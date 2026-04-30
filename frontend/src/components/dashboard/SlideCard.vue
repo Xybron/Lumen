@@ -109,7 +109,7 @@ const typeLabel = computed(
   <!-- Section divider — same band in both views, spans full width in grid. -->
   <article
     v-if="isSection"
-    class="group relative flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors duration-150 ease-out-cubic border-l-2"
+    class="group relative flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors duration-150 ease-out-cubic border-l-2 shrink-0"
     :class="[
       isCurrent
         ? 'border-accent bg-accent/10'
@@ -158,7 +158,7 @@ const typeLabel = computed(
   <!-- Grid view — preview-led card. -->
   <article
     v-else-if="view === 'grid'"
-    class="group relative panel-soft overflow-hidden cursor-pointer transition-all duration-150 ease-out-cubic flex flex-col"
+    class="group relative panel-soft overflow-hidden cursor-pointer transition-all duration-150 ease-out-cubic flex flex-col shrink-0"
     :class="{
       'ring-2 ring-accent/60 shadow-glow': isCurrent,
       'hover:-translate-y-0.5 hover:shadow-panel hover:border-hairglow': !isCurrent,
@@ -247,7 +247,7 @@ const typeLabel = computed(
   <!-- List view — the original row layout. -->
   <article
     v-else
-    class="group relative panel-soft overflow-hidden cursor-pointer transition-all duration-150 ease-out-cubic"
+    class="group relative panel-soft overflow-hidden cursor-pointer transition-all duration-150 ease-out-cubic shrink-0"
     :class="{
       'ring-2 ring-accent/60 shadow-glow': isCurrent,
       'hover:-translate-y-0.5 hover:shadow-panel hover:border-hairglow': !isCurrent,
