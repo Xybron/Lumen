@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#020617" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+    <linearGradient id="green" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#34d399" stop-opacity="0" />
+      <stop offset="50%" stop-color="#34d399" stop-opacity="0.55" />
+      <stop offset="100%" stop-color="#34d399" stop-opacity="0" />
+    </linearGradient>
+    <linearGradient id="violet" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#a78bfa" stop-opacity="0" />
+      <stop offset="50%" stop-color="#a78bfa" stop-opacity="0.45" />
+      <stop offset="100%" stop-color="#a78bfa" stop-opacity="0" />
+    </linearGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#bg)" />
+  <path d="M0 320 Q 480 220 960 360 T 1920 380 L 1920 540 Q 1440 460 960 520 T 0 480 Z" fill="url(#green)" />
+  <path d="M0 460 Q 480 380 960 480 T 1920 520 L 1920 660 Q 1440 580 960 640 T 0 600 Z" fill="url(#violet)" />
+  <g opacity="0.5" fill="#fff">
+    <circle cx="220" cy="120" r="1.5" />
+    <circle cx="540" cy="80" r="1" />
+    <circle cx="980" cy="160" r="1.8" />
+    <circle cx="1340" cy="100" r="1.2" />
+    <circle cx="1680" cy="180" r="1.4" />
+  </g>
+</svg>

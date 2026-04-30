@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="sky" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fefce8" />
+      <stop offset="55%" stop-color="#fde68a" />
+      <stop offset="100%" stop-color="#a16207" />
+    </linearGradient>
+    <radialGradient id="sun" cx="80%" cy="22%" r="20%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95" />
+      <stop offset="100%" stop-color="transparent" />
+    </radialGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#sky)" />
+  <rect width="1920" height="1080" fill="url(#sun)" />
+  <g opacity="0.55" stroke="#a16207" stroke-width="1.6">
+    <line x1="40" y1="780" x2="40" y2="640" />
+    <line x1="120" y1="800" x2="120" y2="660" />
+    <line x1="200" y1="780" x2="200" y2="640" />
+    <line x1="280" y1="800" x2="280" y2="660" />
+    <line x1="360" y1="780" x2="360" y2="640" />
+    <line x1="440" y1="800" x2="440" y2="660" />
+    <line x1="520" y1="780" x2="520" y2="640" />
+    <line x1="600" y1="800" x2="600" y2="660" />
+    <line x1="680" y1="780" x2="680" y2="640" />
+    <line x1="760" y1="800" x2="760" y2="660" />
+    <line x1="840" y1="780" x2="840" y2="640" />
+    <line x1="920" y1="800" x2="920" y2="660" />
+    <line x1="1000" y1="780" x2="1000" y2="640" />
+    <line x1="1080" y1="800" x2="1080" y2="660" />
+    <line x1="1160" y1="780" x2="1160" y2="640" />
+    <line x1="1240" y1="800" x2="1240" y2="660" />
+    <line x1="1320" y1="780" x2="1320" y2="640" />
+    <line x1="1400" y1="800" x2="1400" y2="660" />
+    <line x1="1480" y1="780" x2="1480" y2="640" />
+    <line x1="1560" y1="800" x2="1560" y2="660" />
+    <line x1="1640" y1="780" x2="1640" y2="640" />
+    <line x1="1720" y1="800" x2="1720" y2="660" />
+    <line x1="1800" y1="780" x2="1800" y2="640" />
+    <line x1="1880" y1="800" x2="1880" y2="660" />
+  </g>
+  <g fill="#7c2d12" opacity="0.85">
+    <polygon points="0,1080 0,840 1920,840 1920,1080" />
+  </g>
+</svg>

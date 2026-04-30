@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="sky" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1e1b4b" />
+      <stop offset="55%" stop-color="#7c3aed" />
+      <stop offset="100%" stop-color="#fb923c" />
+    </linearGradient>
+    <radialGradient id="sun" cx="50%" cy="78%" r="22%">
+      <stop offset="0%" stop-color="#fde68a" stop-opacity="0.95" />
+      <stop offset="60%" stop-color="#f59e0b" stop-opacity="0.45" />
+      <stop offset="100%" stop-color="transparent" />
+    </radialGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#sky)" />
+  <rect width="1920" height="1080" fill="url(#sun)" />
+  <g opacity="0.18" fill="#0b0a18">
+    <polygon points="0,1080 240,640 460,820 720,540 960,760 1200,520 1460,720 1700,560 1920,720 1920,1080" />
+  </g>
+</svg>

@@ -1,0 +1,12 @@
+node_modules
+dist
+.DS_Store
+*.log
+.env
+.env.local
+data/media/thumbnails/*
+!data/media/thumbnails/.gitkeep
+data/backups/*
+!data/backups/.gitkeep
+backend/dist
+frontend/dist

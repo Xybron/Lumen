@@ -1,0 +1,17 @@
+{
+  "name": "lumen",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Lumen — a sleek, single-operator projection & presentation platform.",
+  "scripts": {
+    "dev": "concurrently -k -n backend,frontend -c blue,magenta \"npm:dev:backend\" \"npm:dev:frontend\"",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build && npm --prefix backend run build",
+    "start": "npm --prefix backend run start",
+    "install:all": "npm install && npm --prefix frontend install && npm --prefix backend install"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1"
+  }
+}

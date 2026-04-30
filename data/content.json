@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-30T21:40:01.683Z",
+  "settings": {
+    "defaultDurationMs": 30000,
+    "warningAtMs": 300000,
+    "countdownAtMs": 10000,
+    "transitionMs": 600,
+    "fontFamily": "Inter",
+    "globalFontScale": 1
+  },
+  "playlists": [
+    {
+      "id": "plst_seed01",
+      "name": "Sunday Service — Sample",
+      "items": [
+        {
+          "id": "itm_zag3xf",
+          "type": "scripture",
+          "title": "Welcome",
+          "body": "PRAYER MARATHON 2026 II",
+          "reference": "",
+          "durationMs": 20000,
+          "background": {
+            "kind": "image",
+            "src": "media/backgrounds/violet-altar.svg",
+            "fit": "cover",
+            "overlayOpacity": 0.2
+          },
+          "typography": {
+            "size": "xl",
+            "align": "center",
+            "weight": 500
+          }
+        },
+        {
+          "id": "itm_a1b2c3",
+          "type": "scripture",
+          "title": "Welcome",
+          "body": "PRAYER MARATHON 2026",
+          "reference": "",
+          "durationMs": 20000,
+          "background": {
+            "kind": "image",
+            "src": "media/backgrounds/violet-altar.svg",
+            "fit": "cover",
+            "overlayOpacity": 0.2
+          },
+          "typography": {
+            "size": "xl",
+            "align": "center",
+            "weight": 500
+          }
+        }
+      ]
+    }
+  ],
+  "music": {
+    "mode": "loop",
+    "volume": 0.6,
+    "fadeInMs": 1500,
+    "fadeOutMs": 1500,
+    "current": "media/music/1777579485769-The_Blood_Crew_Originally_Composed_By_The_New_Creation_.m4a",
+    "queue": [
+      "media/music/1777579485769-The_Blood_Crew_Originally_Composed_By_The_New_Creation_.m4a"
+    ]
+  }
+}

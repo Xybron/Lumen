@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="storm" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="55%" stop-color="#1e293b" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+    <radialGradient id="lightning" cx="50%" cy="40%" r="36%">
+      <stop offset="0%" stop-color="#bae6fd" stop-opacity="0.45" />
+      <stop offset="100%" stop-color="transparent" />
+    </radialGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#storm)" />
+  <rect width="1920" height="1080" fill="url(#lightning)" />
+  <g opacity="0.6" stroke="#7dd3fc" stroke-width="1.4" fill="none">
+    <path d="M0 720 Q 240 690 480 720 T 960 720 T 1440 720 T 1920 720" />
+    <path d="M0 800 Q 240 770 480 800 T 960 800 T 1440 800 T 1920 800" opacity="0.7" />
+    <path d="M0 880 Q 240 850 480 880 T 960 880 T 1440 880 T 1920 880" opacity="0.4" />
+  </g>
+  <g opacity="0.7" stroke="#e0f2fe" stroke-width="2" fill="none">
+    <polyline points="980,200 940,360 1010,360 950,540" />
+  </g>
+</svg>

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="forest" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#022c22" />
+      <stop offset="55%" stop-color="#064e3b" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+    <radialGradient id="lantern" cx="72%" cy="38%" r="35%">
+      <stop offset="0%" stop-color="#a7f3d0" stop-opacity="0.45" />
+      <stop offset="100%" stop-color="transparent" />
+    </radialGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#forest)" />
+  <rect width="1920" height="1080" fill="url(#lantern)" />
+  <g opacity="0.55" fill="#020617">
+    <polygon points="0,1080 0,720 110,560 200,700 300,540 400,720 520,560 620,720 720,540 820,720 920,580 1040,720 1140,560 1260,720 1360,560 1480,720 1600,540 1720,720 1820,560 1920,720 1920,1080" />
+  </g>
+</svg>

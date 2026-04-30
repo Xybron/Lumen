@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="sky" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fef3c7" />
+      <stop offset="100%" stop-color="#92400e" />
+    </linearGradient>
+    <radialGradient id="haze" cx="50%" cy="60%" r="60%">
+      <stop offset="0%" stop-color="#fde68a" stop-opacity="0.45" />
+      <stop offset="100%" stop-color="transparent" />
+    </radialGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#sky)" />
+  <rect width="1920" height="1080" fill="url(#haze)" />
+  <g stroke="#7c2d12" stroke-width="2" opacity="0.45">
+    <line x1="120" y1="780" x2="160" y2="640" />
+    <line x1="200" y1="800" x2="232" y2="660" />
+    <line x1="280" y1="780" x2="312" y2="660" />
+    <line x1="380" y1="800" x2="412" y2="640" />
+    <line x1="460" y1="780" x2="492" y2="660" />
+    <line x1="540" y1="800" x2="572" y2="640" />
+    <line x1="620" y1="780" x2="652" y2="660" />
+    <line x1="700" y1="800" x2="732" y2="640" />
+    <line x1="780" y1="780" x2="812" y2="660" />
+    <line x1="860" y1="800" x2="892" y2="640" />
+    <line x1="940" y1="780" x2="972" y2="660" />
+    <line x1="1020" y1="800" x2="1052" y2="640" />
+    <line x1="1100" y1="780" x2="1132" y2="660" />
+    <line x1="1180" y1="800" x2="1212" y2="640" />
+    <line x1="1260" y1="780" x2="1292" y2="660" />
+    <line x1="1340" y1="800" x2="1372" y2="640" />
+    <line x1="1420" y1="780" x2="1452" y2="660" />
+    <line x1="1500" y1="800" x2="1532" y2="640" />
+    <line x1="1580" y1="780" x2="1612" y2="660" />
+    <line x1="1660" y1="800" x2="1692" y2="640" />
+    <line x1="1740" y1="780" x2="1772" y2="660" />
+    <line x1="1820" y1="800" x2="1852" y2="640" />
+  </g>
+  <g fill="#451a03" opacity="0.85">
+    <polygon points="0,1080 0,820 1920,820 1920,1080" />
+  </g>
+</svg>
