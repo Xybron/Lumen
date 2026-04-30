@@ -1,7 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { VueDraggable } from 'vue-draggable-plus';
-import { Plus, FileText, Upload, KeyboardIcon, LayoutList, LayoutGrid, X } from 'lucide-vue-next';
+import {
+  Plus,
+  FileText,
+  Upload,
+  KeyboardIcon,
+  LayoutList,
+  LayoutGrid,
+  X,
+  ChevronLeft,
+  ChevronRight,
+  Play,
+  Pause,
+} from 'lucide-vue-next';
 import { useDropZone, useMediaQuery } from '@vueuse/core';
 import { toast } from 'vue-sonner';
 
@@ -262,11 +274,51 @@ onMounted(async () => {
       </button>
     </div>
 
-    <!-- center -->
-    <main
-      ref="dropTarget"
-      class="panel p-3 sm:p-4 overflow-hidden flex flex-col min-h-0"
-    >
+    <!-- Center column wrapper. On mobile + auto mode this stack holds the
+         demoted transport panel above the main panel. md:contents collapses
+         the wrapper so at md+ the main panel becomes a direct grid child. -->
+    <div class="flex flex-col gap-2 sm:gap-3 min-h-0 md:contents">
+      <!-- Mobile transport strip — sits above the active playlist on phones
+           in both modes so the top bar stays focused on quick actions. -->
+      <div
+        class="md:hidden panel-soft flex items-center justify-between px-3 h-12 shrink-0"
+      >
+        <div class="flex items-center gap-1.5">
+          <Button
+            variant="ghost"
+            size="icon"
+            :disabled="playback.index === 0"
+            @click="playback.goPrev"
+          >
+            <ChevronLeft :size="18" />
+          </Button>
+          <Button
+            :variant="playback.playing ? 'accent' : 'default'"
+            size="icon"
+            :disabled="playback.mode !== 'auto' || !playback.current"
+            @click="playback.toggle"
+          >
+            <Pause v-if="playback.playing" :size="16" />
+            <Play v-else :size="16" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            :disabled="!playback.current"
+            @click="playback.goNext"
+          >
+            <ChevronRight :size="18" />
+          </Button>
+        </div>
+        <div class="text-sm font-medium text-white/75 tnum tracking-display">
+          {{ playback.items.length === 0 ? '—' : `${playback.index + 1} / ${playback.items.length}` }}
+        </div>
+      </div>
+
+      <main
+        ref="dropTarget"
+        class="panel p-3 sm:p-4 overflow-hidden flex flex-col min-h-0"
+      >
       <header class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 pb-3 px-1">
         <div class="min-w-0">
           <div class="text-xs font-semibold tracking-[0.12em] uppercase text-white/40">
@@ -364,7 +416,8 @@ onMounted(async () => {
           @jump="playback.jumpTo(i)"
         />
       </VueDraggable>
-    </main>
+      </main>
+    </div>
 
     <!-- Up-next rail. In-grid on md+; slides in from the right on mobile. -->
     <div

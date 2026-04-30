@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-04-30T21:40:01.683Z",
+  "updatedAt": "2026-04-30T22:42:30.882Z",
   "settings": {
     "defaultDurationMs": 30000,
     "warningAtMs": 300000,
@@ -34,20 +34,389 @@
           }
         },
         {
-          "id": "itm_a1b2c3",
-          "type": "scripture",
-          "title": "Welcome",
-          "body": "PRAYER MARATHON 2026",
+          "id": "itm_secpr1",
+          "type": "section",
+          "title": "Prayer Bullets",
+          "body": "",
           "reference": "",
-          "durationMs": 20000,
+          "durationMs": 5000
+        },
+        {
+          "id": "itm_pr01",
+          "type": "prayer",
+          "title": "Thanksgiving",
+          "body": "",
+          "reference": "Psalm 107:1 · Jeremiah 30:19",
+          "durationMs": 3600000,
+          "background": {
+            "kind": "image",
+            "src": "media/backgrounds/dawn-cathedral.svg",
+            "fit": "cover",
+            "overlayOpacity": 0.45
+          },
+          "typography": {
+            "size": "lg",
+            "align": "center",
+            "weight": 500
+          }
+        },
+        {
+          "id": "itm_pr02",
+          "type": "prayer",
+          "title": "In the remaining year, take care of us and protect us",
+          "body": "Protect and take care of WLCC.",
+          "reference": "Ezra 8:21-22",
+          "durationMs": 3600000,
+          "background": {
+            "kind": "image",
+            "src": "media/backgrounds/cathedral-rays.svg",
+            "fit": "cover",
+            "overlayOpacity": 0.5
+          },
+          "typography": {
+            "size": "lg",
+            "align": "center",
+            "weight": 500
+          }
+        },
+        {
+          "id": "itm_pr03",
+          "type": "prayer",
+          "title": "We shall not be derailed from the mandate and God's purpose for us",
+          "body": "",
+          "reference": "Galatians 5:7",
+          "durationMs": 3600000,
+          "background": {
+            "kind": "image",
+            "src": "media/backgrounds/wheat-grace.svg",
+            "fit": "cover",
+            "overlayOpacity": 0.5
+          },
+          "typography": {
+            "size": "lg",
+            "align": "center",
+            "weight": 500
+          }
+        },
+        {
+          "id": "itm_pr04",
+          "type": "prayer",
+          "title": "May all things we do grow faster",
+          "body": "The Church (WLCC), our work, our children, and every God-given assignment.",
+          "reference": "Amos 9:13",
+          "durationMs": 3600000,
+          "background": {
+            "kind": "image",
+            "src": "media/backgrounds/morning-fields.svg",
+            "fit": "cover",
+            "overlayOpacity": 0.4
+          },
+          "typography": {
+            "size": "lg",
+            "align": "center",
+            "weight": 500
+          }
+        },
+        {
+          "id": "itm_pr05",
+          "type": "prayer",
+          "title": "May we hear from the Lord",
+          "body": "",
+          "reference": "Ezekiel 22:23",
+          "durationMs": 3600000,
+          "background": {
+            "kind": "image",
+            "src": "media/backgrounds/cathedral-rays.svg",
+            "fit": "cover",
+            "overlayOpacity": 0.5
+          },
+          "typography": {
+            "size": "lg",
+            "align": "center",
+            "weight": 500
+          }
+        },
+        {
+          "id": "itm_pr06",
+          "type": "prayer",
+          "title": "Lord, may we know You as we should",
+          "body": "",
+          "reference": "Philippians 3:10",
+          "durationMs": 3600000,
           "background": {
             "kind": "image",
             "src": "media/backgrounds/violet-altar.svg",
             "fit": "cover",
-            "overlayOpacity": 0.2
+            "overlayOpacity": 0.45
           },
           "typography": {
-            "size": "xl",
+            "size": "lg",
+            "align": "center",
+            "weight": 500
+          }
+        },
+        {
+          "id": "itm_pr07",
+          "type": "prayer",
+          "title": "Empower us to maximize God-given opportunities",
+          "body": "While overcoming every spiritual opposition that stands in the way.",
+          "reference": "1 Corinthians 16:9",
+          "durationMs": 3600000,
+          "background": {
+            "kind": "image",
+            "src": "media/backgrounds/dawn-cathedral.svg",
+            "fit": "cover",
+            "overlayOpacity": 0.45
+          },
+          "typography": {
+            "size": "lg",
+            "align": "center",
+            "weight": 500
+          }
+        },
+        {
+          "id": "itm_pr08",
+          "type": "prayer",
+          "title": "Boldness and wisdom to walk through the wide door",
+          "body": "Even when faced with intimidating circumstances, grant us courage to step in.",
+          "reference": "1 Corinthians 16:9",
+          "durationMs": 3600000,
+          "background": {
+            "kind": "image",
+            "src": "media/backgrounds/ember-glow.svg",
+            "fit": "cover",
+            "overlayOpacity": 0.5
+          },
+          "typography": {
+            "size": "lg",
+            "align": "center",
+            "weight": 500
+          }
+        },
+        {
+          "id": "itm_pr09",
+          "type": "prayer",
+          "title": "A dwelling place in the secret place",
+          "body": "Protection from hidden traps and deadly diseases, angelic guardianship over our path, and overcoming every spiritual adversary.",
+          "reference": "Psalm 91",
+          "durationMs": 3600000,
+          "background": {
+            "kind": "image",
+            "src": "media/backgrounds/midnight-mist.svg",
+            "fit": "cover",
+            "overlayOpacity": 0.5
+          },
+          "typography": {
+            "size": "lg",
+            "align": "center",
+            "weight": 500
+          }
+        },
+        {
+          "id": "itm_pr10",
+          "type": "prayer",
+          "title": "Multiply us for spiritual service",
+          "body": "Bring growth and restoration to the communities we live in. Pray for a significant, rapid increase in godly men in ministry and community.",
+          "reference": "Ezekiel 36:36-37",
+          "durationMs": 3600000,
+          "background": {
+            "kind": "image",
+            "src": "media/backgrounds/garden-vigil.svg",
+            "fit": "cover",
+            "overlayOpacity": 0.5
+          },
+          "typography": {
+            "size": "lg",
+            "align": "center",
+            "weight": 500
+          }
+        },
+        {
+          "id": "itm_pr11",
+          "type": "prayer",
+          "title": "The Lord is our Shepherd",
+          "body": "",
+          "reference": "Psalm 23",
+          "durationMs": 30000,
+          "background": {
+            "kind": "image",
+            "src": "media/backgrounds/forest-vesper.svg",
+            "fit": "cover",
+            "overlayOpacity": 0.5
+          },
+          "typography": {
+            "size": "lg",
+            "align": "center",
+            "weight": 500
+          }
+        },
+        {
+          "id": "itm_pr11a",
+          "type": "prayer-sub",
+          "title": "Divine Hedge of Protection",
+          "body": "Ask the Good Shepherd to build a hedge of protection around His sheep, shielding them from the snares of predators and evil influences.",
+          "reference": "Psalm 23",
+          "durationMs": 600000,
+          "background": {
+            "kind": "image",
+            "src": "media/backgrounds/forest-vesper.svg",
+            "fit": "cover",
+            "overlayOpacity": 0.5
+          },
+          "typography": {
+            "size": "lg",
+            "align": "center",
+            "weight": 500
+          }
+        },
+        {
+          "id": "itm_pr11b",
+          "type": "prayer-sub",
+          "title": "Protection from False Teachers",
+          "body": "Pray that the sheep recognize the voice of the Shepherd and are kept safe from false doctrines and \"wolves in sheep's clothing.\"",
+          "reference": "Psalm 23",
+          "durationMs": 600000,
+          "background": {
+            "kind": "image",
+            "src": "media/backgrounds/forest-vesper.svg",
+            "fit": "cover",
+            "overlayOpacity": 0.5
+          },
+          "typography": {
+            "size": "lg",
+            "align": "center",
+            "weight": 500
+          }
+        },
+        {
+          "id": "itm_pr11c",
+          "type": "prayer-sub",
+          "title": "Restoration of the Lost and Wandering",
+          "body": "Intercede for those who have wandered away, asking that they be pursued and returned safely to the fold.",
+          "reference": "Psalm 23",
+          "durationMs": 600000,
+          "background": {
+            "kind": "image",
+            "src": "media/backgrounds/forest-vesper.svg",
+            "fit": "cover",
+            "overlayOpacity": 0.5
+          },
+          "typography": {
+            "size": "lg",
+            "align": "center",
+            "weight": 500
+          }
+        },
+        {
+          "id": "itm_pr11d",
+          "type": "prayer-sub",
+          "title": "Strengthening the Weak",
+          "body": "Pray for restoration of soul, healing, and strength for sheep whose spirits are weary or overwhelmed.",
+          "reference": "Psalm 23",
+          "durationMs": 600000,
+          "background": {
+            "kind": "image",
+            "src": "media/backgrounds/forest-vesper.svg",
+            "fit": "cover",
+            "overlayOpacity": 0.5
+          },
+          "typography": {
+            "size": "lg",
+            "align": "center",
+            "weight": 500
+          }
+        },
+        {
+          "id": "itm_pr11e",
+          "type": "prayer-sub",
+          "title": "Provision and Security",
+          "body": "Thank God for being our Shepherd, for providing green pastures, and for ensuring we lack nothing.",
+          "reference": "Psalm 23",
+          "durationMs": 600000,
+          "background": {
+            "kind": "image",
+            "src": "media/backgrounds/forest-vesper.svg",
+            "fit": "cover",
+            "overlayOpacity": 0.5
+          },
+          "typography": {
+            "size": "lg",
+            "align": "center",
+            "weight": 500
+          }
+        },
+        {
+          "id": "itm_pr11f",
+          "type": "prayer-sub",
+          "title": "Protection for Leaders",
+          "body": "Pray for under-shepherds — ministers, parents, Christian faith leaders, and the nation of Ghana — to have wisdom and dedication to safeguard the sheep committed to their care.",
+          "reference": "Psalm 23",
+          "durationMs": 600000,
+          "background": {
+            "kind": "image",
+            "src": "media/backgrounds/forest-vesper.svg",
+            "fit": "cover",
+            "overlayOpacity": 0.5
+          },
+          "typography": {
+            "size": "lg",
+            "align": "center",
+            "weight": 500
+          }
+        },
+        {
+          "id": "itm_pr12",
+          "type": "prayer",
+          "title": "Strength for our Bishop and the Prayer Altar",
+          "body": "",
+          "reference": "2 Samuel 21:15-17",
+          "durationMs": 30000,
+          "background": {
+            "kind": "image",
+            "src": "media/backgrounds/tabernacle.svg",
+            "fit": "cover",
+            "overlayOpacity": 0.5
+          },
+          "typography": {
+            "size": "lg",
+            "align": "center",
+            "weight": 500
+          }
+        },
+        {
+          "id": "itm_pr12a",
+          "type": "prayer-sub",
+          "title": "Sending Divine Helpers for our Bishop",
+          "body": "Lord, bring helpers like Abishai into the life of our Bishop — those who will stand with him, fight for him, and help him overcome, ensuring he does not fall. Preserve his purpose and leadership. Protect the 'light of WLCC' — his family and his vision — from being quenched by the enemy's attacks. Let our Bishop not fall before his time.",
+          "reference": "2 Samuel 21:15-17",
+          "durationMs": 1800000,
+          "background": {
+            "kind": "image",
+            "src": "media/backgrounds/tabernacle.svg",
+            "fit": "cover",
+            "overlayOpacity": 0.5
+          },
+          "typography": {
+            "size": "lg",
+            "align": "center",
+            "weight": 500
+          }
+        },
+        {
+          "id": "itm_pr12b",
+          "type": "prayer-sub",
+          "title": "May our prayer altar keep burning",
+          "body": "",
+          "reference": "Luke 18:1 · 1 Thessalonians 5:17",
+          "durationMs": 1800000,
+          "background": {
+            "kind": "image",
+            "src": "media/backgrounds/incense.svg",
+            "fit": "cover",
+            "overlayOpacity": 0.5
+          },
+          "typography": {
+            "size": "lg",
             "align": "center",
             "weight": 500
           }
@@ -57,7 +426,7 @@
   ],
   "music": {
     "mode": "loop",
-    "volume": 0.6,
+    "volume": 0.56,
     "fadeInMs": 1500,
     "fadeOutMs": 1500,
     "current": "media/music/1777579485769-The_Blood_Crew_Originally_Composed_By_The_New_Creation_.m4a",
