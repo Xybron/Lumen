@@ -9,6 +9,8 @@ import {
   MoreVertical,
   ArrowUp,
   ArrowDown,
+  Eye,
+  X,
 } from 'lucide-vue-next';
 import type { Item } from '@/types';
 import { mediaUrl } from '@/lib/api';
@@ -16,6 +18,8 @@ import { usePlaybackStore } from '@/stores/playback';
 import { useContentStore } from '@/stores/content';
 import PreviewSurface from './PreviewSurface.vue';
 import BottomSheet from '@/components/ui/BottomSheet.vue';
+import BackgroundLayer from '@/components/live/BackgroundLayer.vue';
+import ContentLayer from '@/components/live/ContentLayer.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -39,6 +43,12 @@ const emit = defineEmits<{
 }>();
 
 const sheetOpen = ref(false);
+const previewOpen = ref(false);
+
+function openPreview() {
+  previewOpen.value = true;
+  sheetOpen.value = false;
+}
 
 const canMoveUp = computed(() => props.index > 0);
 const canMoveDown = computed(
@@ -367,6 +377,14 @@ const typeLabel = computed(
         Jump to this slide
       </button>
       <button
+        v-if="!isSection"
+        class="flex items-center gap-3 px-3 h-11 rounded-xl text-sm text-white hover:bg-white/[0.06] active:bg-white/[0.10] transition-colors"
+        @click="openPreview"
+      >
+        <Eye :size="16" class="text-white/70" />
+        Preview
+      </button>
+      <button
         class="flex items-center gap-3 px-3 h-11 rounded-xl text-sm text-white hover:bg-white/[0.06] active:bg-white/[0.10] transition-colors"
         @click="actionThenClose('edit')"
       >
@@ -406,4 +424,39 @@ const typeLabel = computed(
       </button>
     </div>
   </BottomSheet>
+
+  <!-- Fullscreen slide preview — opened from the mobile bottom sheet's
+       Preview action. Renders the slide layers at viewport size so the
+       operator can confirm exactly what the projector will show. -->
+  <Teleport to="body">
+    <Transition
+      enter-active-class="transition-opacity duration-200 ease-out-cubic"
+      enter-from-class="opacity-0"
+      enter-to-class="opacity-100"
+      leave-active-class="transition-opacity duration-150 ease-out-cubic"
+      leave-from-class="opacity-100"
+      leave-to-class="opacity-0"
+    >
+      <div
+        v-if="previewOpen"
+        role="dialog"
+        aria-modal="true"
+        class="fixed inset-0 z-[70] bg-black"
+        @click="previewOpen = false"
+      >
+        <BackgroundLayer :background="item.background" />
+        <ContentLayer :item="item" :prayer-label="prayerLabel" />
+        <button
+          class="absolute top-3 right-3 h-10 w-10 rounded-full bg-black/55 backdrop-blur-md border border-hair text-white/85 hover:text-white hover:bg-black/75 flex items-center justify-center transition-colors"
+          title="Close preview"
+          @click.stop="previewOpen = false"
+        >
+          <X :size="18" />
+        </button>
+        <div class="absolute top-3 left-3 panel px-2.5 py-1.5 text-[11px] font-semibold tracking-[0.16em] uppercase text-white/65">
+          Preview
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>

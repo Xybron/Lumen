@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import { Plus, Trash2, Settings as SettingsIcon, ListMusic } from 'lucide-vue-next';
+import { nextTick, ref, useTemplateRef } from 'vue';
+import { Plus, Trash2, Pencil, Settings as SettingsIcon, ListMusic } from 'lucide-vue-next';
 import { useContentStore } from '@/stores/content';
 import { Button } from '@/components/ui/button';
 
@@ -8,6 +8,10 @@ const content = useContentStore();
 
 const adding = ref(false);
 const newName = ref('');
+
+const renamingId = ref<string | null>(null);
+const renameDraft = ref('');
+const renameInput = useTemplateRef<HTMLInputElement>('renameInput');
 
 async function commitAdd() {
   if (!newName.value.trim()) {
@@ -17,6 +21,32 @@ async function commitAdd() {
   await content.addPlaylist(newName.value.trim());
   newName.value = '';
   adding.value = false;
+}
+
+async function startRename(p: { id: string; name: string }) {
+  renamingId.value = p.id;
+  renameDraft.value = p.name;
+  await nextTick();
+  renameInput.value?.focus();
+  renameInput.value?.select();
+}
+
+async function commitRename() {
+  const id = renamingId.value;
+  if (!id) return;
+  const next = renameDraft.value.trim();
+  // Cancel rename if blank or unchanged.
+  const original = content.playlists.find((p) => p.id === id)?.name;
+  if (next && next !== original) {
+    await content.renamePlaylist(id, next);
+  }
+  renamingId.value = null;
+  renameDraft.value = '';
+}
+
+function cancelRename() {
+  renamingId.value = null;
+  renameDraft.value = '';
 }
 
 const emit = defineEmits<{ (e: 'open-settings'): void }>();
@@ -44,26 +74,50 @@ const emit = defineEmits<{ (e: 'open-settings'): void }>();
       <li
         v-for="p in content.playlists"
         :key="p.id"
-        class="group flex items-center justify-between rounded-xl px-3 py-2.5 cursor-pointer transition-all duration-150 ease-out-cubic"
+        class="group flex items-center gap-2 rounded-xl px-3 py-2.5 cursor-pointer transition-all duration-150 ease-out-cubic"
         :class="
           content.activePlaylistId === p.id
             ? 'bg-white/[0.10] border border-hairglow'
             : 'hover:bg-white/[0.04] border border-transparent'
         "
-        @click="content.setActive(p.id)"
+        @click="renamingId !== p.id && content.setActive(p.id)"
       >
-        <div class="min-w-0">
-          <div class="text-sm font-medium text-white truncate">{{ p.name }}</div>
-          <div class="text-xs text-white/45 mt-0.5">
+        <div class="min-w-0 flex-1">
+          <input
+            v-if="renamingId === p.id"
+            ref="renameInput"
+            v-model="renameDraft"
+            class="w-full bg-white/[0.06] border border-hairglow rounded-lg px-2 py-1 text-sm text-white outline-none focus:border-accent/60 transition-colors"
+            @click.stop
+            @keydown.enter.prevent="commitRename"
+            @keydown.escape.prevent="cancelRename"
+            @blur="commitRename"
+          />
+          <div v-else class="text-sm font-medium text-white truncate">{{ p.name }}</div>
+          <div v-if="renamingId !== p.id" class="text-xs text-white/45 mt-0.5">
             {{ p.items.length }} {{ p.items.length === 1 ? 'item' : 'items' }}
           </div>
         </div>
-        <button
-          class="opacity-0 group-hover:opacity-100 transition-opacity text-white/45 hover:text-red-400"
-          @click.stop="content.removePlaylist(p.id)"
+
+        <div
+          v-if="renamingId !== p.id"
+          class="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity shrink-0"
         >
-          <Trash2 :size="13" />
-        </button>
+          <button
+            class="h-7 w-7 rounded-lg flex items-center justify-center text-white/55 hover:text-white hover:bg-white/[0.08] transition-colors"
+            title="Rename"
+            @click.stop="startRename(p)"
+          >
+            <Pencil :size="12" />
+          </button>
+          <button
+            class="h-7 w-7 rounded-lg flex items-center justify-center text-white/45 hover:text-red-300 hover:bg-red-500/15 transition-colors"
+            title="Delete"
+            @click.stop="content.removePlaylist(p.id)"
+          >
+            <Trash2 :size="13" />
+          </button>
+        </div>
       </li>
     </ul>
 

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-04-30T22:42:30.882Z",
+  "updatedAt": "2026-04-30T23:59:39.205Z",
   "settings": {
     "defaultDurationMs": 30000,
     "warningAtMs": 300000,
@@ -12,7 +12,7 @@
   "playlists": [
     {
       "id": "plst_seed01",
-      "name": "Sunday Service — Sample",
+      "name": "WLCC Prayer Marathon",
       "items": [
         {
           "id": "itm_zag3xf",
