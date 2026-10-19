@@ -7,7 +7,13 @@ dist/
 build/
 backend/dist/
 frontend/dist/
+media-sidecar/dist/
 *.tsbuildinfo
+
+# Tauri / Rust build output + bundled sidecar binaries
+src-tauri/target/
+src-tauri/binaries/
+src-tauri/gen/
 
 # Vite cache
 .vite/
@@ -42,6 +48,26 @@ coverage/
 
 # Lumen runtime data — keep folder shells via .gitkeep files
 # but ignore everything generated or uploaded at runtime.
+
+# SQLite identity/ops store (users, sessions, roles) — local runtime state
+data/lumen.db
+data/lumen.db-wal
+data/lumen.db-shm
+data/.lumen-runtime.lock
+data/.lumen-runtime.lock.*.tmp
+data/.lumen-runtime.lease.sqlite*
+data/production.json
+data/recordings/
+data/clips/
+data/broadcast/
+watch-relay/data/
+data/worship.db*
+data/ai/
+agent/dist/
+
+# Quarantined phone/contributor uploads awaiting approval
+data/media/incoming/*
+!data/media/incoming/.gitkeep
 
 # Atomic-write rolling backups produced by backend/atomic.ts
 data/backups/*

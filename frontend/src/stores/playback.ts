@@ -1,147 +1,82 @@
 import { defineStore } from 'pinia';
-import { computed, ref, watch } from 'vue';
-import { createTimer } from '@/lib/timer';
-import { preload } from '@/lib/preload';
-import { computePrayerLabels, type PrayerLabel } from '@/lib/prayers';
+import { computed } from 'vue';
 import type { Item, Mode } from '@/types';
-import { useContentStore } from './content';
+import type { PrayerLabel } from '@/lib/prayers';
+import { useEnginesStore } from './engines';
+import { usePresenceStore } from './presence';
 
+// DEPRECATED compatibility shim. The single-session playback store now proxies
+// the FOCUSED channel's engine in the registry, so existing components keep
+// working unchanged during the channel cutover. Remove once they consume the
+// engines store (or a per-channel engine prop) directly.
 export const usePlaybackStore = defineStore('playback', () => {
-  const content = useContentStore();
-  const mode = ref<Mode>('auto');
-  const index = ref(0);
-  const playing = ref(false);
-  const blanked = ref(false);
+  const engines = useEnginesStore();
+  const presence = usePresenceStore();
+  const e = () => engines.focused;
 
-  const timer = createTimer(8);
+  // True when another operator currently controls the focused channel — the UI
+  // goes read-only (controls no-op) until you take it over. Defense-in-depth: the
+  // server is the authority, this just keeps the UI honest.
+  const readOnly = computed(() => {
+    const id = engines.focusedChannelId;
+    return id ? presence.controlledByOther(id) : false;
+  });
+  function guard(fn: () => void) {
+    if (readOnly.value) return;
+    fn();
+  }
 
-  const items = computed<Item[]>(() => content.activePlaylist?.items ?? []);
-  const current = computed<Item | undefined>(() => items.value[index.value]);
-
-  const prayerLabels = computed<Record<string, PrayerLabel>>(() =>
-    computePrayerLabels(items.value),
-  );
+  const mode = computed<Mode>(() => e()?.mode.value ?? 'auto');
+  // Writable so callers that still assign playback.index (e.g. drag-reorder index
+  // correction) drive the focused engine.
+  const index = computed<number>({
+    get: () => e()?.index.value ?? 0,
+    set: (v) => {
+      const eng = e();
+      if (eng) eng.index.value = v;
+    },
+  });
+  const playing = computed(() => e()?.playing.value ?? false);
+  const blanked = computed(() => e()?.blanked.value ?? false);
+  const items = computed<Item[]>(() => e()?.items.value ?? []);
+  const current = computed<Item | undefined>(() => e()?.current.value);
+  const next = computed<Item | undefined>(() => e()?.next.value);
+  const prayerLabels = computed<Record<string, PrayerLabel>>(() => e()?.prayerLabels.value ?? {});
   function prayerLabelFor(id: string): PrayerLabel | undefined {
-    return prayerLabels.value[id];
+    return e()?.prayerLabelFor(id);
   }
-
-  function nextPlayableIndex(from: number, dir: 1 | -1): number | null {
-    let i = from + dir;
-    while (i >= 0 && i < items.value.length) {
-      if (items.value[i].type !== 'section') return i;
-      i += dir;
-    }
-    return null;
-  }
-
-  const next = computed<Item | undefined>(() => {
-    const ni = nextPlayableIndex(index.value, 1);
-    return ni == null ? undefined : items.value[ni];
-  });
-
-  const totalMs = computed(() => current.value?.durationMs ?? 0);
-  const remainingMs = computed(() => timer.remaining.value);
-  const elapsedMs = computed(() => timer.elapsed.value);
-  const progress = computed(() =>
-    totalMs.value > 0 ? Math.min(1, elapsedMs.value / totalMs.value) : 0,
-  );
-
-  timer.onComplete(() => {
-    if (mode.value === 'auto') goNext();
-  });
+  const totalMs = computed(() => e()?.totalMs.value ?? 0);
+  const remainingMs = computed(() => e()?.remainingMs.value ?? 0);
+  const elapsedMs = computed(() => e()?.elapsedMs.value ?? 0);
+  const progress = computed(() => e()?.progress.value ?? 0);
 
   function play() {
-    if (mode.value !== 'auto') return;
-    if (!current.value) return;
-    if (timer.running.value) return;
-    if (timer.remaining.value > 0) {
-      timer.resume();
-    } else {
-      timer.start(current.value.durationMs);
-    }
-    playing.value = true;
+    guard(() => e()?.play());
   }
-
   function pause() {
-    timer.pause();
-    playing.value = false;
+    guard(() => e()?.pause());
   }
-
   function toggle() {
-    if (playing.value) pause();
-    else play();
+    guard(() => e()?.toggle());
   }
-
   function goNext() {
-    const ni = nextPlayableIndex(index.value, 1);
-    if (ni != null) {
-      index.value = ni;
-      onSlideChange();
-    } else {
-      pause();
-    }
+    guard(() => e()?.goNext());
   }
-
   function goPrev() {
-    const pi = nextPlayableIndex(index.value, -1);
-    if (pi != null) {
-      index.value = pi;
-      onSlideChange();
-    }
+    guard(() => e()?.goPrev());
   }
-
   function jumpTo(i: number) {
-    if (i < 0 || i >= items.value.length) return;
-    // 1-9 keyboard / UpNext clicks should skip past sections to the nearest playable.
-    if (items.value[i]?.type === 'section') {
-      const fwd = nextPlayableIndex(i - 1, 1);
-      if (fwd == null) return;
-      index.value = fwd;
-    } else {
-      index.value = i;
-    }
-    onSlideChange();
+    guard(() => e()?.jumpTo(i));
   }
-
   function setMode(m: Mode) {
-    mode.value = m;
-    if (m === 'manual') {
-      timer.stop();
-      playing.value = false;
-    } else if (current.value) {
-      // Auto: re-arm with the full duration of whatever's on screen.
-      timer.start(current.value.durationMs);
-      playing.value = true;
-    }
+    guard(() => e()?.setMode(m));
   }
-
   function toggleMode() {
-    setMode(mode.value === 'auto' ? 'manual' : 'auto');
+    guard(() => e()?.toggleMode());
   }
-
   function toggleBlank() {
-    blanked.value = !blanked.value;
+    guard(() => e()?.toggleBlank());
   }
-
-  function onSlideChange() {
-    preload(next.value);
-    if (mode.value === 'auto' && current.value) {
-      timer.start(current.value.durationMs);
-      playing.value = true;
-    } else {
-      timer.stop();
-      playing.value = false;
-    }
-  }
-
-  // Reset to slide 0 when the active playlist changes.
-  watch(
-    () => content.activePlaylist?.id,
-    () => {
-      index.value = 0;
-      onSlideChange();
-    },
-  );
 
   return {
     mode,
@@ -157,6 +92,7 @@ export const usePlaybackStore = defineStore('playback', () => {
     remainingMs,
     elapsedMs,
     progress,
+    readOnly,
     play,
     pause,
     toggle,

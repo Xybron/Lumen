@@ -17,6 +17,10 @@ let pingTimer: number | null = null;
 let pongTimer: number | null = null;
 let started = false;
 
+// Topics (channel ids) this client wants the relay to forward. Re-sent on every
+// (re)connect so scoped subscriptions survive a dropped socket.
+const desiredTopics = new Set<string>();
+
 function wsUrl(): string {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${proto}//${location.host}/ws`;
@@ -64,6 +68,15 @@ function open() {
   ws.addEventListener('open', () => {
     reconnectAttempt = 0;
     setStatus('online');
+
+    // Re-declare topic interest to the (possibly fresh) relay.
+    if (desiredTopics.size > 0) {
+      try {
+        ws.send(JSON.stringify({ t: 'subscribe', channels: [...desiredTopics] }));
+      } catch {
+        /* will re-send on next open */
+      }
+    }
 
     pingTimer = window.setInterval(() => {
       if (ws.readyState !== WebSocket.OPEN) return;
@@ -147,6 +160,39 @@ export function sendWs(msg: BroadcastMsg) {
 export function subscribeWs(fn: (msg: BroadcastMsg) => void): () => void {
   subscribers.add(fn);
   return () => subscribers.delete(fn);
+}
+
+// Tell the relay which channel topics this client wants forwarded. Idempotent;
+// safe to call before the socket is open (re-sent on connect).
+export function subscribeTopics(channels: string[]) {
+  const added: string[] = [];
+  for (const c of channels) {
+    if (!desiredTopics.has(c)) {
+      desiredTopics.add(c);
+      added.push(c);
+    }
+  }
+  if (added.length && socket?.readyState === WebSocket.OPEN) {
+    try {
+      socket.send(JSON.stringify({ t: 'subscribe', channels: added }));
+    } catch {
+      /* re-sent on next open */
+    }
+  }
+}
+
+export function unsubscribeTopics(channels: string[]) {
+  const removed: string[] = [];
+  for (const c of channels) {
+    if (desiredTopics.delete(c)) removed.push(c);
+  }
+  if (removed.length && socket?.readyState === WebSocket.OPEN) {
+    try {
+      socket.send(JSON.stringify({ t: 'unsubscribe', channels: removed }));
+    } catch {
+      /* topic interest already dropped locally */
+    }
+  }
 }
 
 export function useConnection() {

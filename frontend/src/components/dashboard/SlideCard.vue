@@ -26,9 +26,11 @@ const props = withDefaults(
     item: Item;
     index: number;
     isCurrent: boolean;
+    editable?: boolean;
+    playlistId?: string | null;
     view?: 'list' | 'grid';
   }>(),
-  { view: 'list' },
+  { view: 'list', editable: true },
 );
 
 const playback = usePlaybackStore();
@@ -56,18 +58,21 @@ const canMoveDown = computed(
 );
 
 async function moveUp() {
-  if (!canMoveUp.value || !content.activePlaylistId) return;
-  await content.reorderItems(content.activePlaylistId, props.index, props.index - 1);
+  const playlistId = props.playlistId ?? content.activePlaylistId;
+  if (!props.editable || !canMoveUp.value || !playlistId) return;
+  await content.reorderItems(playlistId, props.index, props.index - 1);
   sheetOpen.value = false;
 }
 
 async function moveDown() {
-  if (!canMoveDown.value || !content.activePlaylistId) return;
-  await content.reorderItems(content.activePlaylistId, props.index, props.index + 1);
+  const playlistId = props.playlistId ?? content.activePlaylistId;
+  if (!props.editable || !canMoveDown.value || !playlistId) return;
+  await content.reorderItems(playlistId, props.index, props.index + 1);
   sheetOpen.value = false;
 }
 
 function actionThenClose(action: 'edit' | 'duplicate' | 'delete' | 'jump') {
+  if (action !== 'jump' && !props.editable) return;
   // Discriminate so Vue's typed-emit overloads resolve.
   switch (action) {
     case 'edit':
@@ -111,6 +116,8 @@ const typeLabel = computed(
     section: 'Section',
     prayer: 'Prayer',
     'prayer-sub': 'Prayer (sub)',
+    lyrics: 'Lyrics',
+    announcement: 'Announcement',
   })[props.item.type],
 );
 </script>
@@ -137,6 +144,7 @@ const typeLabel = computed(
       <button
         class="h-7 w-7 rounded-lg bg-black/30 border border-hair text-white/80 hover:text-white hover:bg-black/50 flex items-center justify-center transition-colors"
         title="Edit"
+        :disabled="!editable"
         @click.stop="emit('edit')"
       >
         <Pencil :size="12" />
@@ -144,11 +152,13 @@ const typeLabel = computed(
       <button
         class="h-7 w-7 rounded-lg bg-black/30 border border-hair text-white/80 hover:text-red-300 hover:bg-red-500/20 flex items-center justify-center transition-colors"
         title="Delete"
+        :disabled="!editable"
         @click.stop="emit('delete')"
       >
         <Trash2 :size="12" />
       </button>
       <div
+        v-if="editable"
         class="drag-handle h-7 w-5 ml-1 cursor-grab active:cursor-grabbing text-white/50 hover:text-white flex items-center justify-center"
         title="Drag to reorder"
       >
@@ -168,11 +178,12 @@ const typeLabel = computed(
   <!-- Grid view — preview-led card. -->
   <article
     v-else-if="view === 'grid'"
-    class="group relative panel-soft overflow-hidden cursor-pointer transition-all duration-150 ease-out-cubic flex flex-col shrink-0"
-    :class="{
-      'ring-2 ring-accent/60 shadow-glow': isCurrent,
-      'hover:-translate-y-0.5 hover:shadow-panel hover:border-hairglow': !isCurrent,
-    }"
+    class="group relative panel-soft presentation-slide-card presentation-grid-card overflow-hidden cursor-pointer flex flex-col shrink-0"
+    :class="{ 'is-current': isCurrent, 'is-next': item.id === playback.next?.id }"
+    tabindex="0"
+    :aria-label="`Slide ${index + 1}: ${item.title || item.body || 'Untitled slide'}${isCurrent ? ', current slide' : ''}`"
+    :aria-current="isCurrent ? 'true' : undefined"
+    @keydown.enter.self.prevent.stop="emit('jump')"
     @dblclick="emit('jump')"
   >
     <div class="relative">
@@ -199,7 +210,7 @@ const typeLabel = computed(
       </button>
 
       <div
-        class="hidden md:flex absolute right-2 top-2 items-center gap-1 opacity-0 -translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-150 ease-out-cubic"
+        class="hidden md:flex absolute right-2 top-2 items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-150"
       >
         <button
           class="h-7 w-7 rounded-lg bg-black/55 backdrop-blur-md border border-hair text-white/85 hover:text-white hover:bg-black/75 flex items-center justify-center transition-colors"
@@ -211,6 +222,7 @@ const typeLabel = computed(
         <button
           class="h-7 w-7 rounded-lg bg-black/55 backdrop-blur-md border border-hair text-white/85 hover:text-white hover:bg-black/75 flex items-center justify-center transition-colors"
           title="Edit"
+          :disabled="!editable"
           @click.stop="emit('edit')"
         >
           <Pencil :size="12" />
@@ -218,6 +230,7 @@ const typeLabel = computed(
         <button
           class="h-7 w-7 rounded-lg bg-black/55 backdrop-blur-md border border-hair text-white/85 hover:text-white hover:bg-black/75 flex items-center justify-center transition-colors"
           title="Duplicate"
+          :disabled="!editable"
           @click.stop="emit('duplicate')"
         >
           <Copy :size="12" />
@@ -225,11 +238,13 @@ const typeLabel = computed(
         <button
           class="h-7 w-7 rounded-lg bg-black/55 backdrop-blur-md border border-hair text-white/85 hover:text-red-300 hover:bg-red-500/20 flex items-center justify-center transition-colors"
           title="Delete"
+          :disabled="!editable"
           @click.stop="emit('delete')"
         >
           <Trash2 :size="12" />
         </button>
         <div
+          v-if="editable"
           class="drag-handle h-7 w-5 ml-1 cursor-grab active:cursor-grabbing text-white/60 hover:text-white flex items-center justify-center"
           title="Drag to reorder"
         >
@@ -240,12 +255,14 @@ const typeLabel = computed(
 
     <div class="px-3 py-2.5 flex flex-col gap-0.5 min-w-0 border-t border-hair">
       <div class="flex items-center justify-between gap-2">
-        <span class="text-[10px] font-semibold tracking-[0.1em] uppercase text-accent/85 truncate">
+        <span class="text-[9px] font-medium text-white/50 truncate">
           {{ typeLabel }}
         </span>
+        <span v-if="isCurrent" class="slide-current-label">Current</span>
+        <span v-else-if="item.id === playback.next?.id" class="slide-next-label">Next</span>
         <span class="text-[11px] text-white/45 tnum shrink-0">{{ durationLabel }}</span>
       </div>
-      <div class="text-sm font-medium text-white truncate tracking-display">
+      <div class="text-[12px] font-medium text-white truncate">
         {{ item.title || item.body || 'Untitled slide' }}
       </div>
       <div v-if="item.reference" class="text-xs text-white/50 truncate">
@@ -257,16 +274,17 @@ const typeLabel = computed(
   <!-- List view — the original row layout. -->
   <article
     v-else
-    class="group relative panel-soft overflow-hidden cursor-pointer transition-all duration-150 ease-out-cubic shrink-0"
-    :class="{
-      'ring-2 ring-accent/60 shadow-glow': isCurrent,
-      'hover:-translate-y-0.5 hover:shadow-panel hover:border-hairglow': !isCurrent,
-    }"
+    class="group relative panel-soft presentation-slide-card presentation-list-card overflow-hidden cursor-pointer shrink-0"
+    :class="{ 'is-current': isCurrent, 'is-next': item.id === playback.next?.id }"
+    tabindex="0"
+    :aria-label="`Slide ${index + 1}: ${item.title || item.body || 'Untitled slide'}${isCurrent ? ', current slide' : ''}`"
+    :aria-current="isCurrent ? 'true' : undefined"
+    @keydown.enter.self.prevent.stop="emit('jump')"
     @dblclick="emit('jump')"
   >
-    <div class="flex h-[88px]">
+    <div class="slide-list-row">
       <!-- thumbnail -->
-      <div class="relative w-32 shrink-0 overflow-hidden bg-black">
+      <div class="relative slide-list-thumbnail shrink-0 overflow-hidden bg-black">
         <img
           v-if="bgUrl && !isVideo"
           :src="bgUrl"
@@ -292,9 +310,9 @@ const typeLabel = computed(
       </div>
 
       <!-- body -->
-      <div class="flex-1 min-w-0 p-3.5 flex flex-col justify-center">
+      <div class="slide-row-body flex-1 min-w-0 flex flex-col justify-center">
         <div class="flex items-center gap-2 mb-1">
-          <span class="text-[10px] font-semibold tracking-[0.1em] uppercase text-accent/85">
+          <span class="text-[9px] font-medium text-white/50">
             {{ typeLabel }}
           </span>
           <span
@@ -304,8 +322,10 @@ const typeLabel = computed(
             {{ prayerLabel }}
           </span>
           <span class="text-[11px] text-white/40 tnum">{{ durationLabel }}</span>
+          <span v-if="isCurrent" class="slide-current-label">Current</span>
+          <span v-else-if="item.id === playback.next?.id" class="slide-next-label">Next</span>
         </div>
-        <div class="text-sm font-medium text-white truncate">
+        <div class="text-[12px] font-medium text-white truncate">
           {{ item.title || item.body || 'Untitled slide' }}
         </div>
         <div v-if="item.reference" class="text-xs text-white/50 truncate mt-0.5">
@@ -324,7 +344,7 @@ const typeLabel = computed(
 
       <!-- desktop hover actions -->
       <div
-        class="hidden md:flex absolute right-2 top-2 items-center gap-1 opacity-0 -translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-150 ease-out-cubic"
+        class="hidden md:flex absolute right-2 top-1/2 -translate-y-1/2 items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-150"
       >
         <button
           class="h-7 w-7 rounded-lg bg-black/40 backdrop-blur-md border border-hair text-white/80 hover:text-white hover:bg-black/60 flex items-center justify-center transition-colors"
@@ -336,6 +356,7 @@ const typeLabel = computed(
         <button
           class="h-7 w-7 rounded-lg bg-black/40 backdrop-blur-md border border-hair text-white/80 hover:text-white hover:bg-black/60 flex items-center justify-center transition-colors"
           title="Edit"
+          :disabled="!editable"
           @click.stop="emit('edit')"
         >
           <Pencil :size="12" />
@@ -343,6 +364,7 @@ const typeLabel = computed(
         <button
           class="h-7 w-7 rounded-lg bg-black/40 backdrop-blur-md border border-hair text-white/80 hover:text-white hover:bg-black/60 flex items-center justify-center transition-colors"
           title="Duplicate"
+          :disabled="!editable"
           @click.stop="emit('duplicate')"
         >
           <Copy :size="12" />
@@ -350,11 +372,13 @@ const typeLabel = computed(
         <button
           class="h-7 w-7 rounded-lg bg-black/40 backdrop-blur-md border border-hair text-white/80 hover:text-red-300 hover:bg-red-500/20 flex items-center justify-center transition-colors"
           title="Delete"
+          :disabled="!editable"
           @click.stop="emit('delete')"
         >
           <Trash2 :size="12" />
         </button>
         <div
+          v-if="editable"
           class="drag-handle h-7 w-5 ml-1 cursor-grab active:cursor-grabbing text-white/50 hover:text-white flex items-center justify-center"
           title="Drag to reorder"
         >
@@ -387,6 +411,7 @@ const typeLabel = computed(
       <button
         class="flex items-center gap-3 px-3 h-11 rounded-xl text-sm text-white hover:bg-white/[0.06] active:bg-white/[0.10] transition-colors"
         @click="actionThenClose('edit')"
+        :disabled="!editable"
       >
         <Pencil :size="16" class="text-white/70" />
         Edit
@@ -395,13 +420,14 @@ const typeLabel = computed(
         v-if="!isSection"
         class="flex items-center gap-3 px-3 h-11 rounded-xl text-sm text-white hover:bg-white/[0.06] active:bg-white/[0.10] transition-colors"
         @click="actionThenClose('duplicate')"
+        :disabled="!editable"
       >
         <Copy :size="16" class="text-white/70" />
         Duplicate
       </button>
       <button
         class="flex items-center gap-3 px-3 h-11 rounded-xl text-sm text-white hover:bg-white/[0.06] active:bg-white/[0.10] transition-colors disabled:opacity-40 disabled:pointer-events-none"
-        :disabled="!canMoveUp"
+        :disabled="!canMoveUp || !editable"
         @click="moveUp"
       >
         <ArrowUp :size="16" class="text-white/70" />
@@ -409,7 +435,7 @@ const typeLabel = computed(
       </button>
       <button
         class="flex items-center gap-3 px-3 h-11 rounded-xl text-sm text-white hover:bg-white/[0.06] active:bg-white/[0.10] transition-colors disabled:opacity-40 disabled:pointer-events-none"
-        :disabled="!canMoveDown"
+        :disabled="!canMoveDown || !editable"
         @click="moveDown"
       >
         <ArrowDown :size="16" class="text-white/70" />
@@ -418,6 +444,7 @@ const typeLabel = computed(
       <button
         class="flex items-center gap-3 px-3 h-11 rounded-xl text-sm text-red-300 hover:bg-red-500/15 active:bg-red-500/25 transition-colors"
         @click="actionThenClose('delete')"
+        :disabled="!editable"
       >
         <Trash2 :size="16" />
         Delete
@@ -460,3 +487,20 @@ const typeLabel = computed(
     </Transition>
   </Teleport>
 </template>
+
+<style scoped>
+.presentation-slide-card { border-radius: var(--radius-control, 7px); background: var(--surface-2, #1d1f22); transition: background .12s, border-color .12s; }
+.presentation-slide-card:hover { border-color: #ffffff26; background: #222429; }
+.presentation-slide-card.is-current { border-color: #7dd3fc66; background: #7dd3fc08; box-shadow: inset 2px 0 0 var(--accent); }
+.presentation-slide-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.presentation-slide-card button:disabled { opacity: .3; cursor: not-allowed; }
+.presentation-grid-card :deep(.group) { border-radius: 0; border-width: 0; }
+.slide-current-label, .slide-next-label { font-size: 8px; font-weight: 500; padding: 2px 4px; border-radius: 3px; white-space: nowrap; }
+.slide-current-label { color: var(--accent); background: #7dd3fc14; }
+.slide-next-label { color: var(--text-muted); background: #ffffff07; }
+.slide-list-row { display: flex; height: 80px; }
+.slide-list-thumbnail { width: 116px; border-right: 1px solid var(--border-hair); }
+.slide-row-body { padding: 10px 148px 10px 12px; }
+@media (max-width: 1100px) and (min-width: 768px) { .slide-row-body { padding-right: 35px; } .presentation-list-card>div>div:last-child:not(.slide-row-body) { background: var(--surface-2, #1d1f22); padding: 4px; border-radius: 7px; } }
+@media (max-width: 767px) { .slide-list-thumbnail { width: 88px; } .slide-list-row { height: 76px; } .slide-row-body { padding: 8px 35px 8px 10px; } .slide-current-label, .slide-next-label { font-size: 7px; padding: 1px 3px; } }
+</style>

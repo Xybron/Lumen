@@ -1,6 +1,7 @@
 @import './tokens.css';
 @import 'tailwindcss';
 @import 'tw-animate-css';
+@import './operator.css';
 
 @custom-variant dark (&:is(.dark *));
 
@@ -38,11 +39,11 @@
 }
 
 .dark {
-  --background: #0a0a0c;
+  --background: var(--bg-base);
   --foreground: #f4f4f5;
-  --card: oklch(0.205 0 0);
+  --card: var(--surface-1);
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
+  --popover: var(--surface-2);
   --popover-foreground: oklch(0.985 0 0);
   --primary: oklch(0.922 0 0);
   --primary-foreground: oklch(0.205 0 0);
@@ -108,13 +109,13 @@
 }
 
 @theme {
-  --color-base: #0a0a0c;
-  --color-elevated: rgba(28, 28, 32, 0.72);
+  --color-base: var(--bg-base);
+  --color-elevated: var(--surface-1);
   --color-hover: rgba(255, 255, 255, 0.06);
   --color-hair: rgba(255, 255, 255, 0.08);
   --color-hairglow: rgba(255, 255, 255, 0.14);
   --color-textprimary: #f4f4f5;
-  --color-textmuted: rgba(244, 244, 245, 0.62);
+  --color-textmuted: var(--text-muted);
   --color-accent: #7dd3fc;
 
   --font-sans: 'Inter', system-ui, sans-serif;

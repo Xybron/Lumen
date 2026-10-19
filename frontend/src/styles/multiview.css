@@ -1,0 +1,127 @@
+.studio-multiview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  padding: 12px;
+  color: var(--text-primary);
+  background: var(--bg-base);
+  outline: none;
+}
+.studio-multiview:focus-visible { box-shadow: 0 0 0 1px var(--accent) inset; }
+.multiview-buses { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; flex-shrink: 0; }
+.multiview-bus { min-width: 0; }
+.multiview-bus.is-preview { grid-column: 1; grid-row: 1; }
+.multiview-bus.is-program { grid-column: 2; grid-row: 1; }
+.multiview-bus-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; margin-bottom: 6px; font-size: 10px; }
+.multiview-bus-label b { display: flex; align-items: center; gap: 5px; flex-shrink: 0; font-weight: 600; font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
+.multiview-bus-label b > span { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.multiview-bus-label > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-subtle); }
+.multiview-bus.is-preview .multiview-bus-label b { color: var(--accent); }
+.multiview-bus.is-program .multiview-bus-label b { color: var(--status-live); }
+.multiview-monitor { position: relative; overflow: hidden; aspect-ratio: 16 / 9; border: 1px solid var(--border-glow); border-radius: 6px; background: #090a0b; }
+.multiview-bus.is-preview .multiview-monitor { border-color: #7dd3fc55; }
+.multiview-bus.is-program .multiview-monitor { border-color: #eea39a55; }
+.multiview-monitor-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; padding: 12px; background: #090a0b; color: var(--text-subtle); font-size: 10px; text-align: center; }
+.multiview-feed-state { position: absolute; bottom: 5px; left: 5px; max-width: calc(100% - 10px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid #ffffff0c; border-radius: 3px; padding: 3px 5px; background: #111317e8; color: var(--text-muted); font-size: 8px; }
+.multiview-transitions { grid-column: 1 / -1; grid-row: 2; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-shrink: 0; }
+.multiview-transition-actions { display: flex; align-items: center; gap: 6px; }
+.multiview-transition { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 32px; padding: 6px 10px; border: 1px solid var(--border-glow); border-radius: 6px; background: var(--surface-2); font-size: 11px; font-weight: 500; color: var(--text-primary); transition: background .15s ease, border-color .15s ease; }
+.multiview-transition:hover:not(:disabled) { background: var(--surface-3); border-color: #ffffff35; }
+.multiview-transition.is-fade { color: var(--accent); }
+.multiview-transition.is-fade:hover:not(:disabled) { border-color: #7dd3fc60; background: var(--accent-soft); }
+.multiview-transition:disabled { opacity: .35; cursor: not-allowed; }
+.multiview-transition kbd { font-family: inherit; font-size: 8px; color: var(--text-subtle); font-weight: 400; white-space: nowrap; }
+.multiview-transition:focus-visible, .multiview-duration input:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.multiview-duration { display: flex; align-items: center; gap: 4px; font-size: 9px; color: var(--text-subtle); }
+.multiview-duration-label { margin-right: 2px; }
+.multiview-duration input { width: 51px; min-height: 30px; border: 1px solid var(--border-hair); border-radius: 5px; padding: 5px; background: var(--surface-1); color: var(--text-primary); text-align: right; font-size: 10px; font-variant-numeric: tabular-nums; appearance: textfield; }
+.multiview-duration input::-webkit-inner-spin-button, .multiview-duration input::-webkit-outer-spin-button { appearance: none; margin: 0; }
+.multiview-scenes-heading { display: flex; justify-content: space-between; gap: 10px; color: var(--text-muted); font-size: 10px; flex-shrink: 0; border-top: 1px solid var(--border-hair); padding-top: 10px; }
+.multiview-scenes-heading > span:first-child { display: flex; align-items: center; gap: 6px; }
+.multiview-scenes-heading b { color: var(--text-subtle); font-size: 9px; font-weight: 400; }
+.multiview-scenes-heading > span:last-child { color: var(--text-subtle); font-size: 9px; }
+.multiview-scenes-scroll { min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: none; }
+.multiview-atlas { position: relative; width: 100%; overflow: hidden; border-radius: 6px; background: #090a0b; }
+.multiview-scene-grid { position: absolute; inset: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.multiview-scene { position: relative; display: block; min-width: 0; min-height: 0; padding: 0; overflow: hidden; background: transparent; border: 3px solid var(--bg-base); border-radius: 8px; outline: none; text-align: left; cursor: pointer; }
+.multiview-scene::after { content: ''; position: absolute; inset: 0; border: 1px solid #ffffff20; border-radius: 5px; pointer-events: none; }
+.multiview-scene:hover:not(:disabled)::after { border-color: #ffffff60; }
+.multiview-scene.is-preview::after { border: 2px solid var(--accent); }
+.multiview-scene.is-program:not(.is-preview)::after { border: 2px solid var(--status-live); }
+.multiview-scene:focus-visible::after { border: 2px solid var(--text-primary); box-shadow: inset 0 0 0 2px #101113; }
+.multiview-scene:disabled:not(.is-empty) { cursor: default; }
+.multiview-scene-number { position: absolute; top: 6px; left: 6px; display: grid; place-items: center; min-width: 19px; height: 17px; padding: 0 4px; border: 1px solid #ffffff14; border-radius: 3px; background: #101113ca; color: #b4b7be; font-size: 8px; font-variant-numeric: tabular-nums; }
+.multiview-scene-status { position: absolute; top: 6px; right: 6px; display: flex; gap: 3px; }
+.multiview-scene-status > span { padding: 3px 4px; border-radius: 3px; background: #101113e6; text-transform: uppercase; font-size: 7px; letter-spacing: .06em; font-weight: 600; line-height: 1; border: 1px solid currentColor; }
+.multiview-scene-status > .is-preview { color: var(--accent); }
+.multiview-scene-status > .is-program { color: var(--status-live); }
+.multiview-scene-caption { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 6px; min-width: 0; padding: 14px 7px 6px; background: linear-gradient(transparent, #080a0dee 70%); color: #f4f4f5; }
+.multiview-scene-caption b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; font-weight: 500; }
+.multiview-scene-caption kbd { flex-shrink: 0; font-family: inherit; font-size: 8px; color: #a1a4ab; white-space: nowrap; }
+.multiview-scene.is-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; background: var(--surface-1); color: var(--text-subtle); cursor: default; font-size: 9px; }
+.multiview-scene.is-empty::after { border-style: dashed; border-color: var(--border-hair); }
+.multiview-scene.is-empty small { font-size: 8px; color: #62666f; }
+.multiview-footnote { display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-shrink: 0; color: var(--text-subtle); font-size: 9px; }
+.multiview-footnote > span:last-child { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.studio-multiview.is-standalone {
+  flex: 1;
+  width: 100%;
+  gap: 12px;
+  padding: 16px;
+  overflow: hidden;
+}
+.studio-multiview.is-standalone .multiview-scenes-scroll { flex: 1; }
+.studio-multiview.is-standalone .multiview-bus-label { font-size: 11px; }
+.studio-multiview.is-standalone .multiview-bus-label b { font-size: 11px; }
+.studio-multiview.is-standalone .multiview-monitor { height: var(--multiview-monitor-height); aspect-ratio: auto; }
+.studio-multiview.is-standalone .multiview-monitor > .scene-poster {
+  inset: 50% auto auto 50%;
+  width: min(100%, calc((var(--multiview-monitor-height) - 2px) * 16 / 9));
+  height: auto;
+  aspect-ratio: 16 / 9;
+  transform: translate(-50%, -50%);
+}
+.studio-multiview.is-standalone .multiview-scenes-heading { font-size: 12px; padding-top: 12px; }
+.studio-multiview.is-standalone .multiview-scene-caption b { font-size: 12px; }
+.studio-multiview.is-standalone .multiview-scene-caption kbd { font-size: 10px; }
+.studio-multiview.is-standalone .multiview-scene-number { font-size: 10px; min-width: 22px; height: 20px; }
+.studio-multiview.is-standalone .multiview-scene-status > span { font-size: 9px; }
+.studio-multiview.is-standalone .multiview-scene.is-empty { font-size: 11px; }
+.studio-multiview.is-standalone .multiview-scene.is-empty small { font-size: 10px; }
+.studio-multiview.is-standalone .multiview-footnote { font-size: 10px; }
+.studio-multiview.has-center-controls .multiview-buses { grid-template-columns: minmax(0, 1fr) 88px minmax(0, 1fr); gap: 14px; }
+.studio-multiview.has-center-controls .multiview-bus.is-program { grid-column: 3; }
+.studio-multiview.has-center-controls .multiview-transitions { grid-column: 2; grid-row: 1; flex-direction: column; justify-content: center; align-self: center; gap: 14px; padding-top: 20px; }
+.studio-multiview.has-center-controls .multiview-transition-actions { flex-direction: column; width: 100%; gap: 8px; }
+.studio-multiview.has-center-controls .multiview-transition { display: grid; grid-template-columns: auto auto; justify-content: space-between; width: 100%; min-height: 56px; padding: 9px 12px; font-size: 12px; }
+.studio-multiview.has-center-controls .multiview-transition kbd { grid-column: 1 / -1; font-size: 10px; text-align: center; }
+.studio-multiview.has-center-controls .multiview-duration { flex-wrap: wrap; justify-content: center; gap: 5px; width: 100%; font-size: 10px; }
+.studio-multiview.has-center-controls .multiview-duration-label { flex-basis: 100%; text-align: center; font-size: 9px; margin: 0; }
+.studio-multiview.has-center-controls .multiview-duration input { width: 56px; min-height: 31px; text-align: center; font-size: 11px; }
+/* Always show at least one complete scene row, including its labels. On very
+   wide/short displays the smaller shelf centers rather than slicing tiles. */
+.studio-multiview.has-center-controls .multiview-atlas { max-width: calc(var(--multiview-shelf-height) * 64 / 9); margin-inline: auto; }
+@media (max-height: 600px) and (min-width: 800px) {
+  .studio-multiview.has-center-controls { padding: 10px 16px; gap: 8px; }
+  .studio-multiview.has-center-controls .multiview-transition { min-height: 44px; padding: 5px 10px; gap: 3px; }
+  .studio-multiview.has-center-controls .multiview-transitions { gap: 8px; padding-top: 14px; }
+}
+@media (max-width: 430px) {
+  .studio-multiview { gap: 8px; padding: 8px; }
+  .multiview-buses { gap: 6px; }
+  .multiview-bus-label { gap: 5px; }
+  .multiview-bus-label > span { display: none; }
+  .multiview-transition { padding: 6px 8px; gap: 5px; }
+  .multiview-transition kbd { display: none; }
+  .multiview-duration-label { display: none; }
+  .multiview-scene-caption { gap: 3px; padding: 12px 5px 5px; }
+  .multiview-scene-caption b { font-size: 9px; }
+  .multiview-scene-caption kbd { font-size: 7px; }
+  .multiview-scene-number { top: 4px; left: 4px; }
+  .multiview-scene-status { top: 4px; right: 4px; }
+  .multiview-scene-status > span { font-size: 6px; padding: 3px; }
+  .multiview-feed-state { font-size: 7px; max-width: calc(100% - 6px); bottom: 3px; left: 3px; }
+  .multiview-footnote { font-size: 8px; }
+}
