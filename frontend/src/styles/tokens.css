@@ -1,12 +1,22 @@
 :root {
-  --bg-base: #0a0a0c;
-  --bg-elevated: rgba(28, 28, 32, 0.72);
-  --bg-hover: rgba(255, 255, 255, 0.06);
+  --bg-base: #101113;
+  --surface-1: #17181b;
+  --surface-2: #1d1f22;
+  --surface-3: #25272b;
+  --bg-elevated: var(--surface-1);
+  --bg-hover: rgba(255, 255, 255, 0.055);
   --border-hair: rgba(255, 255, 255, 0.08);
   --border-glow: rgba(255, 255, 255, 0.14);
   --text-primary: #f4f4f5;
-  --text-muted: rgba(244, 244, 245, 0.62);
+  --text-muted: #a1a4ab;
+  --text-subtle: #72767f;
   --accent: #7dd3fc;
+  --accent-soft: rgba(125, 211, 252, 0.09);
+  --status-live: #eea39a;
+  --status-ready: #a3c98f;
+  --radius-panel: 12px;
+  --radius-control: 7px;
+  --shadow-floating: 0 12px 36px #0005, 0 0 0 1px #0003;
 }
 
 @layer base {
@@ -29,21 +39,29 @@
   }
 }
 
+/* One scrollbar policy across channels, Studio, and portaled dialogs.
+   Keep native overflow scrolling; only the scrollbar chrome is hidden. */
+* {
+  scrollbar-width: none;
+}
+
+::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 .panel {
   background: var(--bg-elevated);
-  backdrop-filter: blur(40px) saturate(180%);
-  -webkit-backdrop-filter: blur(40px) saturate(180%);
   border: 1px solid var(--border-hair);
-  border-radius: 24px;
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.06) inset,
-    0 24px 48px -16px rgba(0, 0, 0, 0.5);
+  border-radius: var(--radius-panel);
+  box-shadow: 0 1px 0 #ffffff03 inset;
 }
 
 .panel-soft {
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--border-hair);
-  border-radius: 16px;
+  border-radius: var(--radius-panel);
 }
 
 .tnum {

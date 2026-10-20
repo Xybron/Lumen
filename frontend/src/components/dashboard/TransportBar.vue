@@ -5,24 +5,33 @@ import {
   ChevronRight,
   Play,
   Pause,
-  ExternalLink,
   Monitor,
   MonitorOff,
   Menu,
   PanelRightOpen,
-  MoreHorizontal,
+  Lock,
 } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import ModeToggle from './ModeToggle.vue';
 import MusicMiniPlayer from './MusicMiniPlayer.vue';
+import ChannelOutputControls from '@/components/channel/ChannelOutputControls.vue';
 import { usePlaybackStore } from '@/stores/playback';
+import { usePresenceStore } from '@/stores/presence';
+import { useEnginesStore } from '@/stores/engines';
 import type { Mode } from '@/types';
 
 const playback = usePlaybackStore();
+const presence = usePresenceStore();
+const engines = useEnginesStore();
+
+// Who controls the focused channel, when it isn't us (drives the read-only badge).
+const controllerName = computed(() => {
+  const id = engines.focusedChannelId;
+  if (!id || !playback.readOnly) return null;
+  return presence.userName(presence.controllerOf(id));
+});
 
 const emit = defineEmits<{
-  (e: 'open-live'): void;
   (e: 'open-playlists'): void;
   (e: 'open-upnext'): void;
 }>();
@@ -38,7 +47,7 @@ function setMode(m: Mode) {
 }
 
 // On mobile the transport (prev/play/next + counter) lives in a dedicated
-// strip above the playlist (rendered by DashboardView), so the top bar stays
+// strip above the playlist (rendered by ChannelView), so the top bar stays
 // uncluttered. At md+ the transport sits inline alongside everything else.
 const transportClass = 'hidden md:flex';
 const counterClass = 'hidden md:block';
@@ -48,7 +57,7 @@ const inlineModeClass = 'inline-flex';
 </script>
 
 <template>
-  <div class="panel flex items-center gap-1.5 md:gap-3 px-2 sm:px-3 h-14">
+  <div class="panel presentation-controls">
     <!-- Mobile: hamburger that opens the playlist sheet (lg+: rail is in grid). -->
     <Button
       variant="ghost"
@@ -61,23 +70,36 @@ const inlineModeClass = 'inline-flex';
     </Button>
 
     <!-- Transport: only in bar on manual or md+. Auto-mode mobile gets a
-         dedicated section below, rendered by DashboardView. -->
+         dedicated section below, rendered by ChannelView. Disabled when another
+         operator controls the focused channel (read-only). -->
     <div :class="['items-center gap-1 md:gap-1.5 shrink-0', transportClass]">
-      <Button variant="ghost" size="icon" @click="playback.goPrev" :disabled="playback.index === 0">
+      <Button variant="ghost" size="icon" title="Previous slide (←)" aria-label="Previous slide" @click="playback.goPrev" :disabled="playback.index === 0 || playback.readOnly">
         <ChevronLeft :size="18" />
       </Button>
       <Button
         :variant="playback.playing ? 'accent' : 'default'"
         size="icon"
-        :disabled="playback.mode !== 'auto' || !playback.current"
+        :disabled="playback.mode !== 'auto' || !playback.current || playback.readOnly"
+        :title="playback.playing ? 'Pause presentation (Space)' : 'Play presentation (Space)'"
+        :aria-label="playback.playing ? 'Pause presentation' : 'Play presentation'"
         @click="playback.toggle"
       >
         <Pause v-if="playback.playing" :size="16" />
         <Play v-else :size="16" />
       </Button>
-      <Button variant="ghost" size="icon" @click="playback.goNext" :disabled="!playback.current">
+      <Button variant="ghost" size="icon" title="Next slide (→)" aria-label="Next slide" @click="playback.goNext" :disabled="!playback.current || playback.readOnly">
         <ChevronRight :size="18" />
       </Button>
+    </div>
+
+    <!-- read-only badge when another operator is driving this channel -->
+    <div
+      v-if="playback.readOnly"
+      class="hidden md:flex items-center gap-1.5 shrink-0 px-2 h-7 rounded-lg bg-amber-400/10 text-amber-300/90 text-xs font-medium"
+      :title="controllerName ? `Controlled by ${controllerName}` : 'Controlled by another operator'"
+    >
+      <Lock :size="12" />
+      <span class="hidden lg:inline">{{ controllerName ?? 'Read-only' }}</span>
     </div>
 
     <div
@@ -86,21 +108,39 @@ const inlineModeClass = 'inline-flex';
         counterClass,
       ]"
     >
-      {{ slideLabel }}
+      <span class="text-white/40 mr-1.5 hidden xl:inline">Slide</span>{{ slideLabel }}
     </div>
 
     <!-- Inline ModeToggle: visible on mobile when auto (transport is gone),
          and always at md+. -->
     <ModeToggle
-      :class="['shrink-0', inlineModeClass]"
+      :class="['shrink-0', inlineModeClass, playback.readOnly ? 'opacity-40 pointer-events-none' : '']"
       :mode="playback.mode"
       @update:mode="setMode"
     />
 
     <div class="hidden md:block h-6 w-px bg-hair shrink-0" />
-    <MusicMiniPlayer class="hidden md:flex" />
+    <MusicMiniPlayer class="hidden md:flex presentation-music" />
 
     <div class="flex-1" />
+
+    <ChannelOutputControls />
+
+    <Button
+      variant="ghost"
+      size="md"
+      class="hidden md:inline-flex !text-xs shrink-0"
+      :class="{ 'text-amber-300 bg-amber-400/10': playback.blanked }"
+      :disabled="playback.readOnly || !playback.current"
+      :aria-pressed="playback.blanked"
+      :title="playback.blanked ? 'Resume projection (B)' : 'Blank screen (B)'"
+      @click="playback.toggleBlank"
+    >
+      <MonitorOff v-if="playback.blanked" :size="14" />
+      <Monitor v-else :size="14" />
+      {{ playback.blanked ? 'Resume' : 'Blank' }}
+      <kbd class="transport-key hidden xl:inline-flex">B</kbd>
+    </Button>
 
     <!-- Tablet/mobile: button to open the up-next sheet. -->
     <Button
@@ -113,60 +153,13 @@ const inlineModeClass = 'inline-flex';
       <PanelRightOpen :size="18" />
     </Button>
 
-    <!-- Mobile-only "more" popover. In auto mode it just has Blank;
-         in manual mode it adds Mode toggle since that's not inline. -->
-    <Popover>
-      <PopoverTrigger as-child>
-        <Button
-          variant="ghost"
-          size="icon"
-          class="md:hidden shrink-0"
-          :class="{ 'text-amber-300': playback.blanked }"
-          title="More"
-        >
-          <MoreHorizontal :size="18" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        align="end"
-        :side-offset="8"
-        class="w-56 !p-2 md:hidden"
-      >
-        <button
-          class="flex items-center gap-3 w-full px-3 h-10 rounded-lg text-sm transition-colors"
-          :class="
-            playback.blanked
-              ? 'text-amber-300 hover:bg-amber-500/10'
-              : 'text-white hover:bg-white/[0.06]'
-          "
-          @click="playback.toggleBlank"
-        >
-          <MonitorOff v-if="playback.blanked" :size="16" />
-          <Monitor v-else :size="16" />
-          {{ playback.blanked ? 'Resume projection' : 'Blank screen' }}
-        </button>
-      </PopoverContent>
-    </Popover>
-
-    <!-- Open Live View — icon-only on phones, labeled at md+. -->
-    <Button
-      variant="accent"
-      size="icon"
-      class="md:hidden shrink-0"
-      title="Open Live View"
-      @click="emit('open-live')"
-    >
-      <ExternalLink :size="16" />
-    </Button>
-    <Button
-      variant="accent"
-      size="md"
-      class="hidden md:inline-flex shrink-0"
-      title="Open Live View"
-      @click="emit('open-live')"
-    >
-      <ExternalLink :size="16" />
-      Open Live View
-    </Button>
   </div>
 </template>
+
+<style scoped>
+.presentation-controls { min-height: 46px; display: flex; align-items: center; gap: 10px; padding: 6px 10px; }
+.presentation-music { max-width: 330px; flex: 1 1 220px; }
+.transport-key { align-items: center; justify-content: center; width: 17px; height: 18px; margin-left: 4px; border: 1px solid var(--border-hair); border-radius: 4px; font-size: 9px; color: var(--text-muted); }
+@media (max-width: 1100px) { .presentation-controls { flex-wrap: wrap; gap: 6px; padding: 6px; } .presentation-music { min-width: 180px; } }
+@media (max-width: 460px) { .presentation-controls { gap: 4px; } }
+</style>

@@ -1,0 +1,18 @@
+{
+  "name": "lumen-cloud",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Isolated, binding-free Lumen cloud foundation; never the live production engine.",
+  "engines": { "node": ">=22.0.0" },
+  "scripts": {
+    "dev": "wrangler dev --env staging --local --ip 127.0.0.1 --port 8787",
+    "test": "node --test test/*.test.js",
+    "check": "tsc --noEmit && node --check scripts/deploy.mjs && node --check scripts/probe.mjs && wrangler deploy --env staging --dry-run --outdir .wrangler/dry-run",
+    "probe": "node scripts/probe.mjs",
+    "deploy:staging": "node scripts/deploy.mjs staging",
+    "deploy:production": "node scripts/deploy.mjs production"
+  },
+  "dependencies": { "jose": "6.2.13" },
+  "devDependencies": { "typescript": "5.9.3", "wrangler": "4.151.3" }
+}

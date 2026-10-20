@@ -1,0 +1,13 @@
+config:
+  edition: 3
+  storage_version: 2
+
+# Fail closed: there is no unfiltered/global stream. This only demonstrates
+# owner isolation. Real team collaboration needs membership-based streams.
+streams:
+  my_demo_cues:
+    auto_subscribe: true
+    query: |
+      SELECT id, owner_id, title, body, updated_at
+      FROM public.demo_cues
+      WHERE owner_id = auth.user_id()

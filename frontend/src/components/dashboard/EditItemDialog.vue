@@ -9,9 +9,10 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
-import { Upload, Wand2 } from 'lucide-vue-next';
+import { Upload, Wand2, Plus, Trash2 } from 'lucide-vue-next';
 import type { Item, ItemType } from '@/types';
 import { api, mediaUrl } from '@/lib/api';
+import { shortId } from '@/lib/ids';
 import { toast } from 'vue-sonner';
 
 const FIT_MODES: { value: 'cover' | 'contain' | 'fill'; label: string }[] = [
@@ -74,10 +75,22 @@ const TYPES: { value: ItemType; label: string }[] = [
   { value: 'text', label: 'Text' },
   { value: 'prayer', label: 'Prayer' },
   { value: 'prayer-sub', label: 'Prayer (sub)' },
+  { value: 'lyrics', label: 'Lyrics' },
+  { value: 'announcement', label: 'Announcement' },
   { value: 'image', label: 'Image' },
   { value: 'video', label: 'Video' },
   { value: 'section', label: 'Section' },
 ];
+
+// ── Lyrics stanza editing ──
+function addStanza() {
+  if (!draft.value) return;
+  draft.value.stanzas = [...(draft.value.stanzas ?? []), { id: shortId('stz'), label: '', lines: '' }];
+}
+function removeStanza(id: string) {
+  if (!draft.value?.stanzas) return;
+  draft.value.stanzas = draft.value.stanzas.filter((s) => s.id !== id);
+}
 
 async function onUpload(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0];
@@ -173,7 +186,15 @@ const COLORS = ['#0a0a0c', '#1e3a8a', '#7c2d12', '#064e3b', '#581c87', '#831843'
       <!-- title -->
       <div class="grid gap-1.5">
         <label class="text-xs font-medium text-white/55 uppercase tracking-[0.1em]">
-          {{ draft.type === 'prayer' || draft.type === 'prayer-sub' ? 'Prayer point' : 'Title' }}
+          {{
+            draft.type === 'prayer' || draft.type === 'prayer-sub'
+              ? 'Prayer point'
+              : draft.type === 'lyrics'
+                ? 'Song title'
+                : draft.type === 'announcement'
+                  ? 'Headline'
+                  : 'Title'
+          }}
         </label>
         <input
           v-model="draft.title"
@@ -181,10 +202,54 @@ const COLORS = ['#0a0a0c', '#1e3a8a', '#7c2d12', '#064e3b', '#581c87', '#831843'
         />
       </div>
 
-      <!-- body -->
-      <div class="grid gap-1.5">
+      <!-- subtitle (announcement) -->
+      <div v-if="draft.type === 'announcement'" class="grid gap-1.5">
+        <label class="text-xs font-medium text-white/55 uppercase tracking-[0.1em]">Subtitle</label>
+        <input
+          v-model="draft.subtitle"
+          class="w-full rounded-xl bg-white/[0.04] border border-hair focus:border-accent/60 outline-none px-3 py-2 text-sm text-white"
+        />
+      </div>
+
+      <!-- lyrics stanza editor -->
+      <div v-if="draft.type === 'lyrics'" class="grid gap-2">
+        <div class="flex items-center justify-between">
+          <label class="text-xs font-medium text-white/55 uppercase tracking-[0.1em]">Stanzas</label>
+          <button class="flex items-center gap-1 text-xs text-accent hover:text-white transition-colors" @click="addStanza">
+            <Plus :size="11" /> Add stanza
+          </button>
+        </div>
+        <div v-for="st in draft.stanzas ?? []" :key="st.id" class="panel-soft p-2.5 grid gap-1.5">
+          <div class="flex items-center gap-2">
+            <input
+              v-model="st.label"
+              placeholder="Verse 1 / Chorus (optional)"
+              class="flex-1 rounded-lg bg-white/[0.05] border border-hair focus:border-accent/60 outline-none px-2.5 py-1.5 text-xs text-white"
+            />
+            <button class="h-7 w-7 rounded-lg flex items-center justify-center text-white/45 hover:text-red-300 hover:bg-red-500/15 transition-colors" @click="removeStanza(st.id)">
+              <Trash2 :size="13" />
+            </button>
+          </div>
+          <textarea
+            v-model="st.lines"
+            rows="3"
+            placeholder="One line per row…"
+            class="w-full rounded-lg bg-white/[0.04] border border-hair focus:border-accent/60 outline-none px-2.5 py-1.5 text-sm text-white resize-none"
+          />
+        </div>
+        <p v-if="!(draft.stanzas?.length)" class="text-xs text-white/35">No stanzas yet — add one to start.</p>
+      </div>
+
+      <!-- body (everything except lyrics) -->
+      <div v-else class="grid gap-1.5">
         <label class="text-xs font-medium text-white/55 uppercase tracking-[0.1em]">
-          {{ draft.type === 'prayer' || draft.type === 'prayer-sub' ? 'Supporting scripture' : 'Body' }}
+          {{
+            draft.type === 'prayer' || draft.type === 'prayer-sub'
+              ? 'Supporting scripture'
+              : draft.type === 'scripture'
+                ? 'Passage'
+                : 'Body'
+          }}
         </label>
         <textarea
           v-model="draft.body"

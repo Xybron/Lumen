@@ -1,0 +1,10 @@
+{
+  "name": "lumen-watch-relay",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Independent public HLS viewer and authenticated outbound Lumen relay",
+  "engines": { "node": ">=22" },
+  "scripts": { "start": "node server.mjs", "test": "node --test test/*.test.mjs" },
+  "dependencies": { "hls.js": "^1.6.15" }
+}

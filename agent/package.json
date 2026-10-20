@@ -1,0 +1,21 @@
+{
+  "name": "lumen-capture-agent",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Lumen capture agent — registers SDI/HDMI/NDI inputs with a station. Ships with STUB providers; native hardware build implements CaptureInput.start().",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2",
+    "@types/node": "^22.7.5"
+  }
+}

@@ -1,0 +1,116 @@
+/* Shared operator primitives. Public canvases own their own visual design. */
+:where(.lumen-shell, .studio-app, .lumen-login) {
+  color-scheme: dark;
+  --operator-control-height: 32px;
+}
+
+:where(.lumen-shell, .studio-app, .lumen-login) :where(button, a, input, textarea, select, summary):focus-visible,
+[data-slot="dialog-content"] :where(button, a, input, textarea, select, summary):focus-visible,
+[data-slot="dropdown-menu-content"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+:where(.lumen-shell, .studio-app) :where(button, a, input, select, textarea) {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:where(.lumen-shell, .studio-app) [data-slot="button"] {
+  border-radius: var(--radius-control);
+  font-size: 12px;
+  transition-property: background-color, color, border-color, box-shadow;
+  transition-duration: 120ms;
+}
+
+[data-slot="dialog-content"].panel {
+  background: var(--surface-1);
+  border-color: var(--border-glow);
+  box-shadow: var(--shadow-floating);
+  color-scheme: dark;
+}
+
+[data-slot="dialog-title"] {
+  font-size: 16px;
+  line-height: 1.4;
+  letter-spacing: -.35px;
+  font-weight: 550;
+}
+
+[data-slot="dialog-description"] {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+[data-slot="dialog-content"] [data-slot="dialog-close"] {
+  border-radius: 6px;
+  color: var(--text-muted);
+}
+
+[data-slot="dropdown-menu-content"].panel,
+[data-slot="dropdown-menu-sub-content"].panel,
+[data-slot="popover-content"].panel {
+  background: var(--surface-2);
+  border-radius: 9px;
+  border-color: var(--border-glow);
+  padding: 5px;
+  box-shadow: var(--shadow-floating);
+  backdrop-filter: none;
+}
+
+[data-slot="dropdown-menu-content"] :where([role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"]) {
+  min-height: 32px;
+  border-radius: 5px;
+  font-size: 12px;
+  gap: 9px;
+}
+
+[data-sonner-toast] {
+  border-radius: 9px !important;
+  font-family: inherit !important;
+}
+
+/* Shared confirmations: compact, action-specific and safe to cancel by default. */
+[data-slot="dialog-content"].lumen-confirmation {
+  width: min(460px, calc(100vw - 32px));
+  max-width: min(460px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  padding: 24px;
+  gap: 18px;
+  border-radius: var(--radius-panel);
+  box-shadow: 0 24px 80px #0008, 0 0 0 1px #0003;
+  transition-property: opacity, transform;
+}
+.confirmation-heading { display: flex; align-items: flex-start; gap: 13px; }
+.confirmation-heading [data-slot="dialog-header"] { min-width: 0; gap: 8px; text-align: left; }
+.confirmation-heading [data-slot="dialog-description"] { line-height: 1.75; overflow-wrap: anywhere; }
+.confirmation-icon { display: grid; place-items: center; width: 38px; height: 38px; flex-shrink: 0; border: 1px solid var(--border-hair); border-radius: 10px; color: var(--text-muted); background: var(--surface-2); }
+.confirmation-live .confirmation-icon { color: var(--accent); background: var(--accent-soft); border-color: #7dd3fc25; }
+.confirmation-danger .confirmation-icon { color: var(--status-live); background: #eea39a09; border-color: #eea39a20; }
+.confirmation-details { display: flex; flex-direction: column; gap: 9px; margin: 0; padding-left: 16px; list-style: disc; color: var(--text-muted); font-size: 12px; line-height: 1.65; }
+.confirmation-details li::marker { color: var(--text-subtle); }
+.confirmation-note { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 12px; background: var(--surface-2); border: 1px solid var(--border-hair); border-radius: 7px; font-size: 11px; line-height: 1.65; color: var(--text-muted); }
+.confirmation-note svg { flex-shrink: 0; margin-top: 2px; color: var(--accent); }
+.confirmation-actions { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 16px; border-top: 1px solid var(--border-hair); }
+.confirmation-button { min-height: 34px; padding: 8px 13px; border-radius: var(--radius-control); font: inherit; font-size: 12px; line-height: 1.4; font-weight: 500; cursor: pointer; transition: background-color 120ms, border-color 120ms; }
+.confirmation-cancel { background: var(--surface-2); color: var(--text-primary); border: 1px solid var(--border-glow); }
+.confirmation-cancel:hover { background: var(--surface-3); }
+.confirmation-accept { background: var(--accent); color: #12232d; border: 1px solid transparent; }
+.confirmation-accept:hover { background: #a0e0ff; }
+.confirmation-danger .confirmation-accept { background: #eea39a; color: #351d1c; }
+.confirmation-danger .confirmation-accept:hover { background: #f2b7b0; }
+.confirmation-button:disabled { opacity: .45; cursor: not-allowed; }
+@media (max-width: 480px) {
+  [data-slot="dialog-content"].lumen-confirmation { padding: 20px; gap: 16px; }
+  .confirmation-icon { width: 32px; height: 32px; border-radius: 8px; }
+  .confirmation-heading { gap: 10px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lumen-confirmation, .confirmation-button { animation: none !important; transition: none !important; }
+}
+
+@media (pointer: coarse) {
+  .lumen-shell .w-workspace .w-icon,
+  .studio-app .s-icon,
+  .channel-nav .dock-control { min-width: 36px; min-height: 36px; }
+}

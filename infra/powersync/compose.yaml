@@ -1,0 +1,99 @@
+name: lumen-powersync-evaluation
+
+# Isolated evaluation only. No church data directory or cloud credentials are mounted.
+services:
+  postgres:
+    image: postgres:17.11-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    restart: "no"
+    # Copy the script off a potentially noexec host/VM bind mount. The official
+    # entrypoint sources the non-executable container-local copy.
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        cp /bootstrap/init-db.sh /docker-entrypoint-initdb.d/10-lumen-evaluation.sh
+        chmod 0644 /docker-entrypoint-initdb.d/10-lumen-evaluation.sh
+        exec /usr/local/bin/docker-entrypoint.sh "$$@"
+      - --
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_replication_slots=4
+      - -c
+      - max_wal_senders=4
+      - -c
+      - max_slot_wal_keep_size=256MB
+    environment:
+      POSTGRES_USER: lumen_eval_admin
+      POSTGRES_DB: lumen_demo
+      POSTGRES_PASSWORD: ${PS_DB_ADMIN_PASSWORD:?Run node infra/powersync/setup.mjs first}
+      PS_REPLICATION_PASSWORD: ${PS_REPLICATION_PASSWORD:?Missing evaluation replication password}
+      PS_STORAGE_PASSWORD: ${PS_STORAGE_PASSWORD:?Missing evaluation storage password}
+    volumes:
+      - evaluation_postgres:/var/lib/postgresql/data
+      - ./init-db.sh:/bootstrap/init-db.sh:ro
+      - ./init-db.sql:/bootstrap/init-db.sql:ro
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U lumen_eval_admin -d lumen_demo"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    mem_limit: 512m
+    cpus: 0.75
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "2"
+    networks: [evaluation]
+
+  powersync:
+    image: journeyapps/powersync-service:1.27.0@sha256:15b8e4dbbab17ba45d3abfef29df29b21489266e55ff9aa95bbfd56d9548c00f
+    restart: "no"
+    command: [start, -r, unified]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POWERSYNC_CONFIG_PATH: /config/service.yaml
+      PS_DATA_SOURCE_URI: postgresql://lumen_replica:${PS_REPLICATION_PASSWORD:?Missing evaluation replication password}@postgres:5432/lumen_demo
+      PS_STORAGE_URI: postgresql://lumen_bucket:${PS_STORAGE_PASSWORD:?Missing evaluation storage password}@postgres:5432/lumen_buckets
+      PS_JWK_N: ${PS_JWK_N:?Missing evaluation RSA public key}
+      NODE_OPTIONS: --max-old-space-size=512
+    ports:
+      - "127.0.0.1:8188:8080"
+    volumes:
+      - ./service.yaml:/config/service.yaml:ro
+      - ./sync-config.yaml:/config/sync-config.yaml:ro
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8080/probes/liveness').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
+    mem_limit: 768m
+    cpus: 1
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "2"
+    # The API needs a publishing bridge on Docker Desktop; DB stays internal.
+    networks: [evaluation, api]
+
+volumes:
+  evaluation_postgres:
+
+networks:
+  evaluation:
+    internal: true
+  api:
+    driver: bridge
+    enable_ipv6: false
+    driver_opts:
+      com.docker.network.bridge.host_binding_ipv4: "127.0.0.1"
+      com.docker.network.bridge.enable_ip_masquerade: "false"

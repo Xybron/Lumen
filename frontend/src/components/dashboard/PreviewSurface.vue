@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, useTemplateRef, watchEffect, onMounted, onBeforeUnmount } from 'vue';
-import { Maximize2, Flame, ChevronLeft, ChevronRight } from 'lucide-vue-next';
+import { Maximize2, Clock3, ChevronLeft, ChevronRight } from 'lucide-vue-next';
 import BackgroundLayer from '@/components/live/BackgroundLayer.vue';
 import ContentLayer from '@/components/live/ContentLayer.vue';
 import {
@@ -57,7 +57,7 @@ onMounted(() => {
   }
 });
 
-onBeforeUnmount(() => ro?.disconnect());
+onBeforeUnmount(() => { ro?.disconnect(); expandedRo?.disconnect(); });
 
 watchEffect(() => {
   void props.designWidth;
@@ -136,7 +136,7 @@ const totalLabel = computed(() => fmtTime(playback.totalMs));
 <template>
   <div
     ref="wrap"
-    class="group relative aspect-video w-full rounded-xl overflow-hidden bg-black border border-hair"
+    class="group relative aspect-video w-full rounded-lg overflow-hidden bg-black border border-hair"
   >
     <div class="absolute inset-0 overflow-hidden">
       <div :style="stageStyle" class="relative overflow-hidden">
@@ -191,7 +191,7 @@ const totalLabel = computed(() => fmtTime(playback.totalMs));
     </button>
 
     <Dialog v-if="expandable" v-model:open="expanded">
-      <DialogContent class="!max-w-[92vw] !w-[92vw] sm:!max-w-[92vw] !p-5 !gap-3">
+      <DialogContent class="expanded-slide-dialog !p-4 !gap-3">
         <DialogHeader>
           <DialogTitle class="flex items-center gap-3">
             <span class="text-[10px] font-semibold tracking-[0.16em] uppercase text-accent shrink-0">
@@ -208,8 +208,7 @@ const totalLabel = computed(() => fmtTime(playback.totalMs));
 
         <div
           ref="expandedWrap"
-          class="relative aspect-video w-full rounded-xl overflow-hidden bg-black border border-hair"
-          style="max-height: 78vh"
+          class="relative aspect-video w-full rounded-lg overflow-hidden bg-black border border-hair"
         >
           <div class="absolute inset-0 overflow-hidden">
             <div :style="expandedStageStyle" class="relative overflow-hidden">
@@ -247,15 +246,11 @@ const totalLabel = computed(() => fmtTime(playback.totalMs));
         </div>
 
         <div class="flex items-center gap-3">
-          <Flame :size="14" class="text-orange-300/85 shrink-0" />
-          <div class="firey-track relative flex-1 h-2 rounded-full overflow-hidden bg-white/[0.06]">
+          <Clock3 :size="13" class="text-white/45 shrink-0" />
+          <div class="relative flex-1 h-1 rounded-full overflow-hidden bg-white/[0.06]">
             <div
-              class="firey-fill absolute inset-y-0 left-0 rounded-full transition-[width] duration-150 ease-out-cubic"
+              class="absolute inset-y-0 left-0 rounded-full bg-accent transition-[width] duration-150 ease-out-cubic"
               :style="{ width: `${progressPct}%` }"
-            />
-            <div
-              class="firey-tip absolute top-1/2 -translate-y-1/2 -translate-x-1/2 transition-[left] duration-150 ease-out-cubic"
-              :style="{ left: `${progressPct}%` }"
             />
           </div>
           <div class="text-xs text-white/65 tnum tracking-display shrink-0">
@@ -272,47 +267,7 @@ const totalLabel = computed(() => fmtTime(playback.totalMs));
   </div>
 </template>
 
-<style scoped>
-/* Firey progress: hottest at the leading edge.
- * The fill carries embers → orange → yellow → white-hot, so the rightmost
- * pixel is always the brightest. The tip dot adds a glowing "wick" that sits
- * exactly at the progress edge. */
-.firey-fill {
-  background: linear-gradient(
-    90deg,
-    #4a0a05 0%,
-    #7a1a08 18%,
-    #c8350c 38%,
-    #ff6a14 60%,
-    #ffb43c 80%,
-    #ffe9a3 94%,
-    #ffffff 100%
-  );
-  box-shadow:
-    0 0 6px rgba(255, 120, 30, 0.55),
-    0 0 14px rgba(255, 80, 20, 0.35);
-}
-
-.firey-tip {
-  width: 12px;
-  height: 12px;
-  border-radius: 9999px;
-  background: radial-gradient(
-    circle at center,
-    #ffffff 0%,
-    #ffe28a 35%,
-    #ff9a30 70%,
-    rgba(255, 90, 20, 0) 100%
-  );
-  filter: drop-shadow(0 0 6px rgba(255, 200, 80, 0.85))
-    drop-shadow(0 0 12px rgba(255, 80, 20, 0.55));
-  pointer-events: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .firey-fill,
-  .firey-tip {
-    transition: none !important;
-  }
-}
+<style>
+.expanded-slide-dialog { width: min(92vw, calc((100dvh - 200px) * 16 / 9), 1440px) !important; max-width: none !important; }
+@media (max-width: 600px) { .expanded-slide-dialog { width: 94vw !important; } }
 </style>

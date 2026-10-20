@@ -1,6 +1,8 @@
 import { onBeforeUnmount } from 'vue';
 import type { BroadcastMsg } from '@/types';
-import { sendWs, startWs, subscribeWs } from './ws';
+import { sendWs, startWs, subscribeWs, subscribeTopics, unsubscribeTopics } from './ws';
+
+export { subscribeTopics, unsubscribeTopics };
 
 const CHANNEL = 'lumen-state';
 

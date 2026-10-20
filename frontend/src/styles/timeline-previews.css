@@ -1,0 +1,14 @@
+.nle-timeline-media { position: absolute; top: 0; bottom: 0; z-index: 0; pointer-events: none; overflow: hidden; user-select: none; contain: layout paint style; }
+.nle-timeline-media *, .nle-timeline-media img { pointer-events: none !important; user-select: none; -webkit-user-drag: none; }
+.nle-real-filmstrip { position: absolute; inset: 0 0 12px; overflow: hidden; background: #202a36; }
+.nle-timeline-media.has-no-audio .nle-real-filmstrip, .nle-timeline-media[data-kind="image"] .nle-real-filmstrip { bottom: 0; }
+.nle-real-frame { position: absolute; top: 0; bottom: 0; overflow: hidden; border-right: 1px solid #0b111833; background: #273342; }
+.nle-real-frame.is-pending { background: #293443; }
+.nle-timeline-media .nle-real-frame img { display: block; margin: 0; width: 100%; height: 100%; max-width: none; object-fit: cover; opacity: .82; }
+.nle-real-waveform { position: absolute; bottom: 0; left: 0; right: 0; height: 12px; overflow: hidden; background: #10282cc7; }
+.nle-timeline-media.is-audio .nle-real-waveform { inset: 0; height: auto; background: #1c3d40; }
+.nle-real-wave-chunk { position: absolute; top: 0; bottom: 0; overflow: hidden; }
+.nle-timeline-media .nle-real-wave-chunk img { display: block; margin: 0; height: 100%; width: 100%; max-width: none; object-fit: fill; opacity: .9; }
+.nle-timeline-media.is-muted .nle-real-waveform { opacity: .38; }
+.nle-media-preview-state { position: absolute; left: 5px; bottom: 1px; max-width: calc(100% - 10px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #a0b4c2; background: #162029d9; border-radius: 2px; padding: 1px 3px; font-size: 8px; line-height: 1.3; text-shadow: 0 1px #0005; }
+.nle-media-preview-state.is-waiting { color: #c4b591; background: #25231de8; }

@@ -86,10 +86,10 @@ async function onQueueSorted(e: { oldIndex?: number; newIndex?: number }) {
 </script>
 
 <template>
-  <div class="flex items-center gap-2 panel-soft px-2 py-1 h-9 min-w-0 md:min-w-[220px] w-full md:w-auto">
+  <div class="music-mini-player flex items-center gap-2 panel-soft px-2 py-1 h-9 min-w-0 md:min-w-[220px] w-full md:w-auto">
     <Music2 :size="14" class="text-white/55" />
     <button
-      class="h-6 w-6 rounded-full flex items-center justify-center bg-white/10 hover:bg-white/20 transition-colors disabled:opacity-40"
+      class="h-6 w-6 rounded-md flex items-center justify-center bg-white/[0.06] hover:bg-white/[0.12] transition-colors disabled:opacity-40"
       :disabled="music.mode === 'off' || !music.currentTrack && content.content.music.queue.length === 0"
       :title="music.playing ? 'Pause' : 'Play'"
       @click="music.toggle"
@@ -98,7 +98,7 @@ async function onQueueSorted(e: { oldIndex?: number; newIndex?: number }) {
       <Play v-else :size="11" />
     </button>
     <button
-      class="h-6 w-6 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors text-white/60 disabled:opacity-30"
+      class="h-6 w-6 rounded-md flex items-center justify-center hover:bg-white/10 transition-colors text-white/60 disabled:opacity-30"
       :disabled="music.mode !== 'playlist'"
       title="Skip"
       @click="music.skip"
@@ -116,7 +116,7 @@ async function onQueueSorted(e: { oldIndex?: number; newIndex?: number }) {
           <span class="truncate">{{ trackName }}</span>
         </button>
       </PopoverTrigger>
-      <PopoverContent class="w-80 p-3" align="end">
+      <PopoverContent class="w-80 max-w-[calc(100vw-24px)] p-3" align="end">
         <header class="flex items-center justify-between">
           <h3 class="text-xs font-semibold tracking-[0.12em] uppercase text-white/55">
             Music queue
@@ -208,6 +208,7 @@ async function onQueueSorted(e: { oldIndex?: number; newIndex?: number }) {
 
     <div class="w-16 shrink-0">
       <Slider
+        aria-label="Music volume"
         :model-value="[music.volume]"
         :min="0"
         :max="1"
@@ -217,3 +218,8 @@ async function onQueueSorted(e: { oldIndex?: number; newIndex?: number }) {
     </div>
   </div>
 </template>
+
+<style scoped>
+.music-mini-player { border-radius: var(--radius-control, 7px); background: #0002; }
+.music-mini-player button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
