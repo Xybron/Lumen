@@ -1,0 +1,47 @@
+# Evaluation only. The local source contains synthetic demo rows, never LAB data.
+replication:
+  connections:
+    - type: postgresql
+      uri: !env PS_DATA_SOURCE_URI
+      sslmode: disable # Only the isolated Docker network; never use this for LAB.
+      max_pool_size: 2
+      slot_name_prefix: lumen_eval_
+
+storage:
+  type: postgresql
+  uri: !env PS_STORAGE_URI
+  sslmode: disable
+  max_pool_size: 2
+
+port: 8080
+sync_config:
+  path: /config/sync-config.yaml
+  exit_on_error: true
+
+client_auth:
+  audience: [lumen-local-evaluation]
+  jwks:
+    keys:
+      - kty: RSA
+        kid: lumen-local-evaluation
+        alg: RS256
+        use: sig
+        n: !env PS_JWK_N
+        e: AQAB
+
+# No admin tokens: admin routes reject every request, not anonymous access.
+api:
+  parameters:
+    max_concurrent_connections: 10
+    max_data_fetch_concurrency: 2
+    max_buckets_per_connection: 20
+
+telemetry:
+  disable_telemetry_sharing: true
+healthcheck:
+  probes:
+    use_http: true
+system:
+  logging:
+    level: warn
+    format: json

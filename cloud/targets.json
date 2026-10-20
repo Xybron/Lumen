@@ -1,0 +1,9 @@
+{
+  "repository": "Xybron/Lumen",
+  "staging": {
+    "cloudflareAccountId": "d55fad446c1f3ef3b668eeb8127f7c55",
+    "supabaseProjectRef": "xfppsgiothkvhndmbixx",
+    "supabaseProjectName": "LAB"
+  },
+  "production": null
+}

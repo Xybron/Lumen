@@ -1,0 +1,208 @@
+name: Lumen checks and cloud delivery
+
+on:
+  push:
+    branches: [prod, cloud-staging, 'codex/**']
+  pull_request:
+    branches: [prod, cloud-staging]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Run checks only, or deploy the tested cloud foundation'
+        required: true
+        type: choice
+        default: checks
+        options: [checks, staging, production]
+      confirmation:
+        description: 'Production only: type DEPLOY LUMEN PRODUCTION'
+        required: false
+        type: string
+
+# Tests never need write access, cloud secrets or a Supabase service key.
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  checks:
+    name: Build and test
+    # Opt in only after verifying free account minutes and blocked overages.
+    # A skipped checks job also prevents both deployment jobs from running.
+    if: github.repository == 'Xybron/Lumen' && vars.LUMEN_FREE_CI_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    concurrency:
+      group: lumen-checks-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Validate manual deployment request
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TARGET: ${{ inputs.target }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          if [[ "$GITHUB_REPOSITORY" != 'Xybron/Lumen' ]]; then
+            echo '::error::Deployment is restricted to Xybron/Lumen.'
+            exit 1
+          fi
+          case "$TARGET" in
+            checks) ;;
+            staging)
+              if [[ "$GITHUB_REF" != 'refs/heads/cloud-staging' ]]; then
+                echo '::error::Select the cloud-staging branch for staging deployment.'
+                exit 1
+              fi
+              ;;
+            production)
+              if [[ "$GITHUB_REF" != 'refs/heads/prod' || "$CONFIRMATION" != 'DEPLOY LUMEN PRODUCTION' ]]; then
+                echo '::error::Production requires the prod branch and the exact confirmation phrase.'
+                exit 1
+              fi
+              ;;
+            *)
+              echo '::error::Unknown deployment target.'
+              exit 1
+              ;;
+          esac
+
+      - name: Check out this exact revision
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '22'
+          package-manager-cache: false
+
+      - name: Install locked dependencies
+        run: |
+          npm ci --no-audit --no-fund
+          npm --prefix frontend ci --no-audit --no-fund
+          npm --prefix backend ci --no-audit --no-fund
+          npm --prefix watch-relay ci --no-audit --no-fund
+          npm --prefix cloud ci --no-audit --no-fund
+
+      - name: Build Studio and backend
+        run: npm run build
+
+      - name: Test backend and independent Watch relay
+        run: |
+          npm test
+          npm --prefix watch-relay test
+
+      - name: Test and check cloud foundation
+        run: |
+          npm --prefix cloud test
+          npm --prefix cloud run check
+
+      - name: Validate isolated PowerSync scaffold without starting Docker
+        run: node --test infra/powersync/scaffold.test.mjs
+
+  staging:
+    name: Deploy cloud staging
+    needs: checks
+    if: >-
+      github.repository == 'Xybron/Lumen' &&
+      github.ref == 'refs/heads/cloud-staging' &&
+      (github.event_name == 'push' ||
+       (github.event_name == 'workflow_dispatch' && inputs.target == 'staging'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    # Never terminate a deployment halfway through to start another one.
+    concurrency:
+      group: lumen-cloud-staging
+      cancel-in-progress: false
+    steps:
+      - name: Check staging credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          LUMEN_WORKERS_FREE_CONFIRMED: ${{ vars.LUMEN_WORKERS_FREE_CONFIRMED }}
+        run: |
+          if [[ -z "$CLOUDFLARE_API_TOKEN" || -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
+            echo '::error::Configure the Cloudflare deployment secret and account variable in repository settings. Local Wrangler login does not authenticate GitHub Actions.'
+            exit 1
+          fi
+          if [[ "$LUMEN_WORKERS_FREE_CONFIRMED" != 'true' ]]; then
+            echo '::error::Confirm this account is on Workers Free before setting LUMEN_WORKERS_FREE_CONFIRMED=true. Paid-tier deployment is not authorised.'
+            exit 1
+          fi
+
+      - name: Check out the tested revision
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '22'
+          package-manager-cache: false
+
+      - name: Install cloud tooling
+        run: npm --prefix cloud ci --no-audit --no-fund
+
+      - name: Deploy staging only
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          LUMEN_WORKERS_FREE_CONFIRMED: ${{ vars.LUMEN_WORKERS_FREE_CONFIRMED }}
+          WRANGLER_SEND_METRICS: 'false'
+        run: npm --prefix cloud run deploy:staging
+
+  production:
+    name: Deploy approved cloud production
+    needs: checks
+    if: >-
+      github.repository == 'Xybron/Lumen' &&
+      github.ref == 'refs/heads/prod' &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.target == 'production' &&
+      inputs.confirmation == 'DEPLOY LUMEN PRODUCTION'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    concurrency:
+      group: lumen-cloud-production
+      cancel-in-progress: false
+    steps:
+      - name: Check production credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          LUMEN_WORKERS_FREE_CONFIRMED: ${{ vars.LUMEN_WORKERS_FREE_CONFIRMED }}
+        run: |
+          if [[ -z "$CLOUDFLARE_API_TOKEN" || -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
+            echo '::error::Configure the Cloudflare deployment secret and account variable in repository settings. Do not paste credentials into source code or workflow logs.'
+            exit 1
+          fi
+          if [[ "$LUMEN_WORKERS_FREE_CONFIRMED" != 'true' ]]; then
+            echo '::error::Confirm this account is on Workers Free before setting LUMEN_WORKERS_FREE_CONFIRMED=true. Paid-tier deployment is not authorised.'
+            exit 1
+          fi
+
+      - name: Check out the tested revision
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '22'
+          package-manager-cache: false
+
+      - name: Install cloud tooling
+        run: npm --prefix cloud ci --no-audit --no-fund
+
+      - name: Deploy production only
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          LUMEN_WORKERS_FREE_CONFIRMED: ${{ vars.LUMEN_WORKERS_FREE_CONFIRMED }}
+          WRANGLER_SEND_METRICS: 'false'
+        run: npm --prefix cloud run deploy:production

@@ -30,6 +30,11 @@ pnpm-debug.log*
 .env
 .env.local
 .env.*.local
+.dev.vars
+.dev.vars.*
+.wrangler/
+infra/powersync/.runtime/
+supabase/.temp/
 
 # OS / editor
 .DS_Store

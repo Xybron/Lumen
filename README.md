@@ -20,6 +20,17 @@ Chromium renderer and WebRTC to deliver composed video and audio to displays.
   WebRTC, and MediaRecorder. No cloud account or API key required.
 - **Data** — JSON manifests, SQLite identity, local media and recording chunks.
 
+## Cloud and team-delivery foundation
+
+The existing private Lumen repository now contains a separate, opt-in
+[GitHub delivery workflow](docs/GITHUB-DELIVERY.md), a binding-free
+[Cloudflare staging foundation](cloud/README.md) using LAB's public Auth signing
+keys, and an isolated [PowerSync self-hosting evaluation](infra/powersync/README.md).
+None of these enables cloud collaboration, changes local accounts, uploads
+station data, or restarts the production engine. CI/deployment needs explicit
+free-tier confirmation and scoped credentials; production deployment remains
+unconfigured. The PowerSync trial uses only synthetic local data, not LAB.
+
 ## Quick start
 
 ```bash
