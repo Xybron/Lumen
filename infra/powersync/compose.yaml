@@ -5,6 +5,16 @@ services:
   postgres:
     image: postgres:17.11-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
     restart: "no"
+    # Copy the script off a potentially noexec host/VM bind mount. The official
+    # entrypoint sources the non-executable container-local copy.
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        cp /bootstrap/init-db.sh /docker-entrypoint-initdb.d/10-lumen-evaluation.sh
+        chmod 0644 /docker-entrypoint-initdb.d/10-lumen-evaluation.sh
+        exec /usr/local/bin/docker-entrypoint.sh "$$@"
+      - --
     command:
       - postgres
       - -c
@@ -23,10 +33,10 @@ services:
       PS_STORAGE_PASSWORD: ${PS_STORAGE_PASSWORD:?Missing evaluation storage password}
     volumes:
       - evaluation_postgres:/var/lib/postgresql/data
-      - ./init-db.sh:/docker-entrypoint-initdb.d/10-lumen-evaluation.sh:ro
+      - ./init-db.sh:/bootstrap/init-db.sh:ro
       - ./init-db.sql:/bootstrap/init-db.sql:ro
     healthcheck:
-      test: [CMD-SHELL, "pg_isready -U lumen_eval_admin -d lumen_demo"]
+      test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U lumen_eval_admin -d lumen_demo"]
       interval: 3s
       timeout: 3s
       retries: 20
@@ -72,7 +82,8 @@ services:
       options:
         max-size: 5m
         max-file: "2"
-    networks: [evaluation]
+    # The API needs a publishing bridge on Docker Desktop; DB stays internal.
+    networks: [evaluation, api]
 
 volumes:
   evaluation_postgres:
@@ -80,3 +91,9 @@ volumes:
 networks:
   evaluation:
     internal: true
+  api:
+    driver: bridge
+    enable_ipv6: false
+    driver_opts:
+      com.docker.network.bridge.host_binding_ipv4: "127.0.0.1"
+      com.docker.network.bridge.enable_ip_masquerade: "false"

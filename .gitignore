@@ -35,6 +35,7 @@ pnpm-debug.log*
 .wrangler/
 infra/powersync/.runtime/
 supabase/.temp/
+.local-projects/
 
 # OS / editor
 .DS_Store

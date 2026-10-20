@@ -1,5 +1,11 @@
 # PowerSync self-hosting evaluation
 
+The standalone follow-on project requested for local use and Contabo deployment
+is now maintained in the private [Lumen-Sync repository](https://github.com/Xybron/Lumen-Sync).
+Use that repository's README for the current independent checkout and commands.
+This directory remains the original synthetic-data evaluation fixture, not a
+second production deployment. See [development infrastructure status](../../docs/DEPLOYMENT-STATUS.md).
+
 Status: an **isolated local evaluation**, not Lumen's production sync service. This
 does not modify LAB, start a cloud subscription, migrate any church data or wire
 PowerSync into the running Studio app. It is intentionally not deployed by the
@@ -38,9 +44,12 @@ them as CI artifacts, use `docker compose config` without `--quiet` in logs, or
 reuse evaluation keys for production. The private key is not mounted into any
 container: the service receives only the public verification key.
 
-The only published socket is `127.0.0.1:8188`. PostgreSQL has no host port; all
-containers are on an internal Docker network without cloud access. Images are
-pinned to exact multi-architecture digests, not floating `latest` tags:
+The only published socket is `127.0.0.1:8188`. PostgreSQL has no host port and
+joins only an internal network. PowerSync also joins an API publishing bridge
+with outbound masquerading disabled for Docker Desktop compatibility. This is
+not an airgap or egress firewall; there are no LAB credentials or configured
+cloud sources. Images are pinned to exact multi-architecture digests, not
+floating `latest` tags:
 
 - PowerSync Service `1.27.0`.
 - PostgreSQL `17.11-alpine`.

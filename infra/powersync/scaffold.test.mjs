@@ -58,6 +58,9 @@ test('scaffold keeps pinned images, a loopback-only API and an owner-filtered sa
   assert(!compose.includes('supabase.co'));
   assert(!compose.includes('../../data'));
   assert(!compose.includes(':latest'));
+  assert(!compose.includes('./init-db.sh:/docker-entrypoint-initdb.d/'));
+  assert.match(compose, /chmod 0644 \/docker-entrypoint-initdb\.d\/10-lumen-evaluation\.sh/);
+  assert.match(compose, /pg_isready -h 127\.0\.0\.1/);
   assert.match(service, /audience: \[lumen-local-evaluation\]/);
   assert.match(service, /disable_telemetry_sharing: true/);
   assert.match(streams, /WHERE owner_id = auth\.user_id\(\)/);
