@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { Aperture } from 'lucide-vue-next';
+import TeamButton from '@/components/team/TeamButton.vue';
 </script>
 
 <template>
   <header class="lumen-header">
     <RouterLink to="/" class="lumen-brand" aria-label="Lumen home"><span><Aperture :size="22" :stroke-width="1.5" /></span>lumen</RouterLink>
     <div class="lumen-header-detail"><slot /></div>
+    <TeamButton />
   </header>
 </template>
 

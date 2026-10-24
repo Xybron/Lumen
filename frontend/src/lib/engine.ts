@@ -38,6 +38,7 @@ export interface PlaybackEngine {
   toggleBlank(): void;
   sendState(): void;
   applyExternal(state: ProjectionState): void;
+  applyRemotePresentation(state: ProjectionState): void;
   dispose(): void;
 }
 
@@ -190,6 +191,12 @@ export function createPlaybackEngine(channelId: string, opts?: { defaultMode?: M
       broadcast({ t: 'state', channel: channelId, payload: projectionState.value });
     }
     function applyExternal(state: ProjectionState) { if (opts?.external) { externalCue.value=state.cue??null;blanked.value=state.blanked;mode.value='manual';playing.value=false; } }
+    function applyRemotePresentation(state: ProjectionState) {
+      if (opts?.external || state.channelId !== channelId || state.playlistId !== content.playlistForChannel(channelId)?.id) return;
+      timer.stop(); mode.value = 'manual'; playing.value = false;
+      index.value = Math.max(0, Math.min(items.value.length - 1, Number.isInteger(state.index) ? state.index : 0));
+      blanked.value = state.blanked;
+    }
 
     // Broadcast this channel's state on any meaningful change — runs whether or
     // not the channel is the focused one in the operator UI.
@@ -250,6 +257,7 @@ export function createPlaybackEngine(channelId: string, opts?: { defaultMode?: M
       toggleBlank,
       sendState,
       applyExternal,
+      applyRemotePresentation,
       dispose,
     };
   })!;

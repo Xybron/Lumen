@@ -8,6 +8,9 @@ import { PROGRAM_MONITOR_OUTPUT_ID } from '../../shared/program-monitor.js';
 interface Peer {
   id: string; ws: WebSocket; engine: boolean; operator: boolean; signedIn: boolean;
   watching: Set<string>; publishing: Set<string>; alive: boolean;
+  outputScope?: string;
+  outputAudioEnabled?: boolean;
+  mobileProgram?: boolean;
 }
 
 // Dedicated signaling channel. Only the renderer can offer an output; only
@@ -32,15 +35,50 @@ export class ProductionHub {
     }, 15000);
     this.heartbeat.unref();
   }
-  send(peer: Peer, message: unknown) { if (peer.ws.readyState === WebSocket.OPEN) peer.ws.send(JSON.stringify(message)); }
+  send(peer: Peer, message: unknown) {
+    if (peer.ws.readyState !== WebSocket.OPEN) return;
+    if (peer.outputScope) {
+      const value = message as Record<string, unknown>;
+      const snapshot = value.state as ProductionState | undefined;
+      if (snapshot) {
+        const output = snapshot.outputs.find(item => item.id === peer.outputScope);
+        if (peer.outputScope !== 'program' && !peer.mobileProgram && !output) { peer.ws.close(1008, 'Output is no longer available'); peer.ws.terminate(); return; }
+        peer.outputAudioEnabled = !peer.mobileProgram && (peer.outputScope === 'program' || output?.audioEnabled === true);
+      }
+      if (value.t === 'connected' || value.t === 'status' || value.t === 'state') {
+        const status = value.status as StudioStatus | undefined;
+        peer.ws.send(JSON.stringify({ t: value.t === 'connected' ? 'connected' : 'output-status',
+          ...(value.t === 'connected' ? { peerId: peer.id } : {}), outputId: peer.outputScope,
+          engineState: status?.state ?? this.status().state, audioEnabled: peer.outputAudioEnabled === true }));
+      } else if (value.t === 'signal' && value.key === `out:${peer.outputScope}`) {
+        peer.ws.send(JSON.stringify({ t: 'signal', peerId: value.peerId, key: value.key, description: value.description, candidate: value.candidate }));
+      }
+      return;
+    }
+    peer.ws.send(JSON.stringify(message));
+  }
   engineSend(message: unknown) { if (this.engine) this.send(this.engine, message); }
   hasEngine() { return this.engine?.ws.readyState === WebSocket.OPEN; }
   broadcast(message: unknown) { for (const peer of this.peers.values()) this.send(peer, message); }
-  private connect(ws: WebSocket, req: IncomingMessage) {
+  /** An already capability-authenticated gateway viewer. Never infer operator
+   * authority from cookies/headers on the separate viewer listener. */
+  attachOutputViewer(ws: WebSocket, outputId: string) {
+    if (outputId !== 'program' && !this.state().outputs.some(item => item.id === outputId)) { ws.close(1008, 'Output is no longer available'); return; }
+    if (['preview', 'multiview', PROGRAM_MONITOR_OUTPUT_ID, 'recording'].includes(outputId)) { ws.close(1008, 'Output is not shareable'); return; }
+    this.connect(ws, { headers: {} } as IncomingMessage, outputId);
+  }
+  /** Already-authenticated, scoped phone confidence monitor, deliberately not
+   * reachable through public output capabilities. Silent, 640 × 360 at 15 fps. */
+  attachMobileProgramViewer(ws: WebSocket) {
+    this.connect(ws, { headers: {} } as IncomingMessage, PROGRAM_MONITOR_OUTPUT_ID, true);
+  }
+  private connect(ws: WebSocket, req: IncomingMessage, outputScope?: string, mobileProgram = false) {
+    let frameWindow = Date.now(), frameCount = 0;
     let operator = false;
     let signedIn = false;
-    try { const user = userFromCookieHeader(req.headers.cookie); signedIn = !!user; operator = !!user && userCan(user, '*', 'author'); } catch { /* anonymous output */ }
-    const peer: Peer = { id: randomUUID(), ws, engine: this.isEngine(req), operator, signedIn, watching: new Set(), publishing: new Set(), alive: true };
+    try { if (!outputScope) { const user = userFromCookieHeader(req.headers.cookie); signedIn = !!user; operator = !!user && userCan(user, '*', 'author'); } } catch { /* anonymous output */ }
+    const peer: Peer = { id: randomUUID(), ws, engine: !outputScope && this.isEngine(req), operator, signedIn,
+      watching: new Set(outputScope ? [outputScope] : []), publishing: new Set(), alive: true, ...(outputScope ? { outputScope } : {}), ...(mobileProgram ? { mobileProgram: true } : {}) };
     if (peer.engine && this.engine) { ws.close(1008, 'Renderer already connected'); return; }
     this.peers.set(peer.id, peer);
     this.send(peer, { t: 'connected', peerId: peer.id, state: this.state(), status: this.status() });
@@ -59,10 +97,19 @@ export class ProductionHub {
       try {
         const m = JSON.parse(raw.toString());
         if (!m || typeof m !== 'object') return;
+        if (peer.outputScope) {
+          if (Date.now() - frameWindow > 10000) { frameWindow = Date.now(); frameCount = 0; }
+          if (++frameCount > 120) { ws.close(1008, 'Output signaling rate exceeded'); return; }
+          if ((m.t === 'watch' || m.t === 'unwatch') && m.outputId !== peer.outputScope) return;
+          if (!['watch', 'unwatch', 'signal'].includes(m.t)) return;
+          if (m.t === 'signal' && (m.key !== `out:${peer.outputScope}`
+            || m.description && (m.description.type !== 'answer' || typeof m.description.sdp !== 'string' || m.description.sdp.length > 65536)
+            || m.candidate && (typeof m.candidate !== 'object' || JSON.stringify(m.candidate).length > 8192))) return;
+        }
         if (m.t === 'watch' && !peer.engine && typeof m.outputId === 'string') {
           // Private operator feeds cannot become public through a malformed
           // legacy named-output entry using the same reserved identifier.
-          const allowed = ['preview', 'multiview', PROGRAM_MONITOR_OUTPUT_ID].includes(m.outputId) ? peer.operator :
+          const allowed = peer.outputScope ? m.outputId === peer.outputScope : ['preview', 'multiview', PROGRAM_MONITOR_OUTPUT_ID].includes(m.outputId) ? peer.operator :
             m.outputId === 'program' ? peer.signedIn : this.state().outputs.some(o => o.id === m.outputId);
           if (!allowed) return;
           peer.watching.add(m.outputId);
@@ -96,6 +143,7 @@ export class ProductionHub {
       else this.engineSend({ t: 'peer-left', peerId: peer.id });
     });
     ws.on('error', () => ws.terminate());
+    if (outputScope) this.engineSend({ t: 'watch', peerId: peer.id, outputId: outputScope, key: `out:${outputScope}` });
   }
   close() { clearInterval(this.heartbeat); for (const peer of this.peers.values()) peer.ws.close(); this.wss.close(); }
 }

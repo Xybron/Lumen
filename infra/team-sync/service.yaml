@@ -1,0 +1,37 @@
+replication:
+  connections:
+    - type: postgresql
+      hostname: db.xfppsgiothkvhndmbixx.supabase.co
+      port: 5432
+      database: postgres
+      username: lumen_sync_replica
+      password: !env PS_SOURCE_PASSWORD
+      sslmode: verify-full
+      cacert: !env PS_SOURCE_CA
+      max_pool_size: 2
+      connect_timeout: 8
+      slot_name_prefix: lumen_team_
+storage:
+  type: postgresql
+  uri: !env PS_STORAGE_URI
+  sslmode: disable # Unpublished bucket DB on the private local storage bridge.
+  max_pool_size: 2
+port: 8080
+sync_config:
+  path: /config/sync-config.yaml
+  exit_on_error: true
+client_auth:
+  jwks_uri: https://xfppsgiothkvhndmbixx.supabase.co/auth/v1/.well-known/jwks.json
+  audience: [authenticated]
+api:
+  parameters:
+    max_concurrent_connections: 20
+    max_data_fetch_concurrency: 2
+    max_buckets_per_connection: 100
+telemetry:
+  disable_telemetry_sharing: true
+healthcheck:
+  probes:
+    use_http: true
+system:
+  logging: { level: warn, format: json }

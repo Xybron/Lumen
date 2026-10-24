@@ -61,7 +61,10 @@ async function acquireGate(canonical: string) {
     await created.close();
   } catch (error) { if (code(error) !== 'EEXIST') throw error; }
   const before = await fs.lstat(filename);
-  if (!ownedFile(before) || before.nlink !== 1 || (before.mode & 0o077) !== 0) throw new StationInUseError();
+  // Windows reports synthesized mode bits rather than POSIX group/other
+  // permissions. Keep identity/link checks and SQLite's exclusive OS lease on
+  // every platform; enforce private POSIX permissions where they exist.
+  if (!ownedFile(before) || before.nlink !== 1 || (process.platform !== 'win32' && (before.mode & 0o077) !== 0)) throw new StationInUseError();
   let gate: Database.Database | undefined;
   try {
     gate = new Database(filename, { timeout: 0, fileMustExist: true });

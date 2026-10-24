@@ -8,6 +8,9 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { acquireStationLock, StationInUseError } from '../src/station-lock.js';
 
 const nonce = () => randomBytes(24).toString('hex');
+function privateMode(stat: { mode: number }) {
+  if (process.platform !== 'win32') assert.equal(stat.mode & 0o777, 0o600);
+}
 async function fixture() {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'lumen-station-lease-test-'));
   const sentinels = new Map([
@@ -16,7 +19,7 @@ async function fixture() {
   ]);
   for (const [filename, bytes] of sentinels) await fs.writeFile(path.join(directory, filename), bytes, { mode: 0o600 });
   return { directory, filename: path.join(directory, '.lumen-runtime.lock'), async unchanged() {
-    for (const [filename, bytes] of sentinels) { assert.deepEqual(await fs.readFile(path.join(directory, filename)), bytes); assert.equal((await fs.stat(path.join(directory, filename))).mode & 0o777, 0o600); }
+    for (const [filename, bytes] of sentinels) { assert.deepEqual(await fs.readFile(path.join(directory, filename)), bytes); privateMode(await fs.stat(path.join(directory, filename))); }
   } };
 }
 async function deadPid() {
@@ -45,7 +48,7 @@ test('a valid legacy lock with a confirmed dead PID is recovered automatically',
   try {
     await fs.writeFile(f.filename, JSON.stringify({ pid, nonce: oldNonce }), { mode: 0o600 }); owner = await acquireStationLock(f.directory);
     const current = JSON.parse(await fs.readFile(f.filename, 'utf8')); assert.equal(current.pid, process.pid); assert.notEqual(current.nonce, oldNonce);
-    assert.equal((await fs.stat(f.filename)).mode & 0o777, 0o600); await f.unchanged();
+    privateMode(await fs.stat(f.filename)); await f.unchanged();
     await owner.release(); owner = undefined; await assert.rejects(fs.access(f.filename));
   } finally { await owner?.release(); await fs.rm(f.directory, { recursive: true, force: true }); }
 });
@@ -98,6 +101,35 @@ test('the persistent OS lease gate refuses symlinks without touching their targe
   } finally { await fs.rm(f.directory, { recursive: true, force: true }); }
 });
 
+test('Windows-style mode metadata permits a normal lease while POSIX unsafe modes remain blocked', async () => {
+  const f = await fixture(), gate = path.join(f.directory, '.lumen-runtime.lease.sqlite');
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  let owner: Awaited<ReturnType<typeof acquireStationLock>> | undefined;
+  try {
+    // Reproduce Windows' readable/writable metadata on the current OS. This
+    // tests the platform policy, not native Windows filesystem behavior.
+    await fs.writeFile(gate, '', { mode: 0o666 }); await fs.chmod(gate, 0o666);
+    assert.notEqual((await fs.stat(gate)).mode & 0o077, 0);
+    Object.defineProperty(process, 'platform', { ...platform, value: 'linux' });
+    await assert.rejects(acquireStationLock(f.directory), StationInUseError);
+    await assert.rejects(fs.access(f.filename));
+    Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+    owner = await acquireStationLock(f.directory);
+    await assert.rejects(acquireStationLock(f.directory), StationInUseError);
+    assert.equal(JSON.parse(await fs.readFile(f.filename, 'utf8')).pid, process.pid);
+    await owner.release(); owner = undefined;
+    await assert.rejects(fs.access(f.filename));
+    assert.ok((await fs.stat(gate)).isFile());
+  } finally {
+    try { await owner?.release(); }
+    finally {
+      Object.defineProperty(process, 'platform', platform);
+      try { await f.unchanged(); }
+      finally { await fs.rm(f.directory, { recursive: true, force: true }); }
+    }
+  }
+});
+
 function leaseChild(directory: string) {
   const source = `import {acquireStationLock} from ${JSON.stringify(new URL('../src/station-lock.ts', import.meta.url).href)};
 const send=value=>new Promise((resolve,reject)=>process.send(value,error=>error?reject(error):resolve()));
@@ -124,7 +156,7 @@ test('failed same-process acquisition cannot release the first OS lease to a cro
   const children: ReturnType<typeof leaseChild>[] = [];
   try {
     owner = await acquireStationLock(f.directory); await assert.rejects(acquireStationLock(f.directory), StationInUseError);
-    const gate = path.join(f.directory, '.lumen-runtime.lease.sqlite'); assert.equal((await fs.stat(gate)).mode & 0o777, 0o600);
+    const gate = path.join(f.directory, '.lumen-runtime.lease.sqlite'); privateMode(await fs.stat(gate));
     // Remove only our own disposable metadata to prove the still-held OS lease,
     // not a live PID string, is what blocks a separate process.
     await fs.unlink(f.filename); const contender = leaseChild(f.directory); children.push(contender);

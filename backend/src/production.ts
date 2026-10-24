@@ -16,6 +16,8 @@ import { createBroadcast, type BroadcastWatchRelay } from './broadcast.js';
 import type { BroadcastSpawn } from './broadcast-process.js';
 import { createWatchRelayFromEnv } from './broadcast-relay.js';
 import { ProductionHub } from './production-hub.js';
+import { createOutputDelivery } from './output-delivery.js';
+import { createExternalOutput } from './output-external.js';
 import { rendererFailureMessage, RendererStartupError, resolveRendererOrigin, waitForStationEngine, type RendererAttempt, type RendererOriginOptions } from './renderer-startup.js';
 import type { ProductionState, StudioStatus } from '../../shared/production.js';
 import type { BroadcastSnapshot } from '../../shared/broadcast.js';
@@ -72,6 +74,13 @@ export async function createProduction(rendererOptions: Pick<RendererOriginOptio
     void recordings.interruptActive(reason).catch(error => console.error('[studio] Could not persist recording interruption:', error));
   }
   await store.init(); await recordings.init();
+  const externalOutput = createExternalOutput();
+  const outputDelivery = await createOutputDelivery({ directory: path.join(DATA_DIR, 'outputs'), hub, getState: () => store.get() }).catch(() => {
+    console.error('[outputs] Output sharing is unavailable; saved settings were preserved.');
+    const router = Router();
+    router.use((_req, res) => res.status(503).json({ error: 'Output sharing is unavailable. Check the private output settings and station storage; existing files were preserved.' }));
+    return { router, async close() {} };
+  });
   const clips = await createClips({
     dir: path.join(DATA_DIR, 'clips'), recordings,
     // Keep heavy post-production work out of the live renderer's resource
@@ -158,6 +167,7 @@ export async function createProduction(rendererOptions: Pick<RendererOriginOptio
       '/Applications/Chromium.app/Contents/MacOS/Chromium',
       '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser',
       process.env.PROGRAMFILES ? path.join(process.env.PROGRAMFILES, 'Google/Chrome/Application/chrome.exe') : '',
+      process.env['PROGRAMFILES(X86)'] ? path.join(process.env['PROGRAMFILES(X86)'], 'Google/Chrome/Application/chrome.exe') : '',
       process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Google/Chrome/Application/chrome.exe') : '',
     ].filter((p): p is string => !!p);
     for (const candidate of candidates) { try { await fs.access(candidate); return candidate; } catch { /* next */ } }
@@ -241,6 +251,22 @@ export async function createProduction(rendererOptions: Pick<RendererOriginOptio
 
   const router = Router();
   router.use(clips.router);
+  const outputControl = (req: Request, res: Response, next: NextFunction) => {
+    res.set({ 'Cache-Control': 'private, no-store', 'Referrer-Policy': 'no-referrer' });
+    if (!['GET', 'HEAD'].includes(req.method)) {
+      const origin = req.get('origin');
+      let sameOrigin = !origin;
+      try { if (origin) sameOrigin = ['http:', 'https:'].includes(new URL(origin).protocol) && new URL(origin).host === req.get('host'); } catch { /* Reject malformed origins. */ }
+      const site = req.get('sec-fetch-site');
+      if (!sameOrigin || site && !['same-origin', 'none'].includes(site) || ['POST', 'PUT', 'PATCH'].includes(req.method) && !req.is('application/json')) {
+        res.status(403).json({ error: 'Open output setup on this station to change sharing.' }); return;
+      }
+    }
+    next();
+  };
+  router.get('/studio/output-delivery/external', operator, outputControl, (_req, res) => res.json(externalOutput.status()));
+  router.post('/studio/output-delivery/external/verify', operator, outputControl, asyncRoute(async (_req, res) => { res.json(await externalOutput.verify()); }));
+  router.use('/studio/output-delivery', operator, outputControl, outputDelivery.router);
   router.get('/studio/broadcast', operator, (_req, res, next) => {
     try { res.set('Cache-Control', 'private, no-store').json(broadcastSnapshot()); } catch (error) { next(error); }
   });
@@ -389,9 +415,16 @@ export async function createProduction(rendererOptions: Pick<RendererOriginOptio
     if (code === 500) console.error('[studio]', 'The operation could not be completed.');
     res.status(code).json({ error: error instanceof z.ZodError ? error.issues[0].message : error.message });
   });
-  return { router, wss: hub.wss, async close() {
+  return { router, wss: hub.wss,
+    mobile: {
+      get: () => store.get(), status: snapshot,
+      attachProgramViewer: (ws: import('ws').WebSocket) => hub.attachMobileProgramViewer(ws),
+      select: (revision: number, sceneId: string, authorize: () => void) => store.mobileControls(revision, { sceneId }, authorize),
+      take: (revision: number, sceneId: string, transition: 'cut' | 'fade', durationMs: number, authorize: () => void) => store.command(revision, { type: 'take', sceneId, transition, durationMs, swapPreview: true }, authorize),
+      audio: (revision: number, patch: { muted?: boolean; volume?: number }, authorize: () => void) => store.mobileControls(revision, patch, authorize),
+    }, async close() {
     clearInterval(watchdog); stopping = true;
-    try { await broadcast?.close(); await clips.close(); }
+    try { await outputDelivery.close(); await broadcast?.close(); await clips.close(); }
     finally {
       try { await recordings.interruptActive('Station shut down during recording.'); }
       finally { try { await browser?.close(); } finally { hub.close(); } }

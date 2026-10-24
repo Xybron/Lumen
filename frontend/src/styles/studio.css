@@ -447,3 +447,8 @@
   .studio-app .studio-statusbar { font-size: 9px; gap: 12px; }
   .studio-app .studio-statusbar > span { min-width: 0; }
 }
+
+/* Source names and the adjacent settings control open the same properties. */
+.studio-app .source-properties-trigger { text-align: left; border-radius: 5px; padding: 3px 0; }
+.studio-app .source-properties-trigger:hover b { color: var(--accent); }
+.studio-app .source-properties-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }

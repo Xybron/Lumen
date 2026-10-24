@@ -1,5 +1,6 @@
 (() => {
-  const slug = location.pathname.split('/').filter(Boolean)[1];
+  const path = location.pathname.split('/').filter(Boolean), slug = path.at(-1), workspace = path.length === 3 ? path[1] : null;
+  const scope = `${workspace ? `${workspace}/` : ''}${slug}`;
   const video = document.querySelector('video'), player = document.querySelector('#player'), status = document.querySelector('#status'), placeholder = document.querySelector('#placeholder'), headline = document.querySelector('#headline'), detail = document.querySelector('#detail'), play = document.querySelector('#play'), feedback = document.querySelector('#feedback');
   let hls, source = '', timer, failures = 0, live = false, closing = false, polling = false, pollController;
   function setState(state, message) { status.dataset.state = state; status.textContent = state === 'live' ? 'Live' : state === 'connecting' ? 'Connecting' : 'Offline'; if (message) detail.textContent = message; }
@@ -28,9 +29,9 @@
     polling = true; pollController = new AbortController();
     const deadline = setTimeout(() => pollController?.abort(), 8000);
     try {
-      const response = await fetch(`/api/watch/${encodeURIComponent(slug)}`, { cache: 'no-store', signal: pollController.signal }); if (!response.ok) throw new Error('unavailable');
+      const response = await fetch(`/api/watch/${scope}`, { cache: 'no-store', signal: pollController.signal }); if (!response.ok) throw new Error('unavailable');
       const data = await response.json(); failures = 0;
-      if (data.status === 'live' && typeof data.playlistUrl === 'string' && /^\/hls\//.test(data.playlistUrl)) { live = true; if (source !== data.playlistUrl) attach(data.playlistUrl); }
+      if (data.status === 'live' && typeof data.playlistUrl === 'string' && data.playlistUrl.startsWith(`/hls/${scope}/`)) { live = true; if (source !== data.playlistUrl) attach(data.playlistUrl); }
       else if (data.status === 'connecting') { live = false; if (source) stop(); placeholder.hidden = false; play.hidden = true; headline.textContent = 'The broadcast is starting'; setState('connecting', 'Waiting for the first live picture.'); }
       else offline();
     } catch { failures++; if (failures >= 2) offline('The connection is unavailable. We’ll keep trying.'); else setState('connecting', 'Checking the connection…'); }

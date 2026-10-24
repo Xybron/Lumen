@@ -5,14 +5,20 @@ import { useFullscreen, useIdle, useEventListener, useWakeLock } from '@vueuse/c
 import { Volume2, Maximize } from 'lucide-vue-next';
 import StudioMonitor from '@/components/studio/StudioMonitor.vue';
 import { studioApi } from '@/lib/studio/api';
+import { requestDisplayFullscreen } from '@/lib/studio/display-outputs';
 const route = useRoute();
 const outputId = computed(() => String(route.params.outputId));
 const root = ref<HTMLElement | null>(null), ready = ref(false), audible = ref(false), name = ref('Lumen output');
 const isProgram = computed(() => outputId.value === 'program');
+const fullscreenMessage = ref('');
 const outputName = computed(() => isProgram.value ? 'Program' : name.value);
-const { enter, exit, isFullscreen } = useFullscreen(root), { idle } = useIdle(2500);
+const { exit, isFullscreen } = useFullscreen(root), { idle } = useIdle(2500);
 const wake = useWakeLock();
-useEventListener(window, 'keydown', e => { if (e.key.toLowerCase() === 'f') void (isFullscreen.value ? exit() : enter()); });
+async function fullscreen() {
+  if (isFullscreen.value) { await exit(); return; }
+  if (root.value) { const result = await requestDisplayFullscreen(root.value); fullscreenMessage.value = result.message; }
+}
+useEventListener(window, 'keydown', e => { if (e.key.toLowerCase() === 'f') { e.preventDefault(); void fullscreen(); } });
 onMounted(async () => {
   await wake.request('screen').catch(() => {});
   if (!isProgram.value) {
@@ -23,10 +29,10 @@ onMounted(async () => {
 onBeforeUnmount(() => { void wake.release(); });
 </script>
 <template>
-  <div ref="root" class="production-output" :class="{ 'cursor-hidden': idle }" @dblclick="enter">
+  <div ref="root" class="production-output" :class="{ 'cursor-hidden': idle }" @dblclick="fullscreen">
     <StudioMonitor :output-id="outputId" :audible="audible" @ready="ready = $event" @blocked="audible = false" />
     <div v-if="!ready" class="output-wait"><span>{{ outputName }}</span><small>{{ isProgram ? 'Waiting for the live Program feed' : 'Waiting for the production engine' }}</small></div>
-    <div v-show="!idle" class="output-controls"><button @click="audible = !audible"><Volume2 :size="16" />{{ audible ? 'Mute output' : 'Enable sound' }}</button><button @click="enter"><Maximize :size="16" /> Fullscreen</button></div>
+    <div v-show="!idle" class="output-controls"><span v-if="fullscreenMessage" role="status">{{ fullscreenMessage }}</span><button @click="audible = !audible"><Volume2 :size="16" />{{ audible ? 'Mute output' : 'Enable sound' }}</button><button @click="fullscreen"><Maximize :size="16" /> Fullscreen</button></div>
   </div>
 </template>
 <style scoped>

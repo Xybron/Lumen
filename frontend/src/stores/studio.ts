@@ -6,6 +6,7 @@ import { useContentStore } from '@/stores/content';
 import { StudioPeer, StudioSignal } from '@/lib/studio/signal';
 import { shortId } from '@/lib/ids';
 import { animationFromPreset, cloneAnimation } from '@/lib/studio/animation';
+import { openDeviceCapture, type InputSelection } from '@/lib/studio/device-capture';
 import { arrangeLayers, layerAlignment, layerPreset, nudgeLayerGeometry, reorderLayers, type LayerAlignment, type LayerArrangeAction, type LayerPreset } from '@/lib/studio/layer-layout';
 import type { ProductionState, StudioStatus, StudioRecording, StudioScene, SceneLayer, StudioSource, StudioCommand, LayerAnimation } from '../../../shared/production';
 
@@ -239,32 +240,115 @@ export const useStudioStore = defineStore('studio', () => {
   }
   function disconnectSource(id: string) {
     const capture = captures.get(id); if (!capture) return;
-    captures.delete(id); capture.peer?.close(); capture.stream.getTracks().forEach(t => t.stop());
+    captures.delete(id); capture.peer?.close(); capture.stream.getTracks().forEach(t => { t.onended = null; t.stop(); });
     connectedSources.value = [...captures.keys()]; signal.send({ t: 'unpublish', sourceId: id });
   }
   // Read-only access for muted local animation rehearsals. Preview components
   // must never stop these tracks: their lifetime belongs to the publisher.
   function sourceStream(id: string) { return captures.get(id)?.stream ?? null; }
-  async function connectSource(source: StudioSource, videoDeviceId?: string, audioDeviceId?: string, includeAudio?: boolean) {
+  function cameraStreams() { return [...captures.values()].map(capture => capture.stream).filter(stream => stream.getVideoTracks().some(track => track.readyState === 'live')); }
+  function rememberedInputSelection(id: string): InputSelection {
+    try {
+      const saved = JSON.parse(localStorage.getItem(`lumen:input:${id}`) ?? '{}');
+      return {
+        videoDeviceId: typeof saved?.videoDeviceId === 'string' ? saved.videoDeviceId : undefined,
+        audioDeviceId: typeof saved?.audioDeviceId === 'string' ? saved.audioDeviceId : undefined,
+        includeAudio: typeof saved?.includeAudio === 'boolean' ? saved.includeAudio : false,
+        width: Number.isInteger(saved?.width) && saved.width > 0 ? saved.width : undefined,
+        height: Number.isInteger(saved?.height) && saved.height > 0 ? saved.height : undefined,
+        frameRate: typeof saved?.frameRate === 'number' && Number.isFinite(saved.frameRate) && saved.frameRate > 0 ? saved.frameRate : undefined,
+      };
+    } catch { return {}; }
+  }
+  /** Device IDs remain local to the browser that supplies this source. */
+  function inputSelection(id: string): InputSelection {
+    const saved = rememberedInputSelection(id), stream = sourceStream(id);
+    if (!stream) return saved;
+    const video = stream.getVideoTracks().find(track => track.readyState === 'live');
+    const audio = stream.getAudioTracks().find(track => track.readyState === 'live');
+    return {
+      ...saved,
+      videoDeviceId: video?.getSettings().deviceId || saved.videoDeviceId,
+      audioDeviceId: audio?.getSettings().deviceId || saved.audioDeviceId,
+      includeAudio: !!audio,
+    };
+  }
+  function rememberInputSelection(id: string, selection: InputSelection) {
+    try { localStorage.setItem(`lumen:input:${id}`, JSON.stringify(selection)); } catch { /* private browsing */ }
+  }
+  function publishCapture(id: string, stream: MediaStream) {
+    if (captures.get(id)?.stream === stream) return;
+    disconnectSource(id);
+    captures.set(id, { stream, peer: null }); connectedSources.value = [...captures.keys()];
+    for (const track of stream.getTracks()) track.onended = () => {
+      // An event queued by the previous input must not release its replacement.
+      if (captures.get(id)?.stream === stream) disconnectSource(id);
+    };
+    signal.send({ t: 'publish', sourceId: id });
+  }
+  async function connectSource(source: StudioSource, videoDeviceId?: string, audioDeviceId?: string, includeAudio?: boolean, preparedStream?: MediaStream, format?: Pick<InputSelection, 'width' | 'height' | 'frameRate'>) {
     if (!navigator.mediaDevices) throw new Error('Device access requires localhost or HTTPS.');
     // Device IDs belong to this browser, not the shared production document.
     // Remember explicit selections so reconnecting Camera 2 cannot silently
     // replace it with the default camera (or lose its enabled audio track).
-    let saved: { videoDeviceId?: string; audioDeviceId?: string; includeAudio?: boolean } = {};
-    try { saved = JSON.parse(localStorage.getItem(`lumen:input:${source.id}`) ?? '{}') ?? {}; } catch { /* storage unavailable */ }
+    const saved = rememberedInputSelection(source.id);
     videoDeviceId ??= saved.videoDeviceId;
     audioDeviceId ??= saved.audioDeviceId;
     includeAudio ??= saved.includeAudio ?? false;
-    const stream = source.kind === 'screen' ? await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true }) :
-      await navigator.mediaDevices.getUserMedia({
-        video: source.kind === 'camera' ? { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 }, ...(videoDeviceId ? { deviceId: { exact: videoDeviceId } } : {}) } : false,
-        audio: source.kind === 'microphone' || includeAudio ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false, ...(audioDeviceId ? { deviceId: { exact: audioDeviceId } } : {}) } : false,
+    const selectedFormat = { width: (format ?? saved).width, height: (format ?? saved).height, frameRate: (format ?? saved).frameRate };
+    const remember = () => rememberInputSelection(source.id, { videoDeviceId, audioDeviceId, includeAudio, ...selectedFormat });
+    // Keep the explicit selection even if the first attempt is denied or busy.
+    // The saved source's Connect action must retry that card, not the default.
+    remember();
+    const stream = preparedStream ?? (source.kind === 'screen' ? await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true }) :
+      await openDeviceCapture(source.kind === 'camera' ? 'camera' : 'microphone', { videoDeviceId, audioDeviceId, includeAudio, ...selectedFormat }));
+    // Resolve "Default" to the actual device for subsequent reconnects. A
+    // removed HDMI adapter must never turn a saved camera into the laptop cam.
+    videoDeviceId = stream.getVideoTracks()[0]?.getSettings().deviceId || videoDeviceId;
+    audioDeviceId = stream.getAudioTracks()[0]?.getSettings().deviceId || audioDeviceId;
+    remember();
+    publishCapture(source.id, stream);
+  }
+  /** The caller stages an independent input; Save transfers ownership here.
+   * Cancel never reaches this method, and failed saves retain the old publisher. */
+  async function saveSourceProperties(id: string, patch: Partial<StudioSource>, replacement?: { stream: MediaStream; selection?: InputSelection }) {
+    const previousStream = sourceStream(id);
+    const validate = (source?: StudioSource) => {
+      if (!source) throw new Error('This source no longer exists. Close Properties and choose another source.');
+      if ((patch.id !== undefined && patch.id !== id) || (patch.kind !== undefined && patch.kind !== source.kind)) {
+        throw new Error('A source’s identity and type cannot be changed in Properties.');
+      }
+      if (replacement) {
+        if (!['camera', 'screen', 'microphone'].includes(source.kind)) throw new Error('This source cannot use a live input.');
+        const video = replacement.stream.getVideoTracks().some(track => track.readyState === 'live');
+        const audio = replacement.stream.getAudioTracks().some(track => track.readyState === 'live');
+        if ((source.kind === 'microphone' ? !audio : !video) || (source.kind === 'camera' && replacement.selection?.includeAudio && !audio)) {
+          throw new Error('The selected input stopped before it could be saved. Preview it again and retry.');
+        }
+      }
+      return source;
+    };
+    try {
+      validate(state.value?.sources.find(source => source.id === id));
+      const changes = structuredClone(patch);
+      await edit(draft => {
+        const source = validate(draft.sources.find(source => source.id === id));
+        Object.assign(source, changes, { id, kind: source.kind });
       });
-    try { localStorage.setItem(`lumen:input:${source.id}`, JSON.stringify({ videoDeviceId, audioDeviceId, includeAudio })); } catch { /* private browsing */ }
-    disconnectSource(source.id);
-    captures.set(source.id, { stream, peer: null }); connectedSources.value = [...captures.keys()];
-    for (const track of stream.getTracks()) track.onended = () => disconnectSource(source.id);
-    signal.send({ t: 'publish', sourceId: source.id });
+      validate(state.value?.sources.find(source => source.id === id));
+      if (replacement) {
+        const { stream } = replacement;
+        const selection = { ...rememberedInputSelection(id), ...replacement.selection };
+        selection.videoDeviceId = stream.getVideoTracks()[0]?.getSettings().deviceId || selection.videoDeviceId;
+        selection.audioDeviceId = stream.getAudioTracks()[0]?.getSettings().deviceId || selection.audioDeviceId;
+        selection.includeAudio = stream.getAudioTracks().some(track => track.readyState === 'live');
+        publishCapture(id, stream);
+        rememberInputSelection(id, selection);
+      }
+    } catch (error) {
+      if (replacement && replacement.stream !== previousStream) replacement.stream.getTracks().forEach(track => track.stop());
+      throw error;
+    }
   }
   async function removeSource(id: string) {
     // The server refuses deleting a source still used by a committed live scene.
@@ -295,6 +379,6 @@ export const useStudioStore = defineStore('studio', () => {
   });
   return { state, status, loading, saving, recordings, engineBusy, recordingBusy, selectedLayerId, selectedScene, selectedLayer, connectedSources, animationPresets, reconnect: () => signal.reconnect(),
     load, edit, command, selectScene, addScene, removeScene, updateScene, addLayer, updateLayer, removeLayer, moveLayer, duplicateLayer, reorderLayer, arrangeLayer, alignLayer, presetLayer, nudgeLayer, addSource, removeSource, updateSource,
-    connectSource, disconnectSource, sourceStream, setMainAudio, toggleEngine, refreshRecordings, toggleRecord, recoverRecording,
+    connectSource, disconnectSource, sourceStream, cameraStreams, inputSelection, saveSourceProperties, setMainAudio, toggleEngine, refreshRecordings, toggleRecord, recoverRecording,
     saveAnimationPreset, renameAnimationPreset, deleteAnimationPreset, applyAnimationPreset };
 });

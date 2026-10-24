@@ -230,6 +230,8 @@ try {
   await page.getByRole('button', { name: /The message/ }).click();
   await until(async () => (await get()).previewSceneId === 'scene_message', 'select scene');
   await page.getByRole('button', { name: 'Add source layer', exact: true }).click();
+  await page.getByRole('button', { name: 'Start preview', exact: true }).click();
+  await until(() => page.getByTestId('source-camera-preview').evaluate(video => video.readyState >= 2 && video.videoWidth > 0), 'camera setup preview');
   await page.getByLabel('Name', { exact: true }).fill('Test camera');
   await page.getByRole('button', { name: 'Add to Studio', exact: true }).click();
   await until(async () => Object.values((await (await request.get(`${base}/api/studio/status`)).json()).sources).includes('ready'), 'fake camera input');

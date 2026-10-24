@@ -33,6 +33,9 @@ unconfigured. The PowerSync trial uses only synthetic local data, not LAB.
 
 ## Quick start
 
+For a Windows church computer, follow the [local testing guide](docs/WINDOWS-LOCAL-TESTING.md),
+including prerequisites, the testing branch, and a separate station data folder.
+
 ```bash
 # from repo root
 npm run install:all
@@ -497,6 +500,20 @@ capture require **localhost or HTTPS** and explicit browser permission.
   remain in the library even if you cancel adding its source. Failed previews
   and uploads offer a clear retry path. Browsing and preview playback never
   take a scene or change Program. Every new source starts muted.
+- Click a source's name or settings icon in **Sources** to reopen its
+  **Properties**. Rename it, preview another camera or capture card, select a
+  microphone, choose a screen/window, or change its presentation channel.
+  Camera changes stay in setup until **Save changes**; **Cancel** keeps the
+  existing feed connected.
+- Camera properties include **Resolution** and **Frame rate**, with **Auto**
+  defaults and a live readout of the delivered format. Choices are filtered by
+  the device's reported ranges; the preview checks the selected combination
+  before saving. Each source remembers its format in the supplying browser,
+  including after reconnecting. Choosing another camera resets the format to Auto.
+- Media properties let you replace an image, video or audio file. Video and
+  audio properties also offer **Loop**, **Pause playback**, and **Restart on
+  save**. Saving updates the same source wherever it is used, including
+  Program; it does not create a duplicate source.
 - Use the fullscreen button or **F** to expand Studio; press **F** again or
   **Esc** to leave fullscreen. The live-output window remains independent.
 - The left-panel toggle hides or restores **Scenes**. Scenes and Design can
@@ -613,6 +630,37 @@ video connections or changing Program, recording or audio routing.
 
 ### Engine, outputs, and safety
 
+- HDMI capture cards that macOS or Windows exposes as video inputs can be added
+  through **Add source → Camera**. Connect camera HDMI → capture
+  card → computer, power on the camera, then click **Start preview** to
+  allow camera access. Select the card under **Video device**; its live picture
+  updates in setup before you add it. Preview audio stays muted. The device name
+  fills the source name automatically, and **Connection help** holds setup tips.
+  If the preview background differs from the camera’s picture on Mac, open the
+  menu bar’s **Video** menu and turn off **Background** for your browser. macOS
+  can apply this effect before Lumen receives the video.
+  Connected devices refresh automatically, including passive rescans and refresh on return
+  to the app when a driver/browser misses the device-change event. Input setup
+  shows the number of discovered video inputs and keeps all OS device names,
+  including generic names such as **USB Video** or **USB2.0 Camera**.
+  **Refresh devices** is also available. Install
+  the card's OS driver if it is not listed. Browser capture requires localhost
+  or HTTPS; Chrome or Edge is recommended on both platforms.
+- For embedded HDMI audio, enable **Include audio** and choose the capture
+  card's **Audio device**. Leave audio off when using a separate sound desk.
+  New sources start muted; use the Audio mixer to unmute or set Main audio.
+  Adding the camera keeps the previewed stream connected. Closing or switching
+  setup releases only setup’s tracks, preserving cameras already in Studio.
+  Auto capture negotiates resolution/frame rate with a 1080p30 preference;
+  explicit choices request that exact format and report unsupported combinations
+  without silently changing it. Setup uses independent track constraints, though
+  browsers may reconfigure hardware shared by the live source during format changes.
+  A camera is marked Ready only after a video frame is available.
+  Reconnect preserves the actual selected device in this browser; an unavailable
+  card fails explicitly instead of switching to the built-in webcam. Native-only
+  capture hardware needs a driver that exposes a browser video input or an OBS
+  Virtual Camera bridge. Physical card/driver compatibility must be checked on
+  the target computer.
 - The backend owns the renderer, not the control page. Media-based outputs and
   recording continue if the operator navigates away or closes the control page.
   **Cameras, microphones, and screen shares are supplied by the browser that
@@ -755,6 +803,8 @@ live-only delivery, not a VOD archive or private viewer-account system.
 ```bash
 npm test          # state isolation, routing, validation, and recording storage
 npm run test:studio # build + real Chromium camera/audio/output/recording smoke test
+npm run test:studio:capture # build + simulated HDMI card discovery, video/audio, live output pixels, unplug/replug and permissions
+npm run test:studio:source-properties # build + editing existing sources, staged device/media changes and cancel safety
 npm run test:studio:properties # build + engine-heartbeat drafts, property persistence, queued saves and stale-response regression
 npm run test:clips # build + recordings library, multitrack editing/imports, saved drafts, real MP4 exports and live-production isolation
 npm run test:clips:previews # build + real filmstrips/waveforms, trim alignment, visible-only loading and preview safety

@@ -3,6 +3,8 @@ import { createRouter, createWebHistory } from 'vue-router';
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
+    { path: '/remote', name: 'mobile-controller', component: () => import('@/views/MobileControllerView.vue') },
+    { path: '/team', name: 'team', component: () => import('@/views/TeamView.vue') },
     {
       path: '/recordings',
       name: 'recordings',

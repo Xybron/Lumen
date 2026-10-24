@@ -1,0 +1,53 @@
+config:
+  edition: 3
+  storage_version: 2
+
+# Authorization comes from live replicated membership rows, never a team ID or
+# role supplied by the client. Removing a membership removes its team buckets.
+# There is no global stream and no production-state, auth-session or secret data.
+streams:
+  my_memberships:
+    auto_subscribe: true
+    query: |
+      SELECT id, team_id, user_id, role, created_at
+      FROM public.lumen_memberships
+      WHERE user_id = auth.user_id()
+  my_teams:
+    auto_subscribe: true
+    query: |
+      SELECT id, name, created_by, created_at
+      FROM public.lumen_teams
+      WHERE id IN (
+        SELECT team_id FROM public.lumen_memberships
+        WHERE user_id = auth.user_id()
+      )
+  team_resources:
+    auto_subscribe: true
+    query: |
+      SELECT id, team_id, kind, name, document, revision, updated_by, updated_at
+      FROM public.lumen_resources
+      WHERE team_id IN (
+        SELECT team_id FROM public.lumen_memberships
+        WHERE user_id = auth.user_id()
+      )
+  team_members:
+    auto_subscribe: true
+    query: |
+      SELECT id, team_id, user_id, role, created_at
+      FROM public.lumen_memberships
+      WHERE team_id IN (
+        SELECT team_id FROM public.lumen_memberships
+        WHERE user_id = auth.user_id()
+      )
+  team_profiles:
+    auto_subscribe: true
+    query: |
+      SELECT id, display_name, updated_at
+      FROM public.lumen_profiles
+      WHERE id IN (
+        SELECT user_id FROM public.lumen_memberships
+        WHERE team_id IN (
+          SELECT team_id FROM public.lumen_memberships
+          WHERE user_id = auth.user_id()
+        )
+      )

@@ -21,6 +21,16 @@ falls back to `window.open` when not packaged.
    place them in `src-tauri/binaries/` per the `externalBin` triples.
 3. `cargo tauri dev` / `cargo tauri build`.
 
+Camera/capture-card discovery uses the OS video inputs exposed to the webview,
+with permission-gated names and passive rescans while input setup is open.
+`Info.plist` supplies the macOS camera/microphone usage descriptions, and
+`Entitlements.plist` enables camera/audio input for the signed macOS bundle.
+The user must allow camera/microphone access in macOS or Windows privacy
+settings and in the browser/webview. Cards requiring a vendor driver must have
+that driver installed. Native builds and physical card discovery still need
+acceptance testing on each target OS; the browser regression uses synthetic
+devices and cannot verify native drivers or permission dialogs.
+
 The Express composition root already honors `PORT`/`HOST`/`LUMEN_DATA_DIR`, so no
 backend change is needed to run under Tauri — `sidecar.rs` just wires the env.
 

@@ -84,6 +84,7 @@ export const useEnginesStore = defineStore('engines', () => {
   // Answer hello with the relevant engine's current state so a joining Live view
   // syncs immediately (the WS relay also caches state per channel as a fallback).
   function handleIncoming(msg: BroadcastMsg) {
+    if (msg.t === 'mobile-channel-state') engineFor(msg.channel)?.applyRemotePresentation(msg.payload);
     if (msg.t==='state' && msg.channel && 'cue' in msg.payload) engineFor(msg.channel)?.applyExternal(msg.payload);
     if (msg.t !== 'hello') return;
     if (msg.channel) engineFor(msg.channel)?.sendState();

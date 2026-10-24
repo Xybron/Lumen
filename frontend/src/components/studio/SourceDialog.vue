@@ -1,29 +1,86 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 import { toast } from 'vue-sonner';
-import { Camera, Monitor, Mic, Image, Film, Music2, Presentation, Upload, LoaderCircle, Search, Check, FolderOpen, RefreshCw, X, ArrowUpRight, ShieldCheck } from 'lucide-vue-next';
+import { Camera, Monitor, Mic, Image, Film, Music2, Presentation, Upload, LoaderCircle, Search, Check, FolderOpen, RefreshCw, X, ArrowUpRight, VolumeX, CircleHelp } from 'lucide-vue-next';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import MediaAssetPreview from './MediaAssetPreview.vue';
 import { api, type MediaLibraryFile } from '@/lib/api';
 import { shortId } from '@/lib/ids';
 import { mediaAccept, mediaAssetUrl, mediaDisplayName, mediaExtensions, mediaFileSize, mediaFilesForKind, mediaFormatHint, mediaSourceName, MAX_MEDIA_BYTES, type MediaAssetKind } from '@/lib/studio/media-library';
+import { inputCaptureError, openDeviceCapture, type InputSelection } from '@/lib/studio/device-capture';
+import { CameraPreviewCapture } from '@/lib/studio/camera-preview';
 import { useContentStore } from '@/stores/content';
 import { useStudioStore } from '@/stores/studio';
 import type { StudioSource } from '../../../../shared/production';
 
 const open = defineModel<boolean>('open', { required: true });
+const props = defineProps<{ sourceId?: string | null }>();
 const studio = useStudioStore(), content = useContentStore();
+const editing = computed(() => !!props.sourceId);
+const editingSource = computed(() => studio.state?.sources.find(source => source.id === props.sourceId));
+const initialInput = ref<InputSelection>({}), initializing = ref(false);
+const loop = ref(true), playbackPaused = ref(false), restartOnSave = ref(false), choosingMedia = ref(false);
+const screenReplacement = shallowRef<MediaStream | null>(null), screenChoosing = ref(false);
 const kind = ref<StudioSource['kind']>('camera'), name = ref(''), nameEdited = ref(false), url = ref(''), channelId = ref('');
 const adding = ref(false), error = ref(''), libraryError = ref(''), files = ref<MediaLibraryFile[]>([]), query = ref(''), listing = ref(false);
 const devices = ref<MediaDeviceInfo[]>([]), videoDevice = ref(''), audioDevice = ref(''), withAudio = ref(false);
+const resolution = ref(''), frameRate = ref('');
+const cameraCapabilities = shallowRef<MediaTrackCapabilities>({}), cameraSettings = shallowRef<MediaTrackSettings>({});
+const withinRange = (value: number, range?: { min?: number; max?: number }) =>
+  value >= (range?.min ?? 0) && value <= (range?.max ?? Infinity);
+const resolutionOptions = computed(() => {
+  const sizes = [[640, 480], [1280, 720], [1920, 1080], [2560, 1440], [3840, 2160]];
+  const { width, height } = cameraSettings.value;
+  if (width && height) sizes.push([width, height]);
+  const available = sizes.filter(([w, h]) => withinRange(w, cameraCapabilities.value.width) && withinRange(h, cameraCapabilities.value.height)).map(([w, h]) => `${w}x${h}`);
+  // Keep a remembered/failed choice visible so it can always be changed to Auto.
+  if (resolution.value) available.push(resolution.value);
+  return [...new Set(available)].sort((a, b) => Number(a.split('x')[0]) - Number(b.split('x')[0]));
+});
+const frameRateOptions = computed(() => {
+  const rates = [15, 23.976, 24, 25, 29.97, 30, 50, 59.94, 60, 120];
+  if (cameraSettings.value.frameRate) rates.push(Number(cameraSettings.value.frameRate.toFixed(3)));
+  const available = rates.filter(rate => withinRange(rate, cameraCapabilities.value.frameRate));
+  if (frameRate.value) available.push(Number(frameRate.value));
+  return [...new Set(available)].sort((a, b) => a - b);
+});
+function selectedInput(): InputSelection {
+  const [width, height] = resolution.value.split('x').map(Number);
+  return { videoDeviceId: videoDevice.value, audioDeviceId: audioDevice.value, includeAudio: withAudio.value,
+    width: width || undefined, height: height || undefined, frameRate: Number(frameRate.value) || undefined };
+}
+const deviceError = ref(''), deviceAccessError = ref(''), accessingDevices = ref(false), refreshingDevices = ref(false), devicesScanned = ref(false);
+const videoInputs = computed(() => devices.value.filter(device => device.kind === 'videoinput' && device.deviceId));
+const audioInputs = computed(() => devices.value.filter(device => device.kind === 'audioinput' && device.deviceId));
+// Before permission, browsers can hide IDs even for an attached, remembered
+// device. Keep Start preview available so it can request that exact input.
+const inputMissing = (inputKind: MediaDeviceKind, id: string) => devicesScanned.value && !!id &&
+  !devices.value.some(device => device.kind === inputKind && (!device.deviceId || device.deviceId === id));
+const videoMissing = computed(() => kind.value === 'camera' && inputMissing('videoinput', videoDevice.value));
+const audioMissing = computed(() => (kind.value === 'microphone' || (kind.value === 'camera' && withAudio.value)) && inputMissing('audioinput', audioDevice.value));
+const deviceSummary = computed(() => {
+  const camera = kind.value === 'camera', inputKind = camera ? 'videoinput' : 'audioinput', inputs = camera ? videoInputs.value : audioInputs.value;
+  if (!devicesScanned.value) return refreshingDevices.value ? 'Scanning…' : '';
+  if (devices.value.some(device => device.kind === inputKind) && !inputs.some(device => device.label)) return 'Access needed';
+  if (!inputs.length) return 'No devices found';
+  return `${inputs.length} ${inputs.length === 1 ? 'device' : 'devices'}`;
+});
+const cameraElement = ref<HTMLVideoElement>(), cameraStream = shallowRef<MediaStream | null>(null);
+const cameraConnecting = ref(false), cameraLive = ref(false), cameraWanted = ref(false), cameraDimensions = ref('');
+const cameraCapture = new CameraPreviewCapture();
+let cameraRequest = 0;
 const uploading = ref(false), progress = ref(0), pendingFile = ref<File | null>(null), localPreview = ref(''), justUploaded = ref('');
 const uploadInput = ref<HTMLInputElement>(), dragDepth = ref(0), brokenThumbs = ref(new Set<string>());
 const previewDetail = ref<HTMLElement>();
 let epoch = 0, uploadSequence = 0, listSequence = 0;
+let settingInitialKind = false;
+let deviceSequence = 0;
+let deviceTimer: number | undefined;
 let uploadController: AbortController | undefined, listController: AbortController | undefined;
+let uploadFallback: string | null = null;
 
 const kinds = [
-  { id: 'camera', label: 'Camera / OBS', hint: 'Webcam or virtual camera', icon: Camera, group: 'Live inputs' },
+  { id: 'camera', label: 'Camera / capture card', hint: 'HDMI capture card, webcam, or OBS Virtual Camera', icon: Camera, group: 'Live inputs' },
   { id: 'screen', label: 'Screen share', hint: 'A display, window, or tab', icon: Monitor, group: 'Live inputs' },
   { id: 'microphone', label: 'Microphone', hint: 'Audio interface or mic', icon: Mic, group: 'Live inputs' },
   { id: 'image', label: 'Image', hint: 'Artwork, logo, or backdrop', icon: Image, group: 'Media library' },
@@ -37,14 +94,81 @@ const libraryTitle = computed(() => kind.value === 'image' ? 'Images' : kind.val
 const matchingFiles = computed(() => mediaKind.value ? mediaFilesForKind(files.value, mediaKind.value, query.value) : []);
 const totalFiles = computed(() => mediaKind.value ? mediaFilesForKind(files.value, mediaKind.value).length : 0);
 const selected = computed(() => files.value.find(file => file.path === url.value));
-const selectedName = computed(() => pendingFile.value?.name ?? (selected.value ? mediaDisplayName(selected.value.name) : ''));
+const selectedName = computed(() => pendingFile.value?.name ?? (selected.value ? mediaDisplayName(selected.value.name) : url.value ? mediaDisplayName(url.value.split('/').pop() || name.value) : ''));
 const previewSrc = computed(() => localPreview.value || (url.value ? mediaAssetUrl(url.value) : ''));
 const previewPoster = computed(() => selected.value?.thumbnail ? mediaAssetUrl(selected.value.thumbnail) : undefined);
 const selectedBytes = computed(() => mediaFileSize(pendingFile.value?.size ?? selected.value?.bytes));
-const canAdd = computed(() => !!name.value.trim() && !adding.value && !uploading.value && (!mediaKind.value || !!url.value) && (kind.value !== 'channel' || !!channelId.value));
-const targetHint = computed(() => ['audio', 'microphone'].includes(kind.value)
-  ? 'Audio starts muted. Use Set as Main in Audio mixer, or unmute it there.'
-  : 'Added to Preview. Program stays unchanged until you Cut or Fade.');
+const selectionChanged = computed(() => (kind.value === 'camera' && (videoDevice.value !== (initialInput.value.videoDeviceId || '') || withAudio.value !== !!initialInput.value.includeAudio ||
+  selectedInput().width !== initialInput.value.width || selectedInput().height !== initialInput.value.height || selectedInput().frameRate !== initialInput.value.frameRate)) ||
+  ((kind.value === 'microphone' || (kind.value === 'camera' && withAudio.value)) && audioDevice.value !== (initialInput.value.audioDeviceId || '')));
+const canAdd = computed(() => !!name.value.trim() && !adding.value && !uploading.value && !accessingDevices.value && !screenChoosing.value && !initializing.value &&
+  (!editing.value || !!editingSource.value) &&
+  ((editing.value && !selectionChanged.value) || (!videoMissing.value && !audioMissing.value)) &&
+  (!mediaKind.value || !!url.value) &&
+  (kind.value !== 'camera' || (editing.value && !selectionChanged.value) || (cameraLive.value && !cameraConnecting.value)) &&
+  (kind.value !== 'channel' || !!channelId.value));
+const targetHint = computed(() => editing.value ? 'Changes apply wherever this source is used.' : ['audio', 'microphone'].includes(kind.value)
+  ? 'Starts muted'
+  : 'Adds to Preview');
+
+function stopCameraPreview(reset = true) {
+  cameraRequest++; cameraCapture.stop(); cameraStream.value = null;
+  cameraConnecting.value = false; cameraLive.value = false; cameraDimensions.value = '';
+  if (reset) cameraWanted.value = false;
+}
+function cameraPicture() {
+  const video = cameraElement.value, stream = cameraStream.value;
+  cameraLive.value = !!video && video.srcObject === stream && video.readyState >= 2 && video.videoWidth > 0 &&
+    !!stream?.getVideoTracks().some(track => track.readyState === 'live' && !track.muted);
+  const actual = stream?.getVideoTracks()[0]?.getSettings();
+  cameraDimensions.value = cameraLive.value && video ? `${video.videoWidth} × ${video.videoHeight}${actual?.frameRate ? ' · ' + Number(actual.frameRate.toFixed(3)) + ' fps' : ''}` : '';
+}
+async function startCameraPreview() {
+  if (!open.value || kind.value !== 'camera' || videoMissing.value || audioMissing.value) return;
+  cameraWanted.value = true; cameraConnecting.value = true; cameraLive.value = false;
+  cameraStream.value = null; cameraDimensions.value = ''; deviceAccessError.value = '';
+  const request = ++cameraRequest, context = epoch;
+  try {
+    const stream = await cameraCapture.start(selectedInput(), studio.cameraStreams());
+    if (!stream || !open.value || context !== epoch || request !== cameraRequest) return;
+    cameraStream.value = stream;
+    const track = stream.getVideoTracks()[0];
+    cameraCapabilities.value = track?.getCapabilities?.() ?? {};
+    cameraSettings.value = track?.getSettings() ?? {};
+    if (!nameEdited.value) name.value = devices.value.find(device => device.deviceId === stream.getVideoTracks()[0]?.getSettings().deviceId)?.label || stream.getVideoTracks()[0]?.label || 'Camera';
+    await refreshDevices();
+  } catch (cause) {
+    if (open.value && context === epoch && request === cameraRequest) {
+      await refreshDevices();
+      if (open.value && context === epoch && request === cameraRequest) deviceAccessError.value = (cause as Error).message;
+    }
+  } finally { if (context === epoch && request === cameraRequest) cameraConnecting.value = false; }
+}
+watch(videoDevice, () => {
+  if (initializing.value) return;
+  resolution.value = ''; frameRate.value = '';
+  cameraCapabilities.value = {}; cameraSettings.value = {};
+}, { flush: 'sync' });
+watch([videoDevice, audioDevice, withAudio, resolution, frameRate], () => {
+  if (!initializing.value && open.value && kind.value === 'camera' && !adding.value && (videoDevice.value || cameraWanted.value)) void startCameraPreview();
+}, { flush: 'post' });
+watch([videoMissing, audioMissing], ([video, audio]) => {
+  if (initializing.value || !cameraWanted.value || kind.value !== 'camera') return;
+  if (video || audio) stopCameraPreview(false);
+  else void startCameraPreview();
+});
+watch([cameraElement, cameraStream], ([video, stream], _, cleanup) => {
+  if (video) {
+    video.srcObject = stream;
+    if (stream) void video.play().catch(() => { if (cameraStream.value === stream) deviceAccessError.value = 'Preview could not play. Try again.'; });
+  }
+  for (const track of stream?.getVideoTracks() ?? []) {
+    track.addEventListener('ended', cameraPicture); track.addEventListener('mute', cameraPicture); track.addEventListener('unmute', cameraPicture);
+  }
+  cleanup(() => { for (const track of stream?.getVideoTracks() ?? []) {
+    track.removeEventListener('ended', cameraPicture); track.removeEventListener('mute', cameraPicture); track.removeEventListener('unmute', cameraPicture);
+  } });
+}, { flush: 'post' });
 
 function clearLocalPreview() {
   if (localPreview.value) URL.revokeObjectURL(localPreview.value);
@@ -54,13 +178,75 @@ function stopUpload() {
   uploadSequence++;
   uploadController?.abort(); uploadController = undefined;
   uploading.value = false; pendingFile.value = null; progress.value = 0;
+  if (uploadFallback !== null) url.value = uploadFallback;
+  uploadFallback = null;
   clearLocalPreview();
 }
 function invalidate() {
   epoch++; listSequence++;
+  stopCameraPreview();
+  screenReplacement.value?.getTracks().forEach(track => track.stop()); screenReplacement.value = null; screenChoosing.value = false;
+  deviceSequence++; accessingDevices.value = false; refreshingDevices.value = false;
+  clearInterval(deviceTimer); deviceTimer = undefined;
   listController?.abort(); listController = undefined; listing.value = false;
   stopUpload(); dragDepth.value = 0;
 }
+async function refreshDevices() {
+  if (!open.value || !['camera', 'microphone'].includes(kind.value)) return;
+  if (!navigator.mediaDevices?.enumerateDevices) {
+    deviceError.value = 'Device access requires localhost or HTTPS and a browser with camera support.';
+    return;
+  }
+  const context = epoch, sequence = ++deviceSequence;
+  refreshingDevices.value = true;
+  try {
+    const result = await navigator.mediaDevices.enumerateDevices();
+    if (open.value && context === epoch && sequence === deviceSequence) { devices.value = result; deviceError.value = ''; devicesScanned.value = true; }
+  } catch {
+    if (open.value && context === epoch && sequence === deviceSequence) deviceError.value = 'Devices could not be listed. Check browser permissions, then refresh devices.';
+  } finally {
+    if (context === epoch && sequence === deviceSequence) refreshingDevices.value = false;
+  }
+}
+async function enableDevices() {
+  if (kind.value === 'camera') { await startCameraPreview(); return; }
+  const context = epoch;
+  if (accessingDevices.value || !open.value) return;
+  if (!navigator.mediaDevices?.getUserMedia) { deviceAccessError.value = 'Device access requires localhost or HTTPS and a browser with camera support.'; return; }
+  accessingDevices.value = true; deviceAccessError.value = '';
+  let stream: MediaStream | undefined;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: false,
+      audio: audioDevice.value ? { deviceId: { exact: audioDevice.value } } : true,
+    });
+    if (open.value && context === epoch) await refreshDevices();
+  } catch (cause) {
+    if (open.value && context === epoch) {
+      // Access may have been granted even when the default camera is busy.
+      // Enumerate again so the operator can still find the connected card.
+      await refreshDevices();
+      if (open.value && context === epoch) deviceAccessError.value = inputCaptureError(cause);
+    }
+  } finally {
+    // Even permission prompts resolved after closing the dialog release input.
+    stream?.getTracks().forEach(track => track.stop());
+    if (context === epoch) accessingDevices.value = false;
+  }
+}
+function deviceChanged() {
+  if (document.visibilityState !== 'hidden' && !accessingDevices.value && !refreshingDevices.value && !adding.value) void refreshDevices();
+}
+function startDeviceDiscovery() {
+  if (!open.value || !['camera', 'microphone'].includes(kind.value)) return;
+  void refreshDevices();
+  // Driver startup and browser devicechange delivery vary across operating
+  // systems. These are passive scans; they never open a camera or microphone.
+  if (typeof navigator.mediaDevices?.enumerateDevices === 'function') deviceTimer = window.setInterval(deviceChanged, 2000);
+}
+navigator.mediaDevices?.addEventListener('devicechange', deviceChanged);
+window.addEventListener('focus', deviceChanged);
+document.addEventListener('visibilitychange', deviceChanged);
 async function loadFiles() {
   const assetKind = mediaKind.value;
   if (!open.value || !assetKind) return;
@@ -77,29 +263,61 @@ async function loadFiles() {
     if (context === epoch && sequence === listSequence) listing.value = false;
   }
 }
-watch(open, value => {
+watch([open, () => props.sourceId], ([value]) => {
   invalidate();
   if (!value) return;
+  initializing.value = true;
+  settingInitialKind = true;
+  if (editingSource.value) kind.value = editingSource.value.kind;
+  settingInitialKind = false;
   name.value = ''; nameEdited.value = false; url.value = ''; query.value = ''; files.value = [];
+  channelId.value = ''; loop.value = true; playbackPaused.value = false; restartOnSave.value = false; choosingMedia.value = false;
   error.value = ''; libraryError.value = ''; justUploaded.value = ''; brokenThumbs.value = new Set(); withAudio.value = false;
+  devices.value = []; videoDevice.value = ''; audioDevice.value = ''; deviceError.value = ''; deviceAccessError.value = ''; devicesScanned.value = false;
+  resolution.value = ''; frameRate.value = ''; cameraCapabilities.value = {}; cameraSettings.value = {};
+  initialInput.value = editing.value ? studio.inputSelection(props.sourceId!) : {};
+  const source = editingSource.value;
+  if (source) {
+    name.value = source.name; nameEdited.value = true; url.value = source.url || ''; channelId.value = source.channelId || '';
+    loop.value = source.loop; playbackPaused.value = source.playback?.paused ?? false;
+    videoDevice.value = initialInput.value.videoDeviceId || ''; audioDevice.value = initialInput.value.audioDeviceId || '';
+    withAudio.value = !!initialInput.value.includeAudio;
+    if (initialInput.value.width && initialInput.value.height) resolution.value = `${initialInput.value.width}x${initialInput.value.height}`;
+    frameRate.value = initialInput.value.frameRate ? String(initialInput.value.frameRate) : '';
+  }
   const context = epoch;
   void content.load().catch(() => { if (open.value && context === epoch && kind.value === 'channel') error.value = 'Channels could not be loaded. Close this window and try again.'; });
-  // Enumerating labels never requests device access. Capture is still explicit.
-  void navigator.mediaDevices?.enumerateDevices().then(result => { if (open.value && context === epoch) devices.value = result; }).catch(() => {});
+  // New sources remain passive; editing a connected camera borrows its feed.
+  startDeviceDiscovery();
   void loadFiles();
-}, { flush: 'sync' });
+  void nextTick().then(async () => {
+    if (!open.value || context !== epoch) return;
+    initializing.value = false;
+    if (source?.kind === 'camera' && studio.sourceStream(source.id)) {
+      await refreshDevices();
+      if (open.value && context === epoch) void startCameraPreview();
+    }
+  });
+});
 watch(kind, () => {
+  if (settingInitialKind) return;
+  initializing.value = false;
   invalidate();
   url.value = ''; files.value = []; query.value = ''; error.value = ''; libraryError.value = ''; justUploaded.value = ''; brokenThumbs.value = new Set();
   if (!nameEdited.value) name.value = '';
+  deviceError.value = ''; deviceAccessError.value = ''; devicesScanned.value = false; startDeviceDiscovery();
   void loadFiles();
 }, { flush: 'sync' });
-onBeforeUnmount(invalidate);
+onBeforeUnmount(() => {
+  invalidate(); navigator.mediaDevices?.removeEventListener('devicechange', deviceChanged);
+  window.removeEventListener('focus', deviceChanged); document.removeEventListener('visibilitychange', deviceChanged);
+});
 
 function choose(file: MediaLibraryFile) {
   if (adding.value) return;
   stopUpload(); error.value = ''; url.value = file.path;
   if (!nameEdited.value) name.value = mediaSourceName(file.name);
+  if (editing.value) choosingMedia.value = false;
   revealPreview();
 }
 function revealPreview() {
@@ -126,6 +344,7 @@ async function uploadFile(file: File) {
   if (file.size > MAX_MEDIA_BYTES) { error.value = 'This file is larger than 200 MB. Choose a smaller file.'; return; }
   stopUpload();
   const context = epoch, sequence = uploadSequence;
+  uploadFallback = editing.value ? url.value : null;
   const controller = new AbortController(); uploadController = controller;
   uploading.value = true; pendingFile.value = file; error.value = ''; url.value = ''; justUploaded.value = '';
   localPreview.value = URL.createObjectURL(file);
@@ -140,11 +359,15 @@ async function uploadFile(file: File) {
     const uploaded: MediaLibraryFile = { name: result.path.split('/').pop() ?? file.name, path: result.path, thumbnail: result.thumbnail, bytes: file.size, modifiedAt: new Date().toISOString() };
     files.value = [uploaded, ...files.value.filter(item => item.path !== result.path)];
     url.value = result.path; justUploaded.value = result.path;
+    uploadFallback = null;
+    if (editing.value) choosingMedia.value = false;
     pendingFile.value = null; clearLocalPreview();
     void loadFiles();
   } catch (cause) {
     if (controller.signal.aborted || !open.value || context !== epoch || sequence !== uploadSequence) return;
     error.value = 'Upload failed. Check your connection or choose another file, then try again.';
+    if (uploadFallback !== null) url.value = uploadFallback;
+    uploadFallback = null;
     pendingFile.value = null; clearLocalPreview();
   } finally {
     if (context === epoch && sequence === uploadSequence) { uploading.value = false; uploadController = undefined; }
@@ -179,22 +402,72 @@ function galleryKeys(event: KeyboardEvent) {
 }
 async function add() {
   if (!canAdd.value) return;
+  if (editing.value) { await saveProperties(); return; }
   adding.value = true; error.value = '';
   const context = epoch, source: StudioSource = {
-    id: shortId('input'), name: name.value.trim(), kind: kind.value, loop: true,
+    id: shortId('input'), name: name.value.trim(), kind: kind.value, loop: loop.value,
+    ...(['video', 'audio'].includes(kind.value) ? { playback: { paused: playbackPaused.value, restart: 0 } } : {}),
     ...(mediaKind.value ? { url: url.value } : {}), ...(kind.value === 'channel' ? { channelId: channelId.value } : {}),
     audio: { volume: 0.8, muted: true, mode: ['microphone', 'audio'].includes(kind.value) ? 'always' : 'follow', delayMs: 0 },
   };
+  let prepared: MediaStream | null = source.kind === 'camera' ? cameraCapture.copy() : null;
   try {
     await studio.addSource(source);
     if (!open.value || context !== epoch) return;
     if (['camera', 'screen', 'microphone'].includes(source.kind)) {
-      try { await studio.connectSource(source, videoDevice.value, audioDevice.value, withAudio.value); }
+      try { await studio.connectSource(source, videoDevice.value, audioDevice.value, withAudio.value, prepared ?? undefined, selectedInput()); prepared = null; }
       catch (cause) { toast.error('Source saved, but device access failed: ' + (cause as Error).message + '. Connect it again from Sources.'); }
     }
     open.value = false;
   } catch (cause) { if (open.value && context === epoch) error.value = (cause as Error).message; }
-  finally { adding.value = false; }
+  finally { prepared?.getTracks().forEach(track => track.stop()); adding.value = false; }
+}
+async function chooseScreen() {
+  if (screenChoosing.value || adding.value) return;
+  const context = epoch; screenChoosing.value = true; error.value = '';
+  try {
+    const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true });
+    if (!open.value || context !== epoch) { stream.getTracks().forEach(track => track.stop()); return; }
+    screenReplacement.value?.getTracks().forEach(track => track.stop());
+    screenReplacement.value = stream;
+    for (const track of stream.getVideoTracks()) track.onended = () => {
+      if (screenReplacement.value !== stream) return;
+      stream.getTracks().forEach(item => item.stop()); screenReplacement.value = null;
+      error.value = 'Screen selection ended. Choose a screen again.';
+    };
+  } catch (cause) {
+    if (open.value && context === epoch) error.value = (cause as Error).name === 'NotAllowedError' ? 'Screen selection cancelled. Your current source is unchanged.' : 'This screen could not be shared. Try another screen or window.';
+  } finally { if (context === epoch) screenChoosing.value = false; }
+}
+async function saveProperties() {
+  const source = editingSource.value;
+  if (!source) return;
+  const context = epoch;
+  adding.value = true; error.value = '';
+  let prepared: MediaStream | null = null;
+  try {
+    const patch: Partial<StudioSource> = { name: name.value.trim() };
+    if (mediaKind.value) patch.url = url.value;
+    if (source.kind === 'channel') patch.channelId = channelId.value;
+    if (['video', 'audio'].includes(source.kind)) {
+      patch.loop = loop.value;
+      patch.playback = { paused: playbackPaused.value, restart: (source.playback?.restart ?? 0) + (restartOnSave.value ? 1 : 0) };
+    }
+    const selection = selectedInput();
+    if (source.kind === 'camera' && (selectionChanged.value || (!studio.connectedSources.includes(source.id) && cameraLive.value))) {
+      prepared = cameraCapture.copy();
+      if (!prepared) throw new Error('Preview the selected camera before saving.');
+    } else if (source.kind === 'microphone' && selectionChanged.value) {
+      prepared = await openDeviceCapture('microphone', selection);
+    } else if (source.kind === 'screen' && screenReplacement.value) {
+      prepared = new MediaStream(screenReplacement.value.getTracks().map(track => track.clone()));
+    }
+    if (!open.value || context !== epoch) return;
+    await studio.saveSourceProperties(source.id, patch, prepared ? { stream: prepared, selection } : undefined);
+    prepared = null;
+    if (open.value && context === epoch) open.value = false;
+  } catch (cause) { if (open.value && context === epoch) error.value = (cause as Error).message; }
+  finally { prepared?.getTracks().forEach(track => track.stop()); adding.value = false; }
 }
 </script>
 
@@ -202,23 +475,22 @@ async function add() {
   <Dialog v-model:open="open">
     <DialogContent class="studio-dialog source-dialog" :show-close-button="!adding" @escape-key-down="adding && $event.preventDefault()" @interact-outside="adding && $event.preventDefault()">
       <DialogHeader class="source-header">
-        <DialogTitle>Add a source</DialogTitle>
-        <DialogDescription>Live inputs, media and channels. One place to build your scene.</DialogDescription>
+        <DialogTitle>{{ editing ? 'Source properties' : 'Add a source' }}</DialogTitle>
+        <DialogDescription class="sr-only">{{ editing ? 'Preview changes, then save them to this source.' : 'Choose a source and preview it before adding.' }}</DialogDescription>
       </DialogHeader>
       <form class="source-form" @submit.prevent="add">
-        <div class="source-body">
-          <nav class="source-sidebar" role="group" aria-label="Source type">
+        <div class="source-body" :class="{ 'source-properties-body': editing }">
+          <nav v-if="!editing" class="source-sidebar" role="group" aria-label="Source type">
             <template v-for="(item, index) in kinds" :key="item.id">
               <span v-if="index === 0 || item.group !== kinds[index - 1].group" class="source-group-label">{{ item.group }}</span>
               <button type="button" :class="{ chosen: kind === item.id }" :aria-label="item.label" :aria-pressed="kind === item.id" :title="item.hint" :disabled="adding" @click="kind = item.id">
-                <component :is="item.icon" :size="16" /><span>{{ item.label }}</span>
+                <component :is="item.icon" :size="16" /><span>{{ item.id === 'camera' ? 'Camera' : item.label }}</span>
               </button>
             </template>
-            <p class="source-station-note"><ShieldCheck :size="13" /><span>Stored on this station</span></p>
           </nav>
 
-          <section v-if="mediaKind" class="source-media-workspace" @dragenter="dragEnter" @dragleave="dragLeave" @dragover="dragOver" @drop="drop">
-            <div class="source-library">
+          <section v-if="mediaKind" class="source-media-workspace" :class="{ 'source-media-properties': editing && !choosingMedia }" @dragenter="dragEnter" @dragleave="dragLeave" @dragover="dragOver" @drop="drop">
+            <div v-if="!editing || choosingMedia" class="source-library">
               <div class="source-library-heading"><h3>{{ libraryTitle }}</h3><span>{{ totalFiles }} {{ totalFiles === 1 ? 'asset' : 'assets' }}</span><button type="button" class="source-small-icon" aria-label="Refresh media library" title="Refresh library" :disabled="listing" @click="loadFiles"><RefreshCw :size="13" :class="{ spin: listing }" /></button></div>
               <div class="source-library-tools">
                 <label class="source-search"><Search :size="15" /><input v-model="query" aria-label="Search media" placeholder="Search media…" type="search" @keydown.enter.prevent /><button v-if="query" type="button" aria-label="Clear media search" @click="query = ''"><X :size="12" /></button></label>
@@ -251,34 +523,73 @@ async function add() {
               <div data-testid="source-media-preview">
                 <MediaAssetPreview :kind="mediaKind" :src="previewSrc" :name="selectedName" :poster="previewPoster" />
               </div>
+              <div class="source-media-settings">
               <div v-if="selectedName" class="source-file-detail"><b :title="selectedName">{{ selectedName }}</b><span>{{ selectedBytes }}<template v-if="selectedBytes && selected?.modifiedAt"> · </template>{{ dateLabel(selected?.modifiedAt) }}</span><small v-if="url && url === justUploaded && !uploading"><Check :size="11" />Uploaded to library</small></div>
+              <button v-if="editing" type="button" class="s-button source-change-file" :disabled="adding" @click="choosingMedia = !choosingMedia"><FolderOpen :size="13" />{{ choosingMedia ? 'Done choosing' : 'Change file' }}</button>
               <div v-if="uploading" class="source-upload-progress" role="status" aria-live="polite"><div><span>{{ progress >= 100 ? 'Finishing upload…' : 'Uploading… ' + progress + '%' }}</span><button type="button" @click="stopUpload" aria-label="Cancel upload"><X :size="13" /></button></div><progress :value="progress" max="100" aria-label="Upload progress" /><small>Your preview is ready. Add once the file is saved.</small></div>
               <label class="studio-field source-name-field">Name<input v-model="name" placeholder="Name this source" maxlength="100" required :disabled="adding" @input="nameEdited = true" /></label>
-              <p class="source-detail-help">Use a clear name so your team can find this source in Studio.</p>
-              <p class="source-preview-note"><Monitor :size="13" />Preview is local to this window.</p>
+              <fieldset v-if="['video', 'audio'].includes(kind)" class="source-playback-settings" :disabled="adding">
+                <legend>Playback</legend>
+                <label class="studio-check"><input v-model="loop" type="checkbox" />Loop</label>
+                <label class="studio-check"><input v-model="playbackPaused" type="checkbox" />Pause playback</label>
+                <label v-if="editing" class="studio-check"><input v-model="restartOnSave" type="checkbox" />Restart on save</label>
+              </fieldset>
+              <p class="source-preview-note"><Monitor :size="13" />Local preview</p>
+              </div>
             </aside>
             <div v-if="dragDepth > 0" class="source-drop-overlay"><Upload :size="28" /><b>Drop to upload</b><span>{{ mediaFormatHint[mediaKind] }} · Up to 200 MB</span></div>
           </section>
 
-          <section v-else class="source-input-workspace">
-            <div class="source-input-intro"><span class="source-input-icon"><component :is="activeKind.icon" :size="29" :stroke-width="1.3" /></span><div><h3>{{ activeKind.label }}</h3><p>{{ activeKind.hint }}</p></div></div>
-            <div class="source-input-properties">
-              <label class="studio-field">Name<input v-model="name" :placeholder="kind === 'camera' ? 'e.g. Main camera' : kind === 'microphone' ? 'e.g. Preacher microphone' : kind === 'channel' ? 'e.g. Scripture overlay' : 'e.g. Presentation display'" maxlength="100" required :disabled="adding" @input="nameEdited = true" /></label>
-              <label v-if="kind === 'channel'" class="studio-field">Presentation channel<select v-model="channelId" :disabled="adding"><option value="">Choose a channel…</option><option v-for="channel in content.channels" :key="channel.id" :value="channel.id">{{ channel.name }}</option></select></label>
-              <template v-if="kind === 'camera'">
-                <label class="studio-field">Video device<select v-model="videoDevice" :disabled="adding"><option value="">Default camera</option><option v-for="(device, i) in devices.filter(d => d.kind === 'videoinput')" :key="device.deviceId" :value="device.deviceId">{{ device.label || 'Camera ' + (i + 1) }}</option></select></label>
-                <label class="studio-check"><input v-model="withAudio" type="checkbox" :disabled="adding" /> Include microphone audio</label>
-                <p class="studio-help">Using OBS? Start its Virtual Camera, then select it as your video device.</p>
-              </template>
-              <label v-if="kind === 'microphone' || (kind === 'camera' && withAudio)" class="studio-field">Audio device<select v-model="audioDevice" :disabled="adding"><option value="">Default microphone</option><option v-for="(device, i) in devices.filter(d => d.kind === 'audioinput')" :key="device.deviceId" :value="device.deviceId">{{ device.label || 'Microphone ' + (i + 1) }}</option></select></label>
+          <section v-else class="source-input-workspace" :class="{ 'source-camera-workspace': kind === 'camera' }">
+            <div class="source-input-intro"><component :is="activeKind.icon" :size="21" :stroke-width="1.5" /><div><h3>{{ kind === 'camera' ? 'Camera' : activeKind.label }}</h3><p>{{ kind === 'camera' ? 'Webcams, capture cards & OBS' : activeKind.hint }}</p></div></div>
+            <div :class="kind === 'camera' ? 'camera-setup-grid' : 'source-single-setup'">
+              <aside v-if="kind === 'camera'" class="camera-preview-panel" aria-label="Camera preview">
+                <div class="camera-preview-heading"><span>Preview</span><span v-if="cameraLive" class="camera-live-badge"><i />Live</span><VolumeX :size="14" aria-label="Preview audio muted" /></div>
+                <div class="camera-preview-stage" :data-state="cameraLive ? 'live' : cameraConnecting ? 'loading' : deviceAccessError ? 'error' : 'idle'" data-testid="camera-preview-stage">
+                  <video ref="cameraElement" data-testid="source-camera-preview" autoplay muted playsinline :class="{ visible: cameraLive }" @loadedmetadata="cameraPicture" @loadeddata="cameraPicture" @playing="cameraPicture" @resize="cameraPicture" @emptied="cameraPicture" />
+                  <div v-if="!cameraLive" class="camera-preview-empty" role="status">
+                    <LoaderCircle v-if="cameraConnecting" :size="27" class="spin" /><Camera v-else :size="30" :stroke-width="1.2" />
+                    <b>{{ cameraConnecting ? 'Connecting…' : videoMissing ? 'Camera disconnected' : deviceAccessError ? 'Camera unavailable' : cameraStream ? 'Waiting for picture' : 'See your camera here' }}</b>
+                    <p v-if="cameraStream && !cameraConnecting">Check the camera’s HDMI signal.</p>
+                    <button v-if="!cameraConnecting" type="button" class="s-button" :disabled="adding || videoMissing || audioMissing" @click="startCameraPreview">{{ cameraWanted ? 'Try again' : 'Start preview' }}</button>
+                  </div>
+                </div>
+                <div class="camera-preview-caption"><span>{{ cameraLive ? 'Live preview' : 'Local preview' }}</span><span>{{ cameraDimensions }}</span></div>
+              </aside>
+              <div class="source-input-properties">
+                <div v-if="kind === 'camera'" class="camera-device-field">
+                  <div class="camera-device-label"><label for="source-video-device">Video device</label><span data-testid="input-device-discovery" role="status">{{ deviceSummary }}</span><button type="button" class="source-small-icon" aria-label="Refresh devices" title="Refresh devices" :disabled="adding || refreshingDevices" @click="refreshDevices"><RefreshCw :size="13" :class="{ spin: refreshingDevices }" /></button></div>
+                  <select id="source-video-device" v-model="videoDevice" aria-label="Video device" :disabled="adding"><option value="">Default camera</option><option v-if="videoDevice && !videoInputs.some(device => device.deviceId === videoDevice)" :value="videoDevice" disabled>{{ videoMissing ? 'Camera disconnected' : 'Saved camera' }}</option><option v-for="(device, i) in videoInputs" :key="device.deviceId" :value="device.deviceId">{{ device.label || 'Video input ' + (i + 1) }}</option></select>
+                </div>
+                <div v-if="kind === 'camera'" class="camera-format-fields">
+                  <label class="studio-field">Resolution<select v-model="resolution" aria-label="Resolution" :disabled="adding"><option value="">Auto</option><option v-for="size in resolutionOptions" :key="size" :value="size">{{ size.replace('x', ' × ') }}</option></select></label>
+                  <label class="studio-field">Frame rate<select v-model="frameRate" aria-label="Frame rate" :disabled="adding"><option value="">Auto</option><option v-for="rate in frameRateOptions" :key="rate" :value="String(rate)">{{ rate }} fps</option></select></label>
+                </div>
+                <label class="studio-field">Name<input v-model="name" :placeholder="kind === 'camera' ? 'e.g. Main camera' : kind === 'microphone' ? 'e.g. Preacher microphone' : kind === 'channel' ? 'e.g. Scripture overlay' : 'e.g. Presentation display'" maxlength="100" required :disabled="adding" @input="nameEdited = true" /></label>
+                <div v-if="editing && kind === 'screen'" class="source-screen-settings">
+                  <video v-if="screenReplacement || studio.sourceStream(sourceId!)" :srcObject="screenReplacement || studio.sourceStream(sourceId!)" autoplay muted playsinline aria-label="Screen preview" />
+                  <p>{{ (screenReplacement || studio.sourceStream(sourceId!))?.getVideoTracks()[0]?.label || 'No screen connected' }}</p>
+                  <button type="button" class="s-button" :disabled="adding || screenChoosing" @click="chooseScreen"><Monitor :size="14" />{{ screenChoosing ? 'Choosing…' : 'Choose screen or window' }}</button>
+                </div>
+                <label v-if="kind === 'channel'" class="studio-field">Presentation channel<select v-model="channelId" :disabled="adding"><option value="">Choose a channel…</option><option v-for="channel in content.channels" :key="channel.id" :value="channel.id">{{ channel.name }}</option></select></label>
+                <label v-if="kind === 'camera'" class="studio-check camera-audio-toggle"><input v-model="withAudio" type="checkbox" :disabled="adding" /><Mic :size="14" />Include audio</label>
+                <label v-if="kind === 'microphone' || (kind === 'camera' && withAudio)" class="studio-field">Audio device<select v-model="audioDevice" aria-label="Audio device" :disabled="adding || accessingDevices"><option value="">Default audio input</option><option v-if="audioDevice && !audioInputs.some(device => device.deviceId === audioDevice)" :value="audioDevice" disabled>{{ audioMissing ? 'Audio device disconnected' : 'Saved audio input' }}</option><option v-for="(device, i) in audioInputs" :key="device.deviceId" :value="device.deviceId">{{ device.label || 'Audio input ' + (i + 1) }}</option></select></label>
+                <div v-if="kind === 'microphone'" class="source-device-actions"><button type="button" class="s-button" :disabled="adding || accessingDevices" @click="enableDevices"><LoaderCircle v-if="accessingDevices" :size="13" class="spin" />{{ accessingDevices ? 'Requesting access…' : 'Enable device access' }}</button><button type="button" class="source-small-icon" aria-label="Refresh devices" title="Refresh devices" :disabled="adding || accessingDevices || refreshingDevices" @click="refreshDevices"><RefreshCw :size="13" :class="{ spin: refreshingDevices }" /></button></div>
+                <p v-if="videoMissing || audioMissing || deviceAccessError || deviceError" class="source-form-error" role="alert">{{ videoMissing || audioMissing ? 'Device disconnected. Reconnect it or choose another.' : deviceAccessError || deviceError }}</p>
+                <details class="source-connection-help">
+                  <summary><CircleHelp :size="13" />{{ kind === 'channel' ? 'About channel sources' : 'Connection help' }}</summary>
+                  <div v-if="kind === 'camera'"><p>Camera HDMI → capture card → USB.</p><p>Auto prefers 1080p at 30 fps. The preview shows the delivered format; available resolution and frame-rate combinations depend on the device.</p><p>Allow camera access in browser and system settings. Install the card’s driver if it is missing.</p><p>Unexpected background on Mac? In the menu bar’s Video menu, turn off Background for your browser.</p><p>For HDMI audio, choose the card’s audio input. Keep this tab open during your production.</p></div>
+                  <div v-else-if="kind === 'channel'"><p>Slide, scripture and lyric changes follow this channel automatically.</p></div>
+                  <div v-else><p>Keep this tab open while using the input.</p><p v-if="kind === 'screen'">Available audio depends on the surface you share.</p><p v-else>Allow microphone access in browser and system settings.</p></div>
+                </details>
+              </div>
             </div>
-            <div class="source-input-note"><component :is="kind === 'channel' ? Presentation : ShieldCheck" :size="17" /><p v-if="kind === 'channel'">The channel stays connected. Scripture, lyrics and slide changes update this source wherever it is used.</p><p v-else>This browser supplies your live input. Device access is requested when you add it. Keep this tab open while using the source.<span v-if="kind === 'screen'">Screen audio depends on the browser and the surface you share.</span></p></div>
           </section>
         </div>
         <footer class="source-footer">
           <p v-if="error" class="source-form-error" role="alert">{{ error }}</p>
           <p class="source-target-note"><span />{{ targetHint }}</p>
-          <div class="dialog-actions"><button type="button" class="s-button" :disabled="adding" @click="open = false">Cancel</button><button type="submit" class="s-button primary" :disabled="!canAdd"><LoaderCircle v-if="adding" :size="14" class="spin" />{{ adding ? 'Adding source…' : 'Add to Studio' }}</button></div>
+          <div class="dialog-actions"><button type="button" class="s-button" :disabled="adding" @click="open = false">Cancel</button><button type="submit" class="s-button primary" :disabled="!canAdd"><LoaderCircle v-if="adding" :size="14" class="spin" />{{ editing ? (adding ? 'Saving…' : 'Save changes') : (adding ? 'Adding source…' : 'Add to Studio') }}</button></div>
         </footer>
       </form>
     </DialogContent>
@@ -286,6 +597,21 @@ async function add() {
 </template>
 
 <style scoped>
+.camera-format-fields{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:12px}.camera-format-fields .studio-field{min-width:0}.camera-format-fields select{min-width:0;width:100%}
+.source-body.source-properties-body{grid-template-columns:minmax(0,1fr)}
+.source-media-workspace.source-media-properties{display:block;overflow-y:auto}
+.source-media-properties .source-detail{border:0;background:transparent;display:grid;grid-template-columns:minmax(0,1.4fr) minmax(260px,1fr);gap:26px;padding:26px;height:100%;align-content:start}
+.source-media-settings{min-width:0}.source-media-properties .source-file-detail{padding-top:0}
+.source-playback-settings{border:0;border-top:1px solid var(--border-hair);padding:16px 0 0;margin:22px 0 0;display:grid;gap:12px}
+.source-playback-settings legend{font-size:11px;color:var(--text-muted);padding-right:8px}.source-playback-settings .studio-check{display:flex;gap:8px;align-items:center;font-size:11px;color:var(--text-muted)}
+.source-change-file{font-size:11px}.source-screen-settings{display:grid;gap:14px;min-width:0}.source-screen-settings video{width:100%;aspect-ratio:16/9;object-fit:contain;background:#08090a;border-radius:8px}.source-screen-settings p{font-size:11px;color:var(--text-muted);overflow-wrap:anywhere}.source-screen-settings .s-button{justify-self:start}
+@media(max-width:700px){.source-media-properties .source-detail{display:flex;flex-direction:column;gap:15px;padding:20px}.source-detail>.source-media-settings{grid-column:1/-1}.source-media-settings .source-playback-settings{margin-top:18px}.source-body.source-properties-body{display:flex}}
+.source-camera-workspace{padding:26px!important}.source-camera-workspace .source-input-intro{padding-bottom:20px}.source-input-intro>svg{color:var(--accent);flex-shrink:0}.source-camera-workspace .source-input-intro h3{font-size:16px}.source-camera-workspace .source-input-intro p{font-size:11px;margin-top:3px}.camera-setup-grid{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(245px,1fr);gap:26px;align-items:start;padding-top:24px}.camera-setup-grid .source-input-properties{padding-top:0;gap:19px}.camera-preview-panel{min-width:0}.camera-preview-heading{display:flex;align-items:center;gap:9px;font-size:11px;color:var(--text-muted);margin-bottom:10px}.camera-preview-heading>svg{margin-left:auto;color:var(--text-subtle)}.camera-live-badge{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--status-ready)}.camera-live-badge i{width:5px;height:5px;background:currentColor;border-radius:50%}.camera-preview-stage{position:relative;aspect-ratio:16/9;background:#0b0d0f;border:1px solid var(--border-hair);border-radius:9px;overflow:hidden}.camera-preview-stage video{width:100%;height:100%;object-fit:contain;display:block;opacity:0}.camera-preview-stage video.visible{opacity:1}.camera-preview-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:13px;color:var(--text-subtle);padding:14px;text-align:center}.camera-preview-empty>b{font-size:12px;font-weight:450;color:var(--text-muted)}.camera-preview-empty>p{font-size:10px;line-height:1.5}.camera-preview-empty .s-button{font-size:11px;margin-top:2px}.camera-preview-caption{display:flex;justify-content:space-between;gap:10px;font-size:10px;color:var(--text-subtle);padding-top:10px}.camera-device-field{min-width:0}.camera-device-label{display:flex;align-items:center;gap:7px;font-size:10px;color:var(--text-muted);margin-bottom:6px}.camera-device-label>label{flex:1}.camera-device-label>span{font-size:9px;white-space:nowrap;color:var(--text-subtle)}.camera-device-label .source-small-icon{margin-left:0;width:24px;height:24px}.camera-device-field>select{width:100%;min-width:0;background:var(--surface-2);border:1px solid var(--border-hair);border-radius:6px;height:34px;font-size:12px;padding:7px 9px;color:var(--text-primary)}.camera-audio-toggle{border-top:1px solid var(--border-hair);padding-top:18px}.source-connection-help{font-size:10px;color:var(--text-subtle);line-height:1.6}.source-connection-help summary{display:flex;align-items:center;gap:6px;cursor:pointer;list-style:none;width:fit-content}.source-connection-help summary::-webkit-details-marker{display:none}.source-connection-help summary:hover{color:var(--text-primary)}.source-connection-help[open] summary{color:var(--text-muted);margin-bottom:9px}.source-connection-help p+p{margin-top:7px}
+.source-single-setup .source-input-properties{max-width:430px}
+@media(max-width:1000px) and (min-width:701px){.camera-setup-grid{grid-template-columns:minmax(0,1fr);gap:20px}.camera-preview-panel{max-width:470px}.camera-setup-grid .source-input-properties{max-width:470px}.source-camera-workspace{padding:22px!important}}
+@media(max-width:700px){.source-camera-workspace{padding:20px!important}.camera-setup-grid{display:flex;flex-direction:column;gap:23px;padding-top:18px}.camera-preview-panel,.camera-setup-grid .source-input-properties{width:100%;max-width:none}.camera-preview-empty{gap:9px}.camera-preview-empty>b{font-size:11px}.camera-preview-empty>svg{width:24px;height:24px}.camera-device-label .source-small-icon{width:30px;height:30px}.source-camera-workspace .source-input-intro{padding-bottom:16px}.source-camera-workspace .source-input-intro p{font-size:10px}.source-input-workspace:not(.source-camera-workspace) .source-input-intro h3{font-size:16px}}
+.source-device-actions{display:flex;flex-wrap:wrap;gap:8px}.source-device-actions .s-button{font-size:11px;min-height:32px}
+@media(min-width:701px){.source-sidebar>button>span{min-width:0;white-space:normal;line-height:1.4}}
 :global(.studio-dialog.source-dialog){width:calc(100vw - 32px);max-width:1040px;max-height:min(760px,calc(100dvh - 40px));height:700px;padding:0!important;gap:0;overflow:hidden;transition:none;background:var(--surface-1)!important;box-shadow:0 30px 110px #0009,0 1px 0 #ffffff05 inset}
 .source-header{padding:22px 54px 20px 24px;border-bottom:1px solid var(--border-hair);flex-shrink:0;gap:5px;text-align:left}
 .source-header h2{font-size:18px;letter-spacing:-.4px}.source-header [data-slot="dialog-description"]{font-size:12px;color:var(--text-muted)}

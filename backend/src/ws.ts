@@ -201,6 +201,9 @@ export function attachWebSocket() {
         return;
       }
       if (t === 'auth') return; // cookie-based; the frame is a no-op at the relay
+      // Only the dedicated authenticated mobile command service may originate
+      // this desktop engine synchronization frame.
+      if (t === 'mobile-channel-state') return;
 
       if (t === 'subscribe' || t === 'unsubscribe') {
         const chans = Array.isArray(msg.channels)
@@ -292,6 +295,7 @@ export function attachWebSocket() {
   const handle: RelayHandle = {
     wss,
     injectRemote,
+    getChannelSnapshot(channel) { const message = stateByTopic.get(channel); return message?.payload && typeof message.payload === 'object' ? structuredClone(message.payload as Json) : null; },
     setAuthoritativeChannel(channel,payload) { authoritative.add(channel); const msg={t:'state',channel,payload}; injectRemote(msg); forwardLocal(msg); },
     onLocalMessage(cb) {
       forwardListeners.add(cb);
@@ -306,6 +310,7 @@ export interface RelayHandle {
   wss: WebSocketServer;
   setAuthoritativeChannel(channel: string, payload: Record<string, unknown>): void;
   injectRemote(msg: Record<string, unknown>): void;
+  getChannelSnapshot?(channel: string): Record<string, unknown> | null;
   onLocalMessage(cb: (msg: Record<string, unknown>) => void): () => void;
 }
 

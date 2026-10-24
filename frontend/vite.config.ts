@@ -13,6 +13,9 @@ export default defineConfig({
   // tests must not invalidate a normal Studio development server's modules.
   cacheDir: process.env.LUMEN_DEV_VITE_CACHE_DIR ?? 'node_modules/.vite',
   plugins: [vue(), tailwindcss()],
+  // PowerSync ships module workers and WASM. Prebundling breaks their URLs.
+  optimizeDeps: { exclude: ['@powersync/web'] },
+  worker: { format: 'es' },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
@@ -25,6 +28,7 @@ export default defineConfig({
       '/media': backendOrigin,
       '/ws': { target: backendSocket, ws: true },
       '/studio/ws': { target: backendSocket, ws: true },
+      '/mobile/signal': { target: backendSocket, ws: true },
     },
   },
 });

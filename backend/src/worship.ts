@@ -127,5 +127,16 @@ export async function createWorship(relay:RelayHandle) {
       return {channelId,revision:state.revision};
     });
   }
-  return {router,library,sceneCueGates,close(){listener.close();library.close();}};
+  return {router,library,sceneCueGates,
+    mobile: {
+      workspace: (channelId:string) => library.workspace(channelId),
+      search: (channelId:string, query:string) => {
+        const workspace = library.workspace(channelId);
+        return { scripture: () => library.searchScripture(workspace.versionId,query), lyrics: () => library.searchSongs(query) };
+      },
+      command: (channelId:string, revision:number, command:import('../../shared/worship.js').WorshipCommand, authorize:()=>void) => {
+        authorize(); invalidateListening(channelId);
+        const state=library.command(channelId,revision,command);publish(state);return state;
+      },
+    },close(){listener.close();library.close();}};
 }

@@ -4,6 +4,7 @@ import { startWs } from '@/lib/ws';
 import type { ProductionState, StudioSource } from '../../../../shared/production';
 import { acceptChannelProjection, programCueReady, programCuesReady } from './program-cue-gate';
 import { MediaPlayback, playbackError } from './media-playback';
+import { liveInputStatus } from './device-capture';
 
 export interface MediaInput {
   source: StudioSource;
@@ -277,8 +278,9 @@ export class SourceBank {
   status() {
     const sources: Record<string, 'ready' | 'missing' | 'loading' | 'error'> = {}, levels: Record<string, number> = {}, sourceErrors: Record<string, string> = {};
     for (const [id, input] of this.inputs) {
-      const live = ['camera', 'microphone', 'screen'].includes(input.source.kind);
-      sources[id] = input.error ? 'error' : live ? input.stream?.getTracks().some(t => t.readyState === 'live') ? 'ready' : 'missing' :
+      const kind = input.source.kind;
+      const live = kind === 'camera' || kind === 'microphone' || kind === 'screen';
+      sources[id] = input.error ? 'error' : live ? liveInputStatus(kind, input.stream, input.element instanceof HTMLVideoElement ? input.element : null) :
         input.element instanceof HTMLMediaElement ? input.element.readyState >= 2 ? 'ready' : 'loading' :
         input.element instanceof HTMLImageElement ? input.element.complete && input.element.naturalWidth > 0 ? 'ready' : 'loading' : 'ready';
       if (input.element instanceof HTMLImageElement && input.element.complete && !input.element.naturalWidth) sources[id] = 'error';

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSCameraUsageDescription</key>
+  <string>Lumen uses your selected camera or HDMI capture card to provide live video for your production.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Lumen uses your selected microphone, audio interface or HDMI capture card to provide audio for your production.</string>
+</dict>
+</plist>

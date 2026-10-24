@@ -77,8 +77,9 @@ export class ProductionStore {
       });
     });
   }
-  command(revision: number, command: StudioCommand) {
+  command(revision: number, command: StudioCommand, authorize: () => void = () => {}) {
     return this.mutate(revision, async draft => {
+      authorize();
       if (command.type === 'take') {
         const scene = draft.scenes.find(s => s.id === command.sceneId);
         if (!scene) throw new ProductionError(404, 'Scene not found.');
@@ -149,7 +150,23 @@ export class ProductionStore {
           });
         }
       }
-    });
+    }, authorize);
+  }
+
+  /** Restricted remote controls never accept a whole scene/source document. */
+  mobileControls(revision: number, patch: { sceneId?: string; muted?: boolean; volume?: number }, authorize: () => void) {
+    return this.mutate(revision, draft => {
+      authorize();
+      if (patch.sceneId !== undefined) {
+        if (!draft.scenes.some(scene => scene.id === patch.sceneId)) throw new ProductionError(404, 'Scene not found.');
+        draft.previewSceneId = patch.sceneId;
+      } else {
+        const main = draft.sources.find(source => source.id === draft.mainAudioSourceId);
+        if (!main) throw new ProductionError(409, 'Choose Main audio in Studio first.');
+        if (patch.muted !== undefined) main.audio.muted = patch.muted;
+        if (patch.volume !== undefined) main.audio.volume = patch.volume;
+      }
+    }, authorize);
   }
 
   /** @deprecated Internal legacy compatibility only; operator routes no longer expose channel takeovers. */

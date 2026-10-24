@@ -210,6 +210,7 @@ export interface PresenceEntry {
 // the always-global music/content-updated/config/presence frames) route to the
 // "__global__" topic so legacy clients keep working through the transition.
 export type BroadcastMsg =
+  | { t: 'mobile-channel-state'; channel: string; payload: ProjectionState }
   | { t: 'worship-state'; channel: string; workspace: import('../../shared/worship').WorshipWorkspace }
   | { t: 'hello'; channel?: string }
   | { t: 'state'; channel?: string; payload: ProjectionState }

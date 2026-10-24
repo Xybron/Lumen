@@ -1,0 +1,79 @@
+name: lumen-team-sync
+
+# Opt-in local LAB integration. No station, recordings, stream keys or device
+# configuration is mounted. The separate bucket DB has no published port.
+services:
+  bucket-db:
+    image: postgres:17.11-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    restart: "no"
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        cp /bootstrap/init-bucket.sh /docker-entrypoint-initdb.d/10-lumen-bucket.sh
+        chmod 0644 /docker-entrypoint-initdb.d/10-lumen-bucket.sh
+        exec /usr/local/bin/docker-entrypoint.sh "$$@"
+      - --
+    command: [postgres]
+    environment:
+      POSTGRES_USER: lumen_bucket_admin
+      POSTGRES_DB: lumen_buckets
+      POSTGRES_PASSWORD: ${PS_BUCKET_ADMIN_PASSWORD:?Run node scripts/team-sync.mjs setup}
+      PS_BUCKET_PASSWORD: ${PS_BUCKET_PASSWORD:?Missing local bucket password}
+    volumes:
+      - bucket_data:/var/lib/postgresql/data
+      - ./init-bucket.sh:/bootstrap/init-bucket.sh:ro
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U lumen_bucket_admin -d lumen_buckets"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    mem_limit: 512m
+    cpus: 0.75
+    logging:
+      driver: json-file
+      options: { max-size: 5m, max-file: "2" }
+    networks: [storage]
+
+  powersync:
+    image: journeyapps/powersync-service:1.27.0@sha256:15b8e4dbbab17ba45d3abfef29df29b21489266e55ff9aa95bbfd56d9548c00f
+    restart: "no"
+    command: [start, -r, unified]
+    depends_on:
+      bucket-db: { condition: service_healthy }
+    environment:
+      POWERSYNC_CONFIG_PATH: /config/service.yaml
+      PS_SOURCE_PASSWORD: ${PS_SOURCE_PASSWORD:?Configure the dedicated LAB replication login}
+      PS_SOURCE_CA: ${PS_SOURCE_CA:?Configure the verified LAB root CA certificate}
+      PS_STORAGE_URI: postgresql://lumen_bucket:${PS_BUCKET_PASSWORD:?Missing local bucket password}@bucket-db:5432/lumen_buckets
+      NODE_OPTIONS: --max-old-space-size=512
+    ports: ["127.0.0.1:8189:8080"]
+    volumes:
+      - ./service.yaml:/config/service.yaml:ro
+      - ./sync-config.yaml:/config/sync-config.yaml:ro
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8080/probes/liveness').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+    mem_limit: 768m
+    cpus: 1
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    logging:
+      driver: json-file
+      options: { max-size: 5m, max-file: "2" }
+    networks: [storage, egress]
+
+volumes:
+  bucket_data:
+
+networks:
+  storage: { internal: true }
+  # This per-project bridge does not alter the global Docker daemon or firewall.
+  # Working routed IPv6 on the host and in Docker is still required for LAB.
+  egress:
+    enable_ipv6: true
+    driver_opts:
+      com.docker.network.bridge.host_binding_ipv4: "127.0.0.1"

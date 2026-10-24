@@ -1,0 +1,18 @@
+-- UNEXECUTED TEMPLATE. Do not run until direct IPv6 and the approved migration
+-- can be verified. This is additive and does not grant privileges automatically.
+-- Use an authorized LAB database administrator over verified TLS.
+create role lumen_sync_replica
+  nologin nosuperuser nocreatedb nocreaterole noinherit
+  replication bypassrls connection limit 3;
+grant usage on schema public to lumen_sync_replica;
+grant select on public.lumen_teams, public.lumen_memberships,
+  public.lumen_profiles, public.lumen_resources to lumen_sync_replica;
+
+-- Next, in an interactive psql session (not a migration or shell argument):
+--   \password lumen_sync_replica
+-- Inspect the role's SELECT-only grants and the exact four-table `powersync`
+-- publication. Do not grant access to auth.*, lumen_private.*, secret/runtime
+-- tables, writes, table ownership or future tables through default privileges.
+-- Only after review, explicitly enable the role:
+--   alter role lumen_sync_replica login;
+-- Save the password only in ignored .runtime/local.json, never in source/chat.

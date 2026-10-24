@@ -15,6 +15,12 @@ import { createProduction } from './production.js';
 import { createWorship } from './worship.js';
 import { DATA_DIR, FRONTEND_DIST, INCOMING_DIR, MEDIA_DIR, MEDIA_KINDS } from './paths.js';
 import { acquireStationLock } from './station-lock.js';
+import { createTeamConfigRouter } from './team-config.js';
+import { resolveStationWorkspace } from './workspace.js';
+import { createMobileController, mobileGatewayFromEnv } from './mobile-controller.js';
+import { ContentSchema, type Content } from './schema.js';
+import { ensureChannels } from './migrate-content.js';
+import { CONTENT_FILE } from './paths.js';
 
 async function ensureDirs() {
   await fs.mkdir(DATA_DIR, { recursive: true });
@@ -44,10 +50,16 @@ export async function startLumenServer(options: LumenServerOptions = {}) {
     if (failure) throw failure;
   })();
   try {
+  // Refuse a tenant mismatch before opening any auth, content or live stores.
+  // The station lease supplies the canonical directory and startup authority.
+  const workspace = await resolveStationWorkspace(lease.canonical);
+  const mobileGateway = await mobileGatewayFromEnv();
   await ensureDirs();
   initDb(); // identity/ops store (SQLite at DATA_DIR/lumen.db) + seed admin
   const app = express();
   app.use(express.json({ limit: '20mb' }));
+  app.use('/api', createTeamConfigRouter());
+  app.get('/api/workspace', (_req, res) => res.set('Cache-Control', 'private, no-store').json(workspace));
 
   // The WS relay/handle is created up front so the media router can emit the
   // `media-added` signal through it. Adding routes after server creation is fine
@@ -67,6 +79,35 @@ export async function startLumenServer(options: LumenServerOptions = {}) {
     development: options.development ?? (process.argv[1]?.endsWith('.ts') ?? false),
   }, worship.sceneCueGates, options.productionDependencies);
   cleanup.push(() => production.close());
+  const localOrigins = [`http://${localHost}:${PORT}`, `http://127.0.0.1:5173`, `http://localhost:5173`];
+  const configuredRenderer = options.rendererUrl ?? process.env.LUMEN_RENDERER_URL;
+  if (configuredRenderer) {
+    const origin = new URL(configuredRenderer);
+    if (['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname)) localOrigins.push(origin.origin);
+  }
+  let mobileContentCache: { stamp: string; content: Content } | undefined;
+  const contentStamp = async () => { const stat = await fs.stat(CONTENT_FILE, { bigint: true }); return `${stat.dev}:${stat.ino}:${stat.mtimeNs}:${stat.size}`; };
+  async function mobileContent() {
+    // Atomic content saves change the inode, while in-place edits change the
+    // high-resolution mtime/size. A fresh stat still runs for every operation;
+    // unchanged polls reuse the validated immutable object and its full digest.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const before = await contentStamp();
+      if (mobileContentCache?.stamp === before) return mobileContentCache.content;
+      const content = ContentSchema.parse(ensureChannels(JSON.parse(await fs.readFile(CONTENT_FILE, 'utf8'))));
+      if (before !== await contentStamp()) continue;
+      mobileContentCache = { stamp: before, content }; return content;
+    }
+    throw new Error('Station content changed while loading. Refresh the phone view.');
+  }
+  const mobile = await createMobileController({
+    workspaceId: workspace.id, production: production.mobile, worship: worship.mobile, relay,
+    content: mobileContent,
+    frontendDir: FRONTEND_DIST, allowedLocalOrigins: localOrigins, gateway: mobileGateway,
+    attachProgramViewer: production.mobile.attachProgramViewer,
+  });
+  cleanup.push(() => mobile.close());
+  app.use('/api', mobile.router);
 
   // Route WebSocket upgrades by path to the right server (both use noServer).
   server.on('upgrade', (req, socket, head) => {
@@ -77,6 +118,8 @@ export async function startLumenServer(options: LumenServerOptions = {}) {
       agentWss.handleUpgrade(req, socket, head, (ws) => agentWss.emit('connection', ws, req));
     } else if (pathname === '/studio/ws') {
       production.wss.handleUpgrade(req, socket, head, (ws) => production.wss.emit('connection', ws, req));
+    } else if (pathname === '/mobile/signal') {
+      mobile.handleUpgrade(req, socket, head);
     } else {
       socket.destroy();
     }
@@ -121,7 +164,7 @@ export async function startLumenServer(options: LumenServerOptions = {}) {
     console.log(`[lumen] listening on http://${HOST}:${PORT}`);
     console.log(`[lumen] websocket on ws://${HOST}:${PORT}/ws`);
     console.log(`[lumen] data dir: ${DATA_DIR}`);
-  return { server, close };
+  return { server, close, workspace };
   } catch (error) { await close().catch(() => {}); throw error; }
 }
 

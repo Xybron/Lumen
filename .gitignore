@@ -36,6 +36,8 @@ pnpm-debug.log*
 infra/powersync/.runtime/
 supabase/.temp/
 .local-projects/
+.team-local/
+.mobile-local/
 
 # OS / editor
 .DS_Store
@@ -63,10 +65,14 @@ data/.lumen-runtime.lock
 data/.lumen-runtime.lock.*.tmp
 data/.lumen-runtime.lease.sqlite*
 data/production.json
+data/workspace.json
+data/workspace.json.*.tmp
 data/recordings/
 data/clips/
 data/broadcast/
+data/outputs/
 watch-relay/data/
+watch-relay/tenants.json
 data/worship.db*
 data/ai/
 agent/dist/

@@ -3,14 +3,15 @@ import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router';
 import { toast } from 'vue-sonner';
 import { useFullscreen, useResizeObserver } from '@vueuse/core';
-import { Aperture, ArrowUpRight, ArrowRightLeft, Plus, Copy, Trash2, Layers, Camera, Monitor,
-  Mic, Image, Film, Music2, Presentation, Eye, EyeOff, Lock, Volume2, VolumeX, Circle, Square as StopIcon,
-  FolderOpen, LoaderCircle, Power, ChevronRight, Headphones, CircleHelp, RotateCcw, Play, Pause, Repeat, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Maximize2, Minimize2, AlertCircle, Search, X, LayoutGrid, List, Keyboard } from 'lucide-vue-next';
+import { Aperture, ArrowRightLeft, Plus, Copy, Trash2, Layers, Camera, Monitor,
+  Mic, Image, Film, Music2, Presentation, Lock, Volume2, VolumeX, Circle, Square as StopIcon,
+  FolderOpen, LoaderCircle, Power, ChevronRight, Headphones, CircleHelp, RotateCcw, Play, Pause, Repeat, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Maximize2, Minimize2, AlertCircle, Search, X, LayoutGrid, List, Keyboard, Settings2 } from 'lucide-vue-next';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import LoginGate from '@/components/shell/LoginGate.vue';
 import WorkspaceHeader from '@/components/shell/WorkspaceHeader.vue';
 import LiveViewButton from '@/components/shell/LiveViewButton.vue';
 import BroadcastButton from '@/components/broadcast/BroadcastButton.vue';
+import MobileControlButton from '@/components/mobile/MobileControlButton.vue';
 import ChannelNav from '@/components/shell/ChannelNav.vue';
 import StudioMonitor from '@/components/studio/StudioMonitor.vue';
 import ScenePoster from '@/components/studio/ScenePoster.vue';
@@ -21,6 +22,7 @@ import StudioCanvas from '@/components/studio/StudioCanvas.vue';
 import StudioLayersPanel from '@/components/studio/StudioLayersPanel.vue';
 import SceneShortcutsDialog from '@/components/studio/SceneShortcutsDialog.vue';
 import OutputAudioControl from '@/components/studio/OutputAudioControl.vue';
+import StudioOutputsPanel from '@/components/studio/StudioOutputsPanel.vue';
 import { useStudioStore } from '@/stores/studio';
 import { useIdentityStore } from '@/stores/identity';
 import { useContentStore } from '@/stores/content';
@@ -41,6 +43,9 @@ const { confirmAction } = useConfirmation();
 const { fadeDurationInput, setFadeDuration, take, canTake } = useStudioTransitions();
 const canOperate = computed(() => identity.can('*', 'author'));
 const sourceOpen = ref(false), guideOpen = ref(false);
+const propertiesSourceId = ref<string | null>(null);
+function addSourceDialog() { propertiesSourceId.value = null; sourceOpen.value = true; }
+function editSourceDialog(source: StudioSource) { propertiesSourceId.value = source.id; sourceOpen.value = true; }
 const sceneShortcutsOpen = ref(false);
 const { isFullscreen, isSupported: fullscreenSupported, toggle: toggleNativeFullscreen } = useFullscreen(document.documentElement);
 async function toggleFullscreen() {
@@ -252,6 +257,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keydown));
     <WorkspaceHeader ref="studioHeader">
       <div class="engine-indicator"><span :class="['status-dot', { online: engineRunning, fault: studio.status.state === 'error' }]" /><span>{{ engineRunning ? 'Engine running' : studio.status.state === 'starting' ? 'Starting engine' : studio.status.state === 'error' ? 'Engine unavailable' : 'Engine offline' }}</span><small v-if="engineRunning">{{ studio.status.fps }} fps</small></div>
       <div class="header-actions">
+        <MobileControlButton />
         <BroadcastButton />
         <button type="button" class="s-button recordings-button" aria-label="Recordings" title="Recordings & clips — opens in a new tab" @click="openRecordings"><FolderOpen :size="15" /><span class="button-label">Recordings</span></button>
         <button class="s-button engine-button" :class="{ primary: !engineRunning }" :aria-label="studio.engineBusy ? 'Starting engine' : engineRunning ? 'Stop engine' : 'Start engine'" :title="broadcastActive ? 'End the stream before stopping the engine' : engineRunning ? 'Stop engine' : 'Start engine'" :disabled="studio.engineBusy || !!recording || broadcastActive" @click="studio.toggleEngine"><LoaderCircle v-if="studio.engineBusy" :size="14" class="spin" /><Power v-else :size="14" /><span class="button-label">{{ studio.engineBusy ? 'Starting…' : engineRunning ? 'Stop engine' : 'Start engine' }}</span></button>
@@ -302,13 +308,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keydown));
       <p class="preview-note"><Lock :size="11" />Edits stay in Preview until you Cut or Fade.</p>
 
       <div class="production-tools">
-        <StudioLayersPanel @add-source="sourceOpen = true" @inspect="inspectLayer" />
-        <section class="tool-panel source-audio-panel"><div class="tool-heading"><div class="tool-tabs" role="group" aria-label="Source and audio panels"><button :class="{ active: lowerTab === 'sources' }" :aria-pressed="lowerTab === 'sources'" @click="lowerTab = 'sources'">Sources <span>{{ studio.state.sources.length }}</span></button><button :class="{ active: lowerTab === 'audio' }" :aria-pressed="lowerTab === 'audio'" @click="lowerTab = 'audio'">Audio mixer</button></div><button class="s-icon" aria-label="Add production source" @click="sourceOpen = true"><Plus :size="15" /></button></div>
+        <StudioLayersPanel @add-source="addSourceDialog" @inspect="inspectLayer" />
+        <section class="tool-panel source-audio-panel"><div class="tool-heading"><div class="tool-tabs" role="group" aria-label="Source and audio panels"><button :class="{ active: lowerTab === 'sources' }" :aria-pressed="lowerTab === 'sources'" @click="lowerTab = 'sources'">Sources <span>{{ studio.state.sources.length }}</span></button><button :class="{ active: lowerTab === 'audio' }" :aria-pressed="lowerTab === 'audio'" @click="lowerTab = 'audio'">Audio mixer</button></div><button class="s-icon" aria-label="Add production source" @click="addSourceDialog"><Plus :size="15" /></button></div>
           <div v-if="lowerTab === 'sources'" class="source-list">
-            <div v-if="!studio.state.sources.length" class="sources-empty"><div class="source-empty-icons"><Camera :size="20" /><Mic :size="20" /><Image :size="20" /></div><b>No sources added</b><p>Connect a camera or microphone,<br />or add media and presentation channels.</p><button class="s-button" @click="sourceOpen = true"><Plus :size="13" /> Add source</button></div>
+            <div v-if="!studio.state.sources.length" class="sources-empty"><div class="source-empty-icons"><Camera :size="20" /><Mic :size="20" /><Image :size="20" /></div><b>No sources added</b><p>Connect a camera or microphone,<br />or add media and presentation channels.</p><button class="s-button" @click="addSourceDialog"><Plus :size="13" /> Add source</button></div>
             <div v-for="source in studio.state.sources" :key="source.id" class="source-row" :data-source-id="source.id">
               <span class="source-type-icon"><component :is="icons[source.kind]" :size="15" /></span>
-              <div class="source-name"><div class="source-name-line"><b :title="source.name">{{ source.name }}</b><span v-if="source.id === studio.state.mainAudioSourceId && mainAudioBadge" class="main-audio-badge source-main-audio-badge" data-testid="source-main-audio-badge" :data-state="mainAudioBadge.state" :title="mainAudioBadge.title" role="status"><VolumeX v-if="mainAudioBadge.state === 'muted'" :size="10" aria-hidden="true" /><AlertCircle v-else-if="['disconnected', 'error', 'no-audio'].includes(mainAudioBadge.state)" :size="10" aria-hidden="true" />{{ mainAudioBadge.label }}</span></div><small :class="{ 'danger-text': studio.status.sources[source.id] === 'error' }" :title="studio.status.sourceErrors[source.id]">{{ studio.status.sourceErrors[source.id] || (source.playback?.paused ? 'Paused' : studio.status.sources[source.id] === 'ready' ? 'Ready' : ['camera', 'screen', 'microphone'].includes(source.kind) ? 'Input not connected' : engineRunning ? studio.status.sources[source.id] || 'Loading' : 'Ready when engine starts') }}</small></div>
+              <button type="button" class="source-name source-properties-trigger" :aria-label="'Open properties for ' + source.name" title="Source properties" @click="editSourceDialog(source)"><div class="source-name-line"><b :title="source.name">{{ source.name }}</b><span v-if="source.id === studio.state.mainAudioSourceId && mainAudioBadge" class="main-audio-badge source-main-audio-badge" data-testid="source-main-audio-badge" :data-state="mainAudioBadge.state" :title="mainAudioBadge.title" role="status"><VolumeX v-if="mainAudioBadge.state === 'muted'" :size="10" aria-hidden="true" /><AlertCircle v-else-if="['disconnected', 'error', 'no-audio'].includes(mainAudioBadge.state)" :size="10" aria-hidden="true" />{{ mainAudioBadge.label }}</span></div><small :class="{ 'danger-text': studio.status.sources[source.id] === 'error' }" :title="studio.status.sourceErrors[source.id]">{{ studio.status.sourceErrors[source.id] || (source.playback?.paused ? 'Paused' : studio.status.sources[source.id] === 'ready' ? 'Ready' : studio.status.sources[source.id] === 'loading' && ['camera', 'screen'].includes(source.kind) ? 'Waiting for video signal' : ['camera', 'screen', 'microphone'].includes(source.kind) ? 'Input not connected' : engineRunning ? studio.status.sources[source.id] || 'Loading' : 'Ready when engine starts') }}</small></button>
               <template v-if="['video', 'audio'].includes(source.kind)">
                 <button class="s-icon" :aria-label="(source.playback?.paused ? 'Play ' : 'Pause ') + source.name" :title="source.playback?.paused ? 'Play source' : 'Pause source'" @click="playback(source)"><Play v-if="source.playback?.paused" :size="13" /><Pause v-else :size="13" /></button>
                 <button class="s-icon" :aria-label="'Restart ' + source.name" title="Restart source" @click="playback(source, true)"><RotateCcw :size="13" /></button>
@@ -316,6 +322,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keydown));
               </template>
               <button v-if="!['microphone', 'audio'].includes(source.kind)" class="s-icon" :aria-label="'Add ' + source.name + ' to scene'" title="Add to scene" :disabled="!selected" @click="run(studio.addLayer({ kind: 'source', name: source.name, sourceId: source.id, x: 0, y: 0, width: 100, height: 100 }))"><Plus :size="13" /></button>
               <button v-if="['camera', 'screen', 'microphone'].includes(source.kind)" class="source-connect" @click="studio.connectedSources.includes(source.id) ? studio.disconnectSource(source.id) : connect(source)">{{ studio.connectedSources.includes(source.id) ? 'Disconnect' : 'Connect' }}</button>
+              <button class="s-icon" :aria-label="'Properties for ' + source.name" title="Source properties" @click="editSourceDialog(source)"><Settings2 :size="14" /></button>
               <button class="s-icon" title="Remove source" :aria-label="'Remove ' + source.name" @click="deleteSource(source)"><Trash2 :size="12" /></button>
             </div>
           </div>
@@ -333,12 +340,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keydown));
           <OutputAudioControl />
         </section>
       </div>
-      <section class="outputs-panel" aria-label="Outputs"><div class="outputs-heading"><div><h2><Monitor :size="14" />Outputs <small class="panel-count">{{ studio.state.outputs.length }}</small></h2><p>Choose what each screen receives.</p></div><button class="s-button" aria-label="Add output" :disabled="studio.state.outputs.length >= 6" @click="addOutput"><Plus :size="13" />Add output</button></div><div class="output-cards"><article v-for="output in studio.state.outputs" :key="output.id" class="output-card"><div class="output-card-heading"><span class="output-signal" :class="{ blanked: output.blanked }" :title="output.blanked ? 'Picture blanked' : 'Picture enabled'" /><StudioPropertyInput :value="output.name" :identity="output.id" :pending="!!studio.saving" :aria-label="'Output name ' + output.id" trim nonempty maxlength="100" @commit="renameOutput(output.id, $event)" /><a :href="`/studio/output/${output.id}`" target="_blank" rel="noopener" class="s-icon" :title="'Open ' + output.name" :aria-label="'Open ' + output.name"><ArrowUpRight :size="15" /></a></div><select :aria-label="output.name + ' route'" :value="output.mode === 'program' ? '' : output.scene?.id" @change="run(studio.command({ type: 'route', outputId: output.id, sceneId: value($event) || null }))"><option value="">Follow Program</option><option v-for="scene in studio.state.scenes" :key="scene.id" :value="scene.id">Pin: {{ scene.name }}</option><option v-if="output.scene && !studio.state.scenes.some(s => s.id === output.scene?.id)" :value="output.scene.id">{{ output.scene.name }} (snapshot)</option></select><div class="output-card-bottom"><button :class="{ enabled: !output.blanked }" @click="run(studio.command({ type: 'blank', outputId: output.id, blanked: !output.blanked }))"><EyeOff v-if="output.blanked" :size="12" /><Eye v-else :size="12" />{{ output.blanked ? 'Blanked' : 'Picture on' }}</button><button :class="{ enabled: output.audioEnabled }" :aria-label="(output.audioEnabled ? 'Mute ' : 'Enable ') + output.name + ' audio'" :title="output.audioEnabled ? 'Mute output audio' : 'Enable output audio'" @click="run(studio.edit(d => { const o = d.outputs.find(o => o.id === output.id); if (o) o.audioEnabled = !o.audioEnabled; }))"><Volume2 v-if="output.audioEnabled" :size="12" /><VolumeX v-else :size="12" /></button><button v-if="output.mode === 'scene'" :aria-label="'Refresh ' + output.name + ' from draft'" title="Apply latest draft to this output" @click="run(studio.command({ type: 'route', outputId: output.id, sceneId: output.scene!.id }))"><RotateCcw :size="11" /></button><button v-if="studio.state.outputs.length > 1" :aria-label="'Remove ' + output.name" title="Remove output" @click="removeOutput(output.id)"><Trash2 :size="11" /></button></div></article></div></section>
+      <StudioOutputsPanel :outputs="studio.state.outputs" :scenes="studio.state.scenes" :pending="!!studio.saving" :can-operate="canOperate" @add="addOutput" @rename="renameOutput" @route="(id, sceneId) => run(studio.command({ type: 'route', outputId: id, sceneId }))" @blank="(id, blanked) => run(studio.command({ type: 'blank', outputId: id, blanked }))" @audio="id => run(studio.edit(d => { const output = d.outputs.find(item => item.id === id); if (output) output.audioEnabled = !output.audioEnabled; }))" @refresh="id => { const output = studio.state?.outputs.find(item => item.id === id); if (output?.scene) run(studio.command({ type: 'route', outputId: id, sceneId: output.scene.id })); }" @remove="removeOutput" />
     </main>
 
     <StudioInspector v-show="!inspectorCollapsed" @collapse="collapseInspector" />
     <footer class="studio-statusbar"><span><span class="tiny-dot" :class="{ online: engineRunning }" />{{ studio.saving ? 'Saving…' : 'All changes saved' }}</span><span>LOCAL STATION<ChevronRight :size="10" />{{ studio.state.scenes.length }} scenes<ChevronRight :size="10" />{{ studio.state.outputs.length }} outputs</span><span>{{ recording ? recording.status === 'stopping' ? 'Finishing recording…' : `Recording · ${bytes(recording.bytes)} saved` : '1920 × 1080 · 30 fps' }}</span></footer>
-    <SourceDialog v-model:open="sourceOpen" />
+    <SourceDialog v-model:open="sourceOpen" :source-id="propertiesSourceId" />
     <Dialog v-model:open="guideOpen"><DialogContent class="studio-dialog sm:max-w-[520px]"><DialogHeader><DialogTitle>Your production, in focus.</DialogTitle><DialogDescription>A quick guide to the Studio workflow.</DialogDescription></DialogHeader><ol class="studio-guide"><li><b>Build your scenes.</b><span>Add sources and arrange layers in Preview. Select a layer to edit it; drag to move and use its corner to resize.</span></li><li><b>Start the engine.</b><span>The station runs a dedicated renderer. File playback, outputs, and recording continue when you change workspaces or close the control page.</span></li><li><b>Take the moment live.</b><span>Cut instantly with Space, or Fade with Shift + Space. Preview goes live and the previous Program scene returns to Preview, ready to switch back. Set the fade duration between the monitors. Shortcuts pause while you type or use a dialog. Draft edits stay separate from Program and pinned output snapshots.</span></li><li><b>Choose each screen’s picture.</b><span>Follow Program, or pin a scene. Reapply a pinned scene with its refresh button. Blanking only hides that output’s picture; audio has its own control.</span></li><li><b>Keep a record.</b><span>Record captures Program plus master audio. Browser cameras and screen shares require their publishing tab to remain open. Use headphones for monitoring.</span></li></ol></DialogContent></Dialog>
   </div>
 </template>

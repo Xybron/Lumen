@@ -10,6 +10,8 @@
     "lint": "eslint . --ext .ts,.vue"
   },
   "dependencies": {
+    "@powersync/web": "2.5.0",
+    "@supabase/supabase-js": "2.118.0",
     "@tailwindcss/vite": "^4.2.4",
     "@vueuse/core": "^11.3.0",
     "class-variance-authority": "^0.7.1",

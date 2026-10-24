@@ -1,12 +1,137 @@
 # Lumen Watch relay
 
-A separate, public-only live HLS service. The station pushes its actual Program
+A separate, viewer-facing live HLS service. The station pushes its actual Program
 picture and mixed audio out to this relay; viewers never connect to the station,
 operator UI or station API. It does not embed YouTube or Facebook.
 
 Prepared public address: **https://stream-lumen.xybron.com/watch/live**.
 The application stays at **https://lumen.xybron.com**. These files do not deploy
 anything or modify DNS. Supply the VPS details and approve deployment separately.
+
+## Multiple churches / workspace tenants
+
+Shared hosting must use explicit tenant mode. The ordinary local launcher stays
+single-station and unchanged; global publishing/viewer keys must not be shared
+between unrelated churches. A workspace is identified by its immutable team UUID,
+not a renameable display name, account email or an arbitrary browser parameter.
+
+Provisioning is a **server-administrator step**. First verify the requester's
+current owner membership in the authoritative workspace records. Then copy
+`tenants.example.json` into a private service configuration location, use the
+real workspace UUID, and generate different high-entropy publishing and private
+viewer tokens for every workspace. Blank example keys intentionally fail closed.
+Do not commit the populated file or send it through frontend settings. There is
+no public provisioning endpoint, automatic owner claim or billable service.
+
+```dotenv
+LUMEN_WATCH_TENANTS_FILE=/etc/lumen-watch-tenants.json
+```
+
+The version-1 file contains `tenants: [{ workspaceId, pushToken, viewerToken,
+allowedSlugs: ['live', 'program'], privateSlugs: ['program'] }]`. It must be an
+owner-only, regular non-symlink file owned by the service user (for example,
+`chmod 600` after assigning its owner). At most 256 registrations and 1 MiB are
+accepted. UUIDs and allowed stream slugs are explicit; duplicate workspace IDs,
+reused credentials, weak keys or malformed private settings abort startup.
+In Docker, mount the populated file read-only and ensure the container service
+UID can read it without widening its host permissions.
+
+Each station uses the same `LUMEN_WORKSPACE_ID` as its registered workspace, plus
+only that workspace's `LUMEN_WATCH_RELAY_TOKEN` and separate output viewer token.
+Namespaced routes are:
+
+```text
+/watch/<workspaceId>/live
+/output/<workspaceId>/program#key=<that workspace's viewer token>
+/api/push/<workspaceId>/<slug>/...
+/api/watch/<workspaceId>/<slug>
+/api/output/<workspaceId>/<slug>/...
+/hls/<workspaceId>/<slug>/<session>/<file>
+```
+
+Tenant mode disables **all legacy unscoped** stream, publishing and HLS routes,
+even if old global environment credentials remain set. Shared script/style
+assets remain common. There is no fallback from a missing workspace or rejected
+workspace token to a global credential. Two workspaces may both use `live` and
+`program`; state, media directories, session replay fences and private-cookie
+names/signatures include workspace + slug. A cookie/key for one workspace cannot
+authorize another, and rotating one viewer key does not revoke another's session.
+Public `live` feeds are intentionally audience-viewable; UUIDs are not secrets or
+privacy controls. Use private `program` for access-controlled production links.
+
+Resource limits remain bounded on the free/self-hosted deployment: by default
+eight registered stream histories in the relay, up to two per workspace, at most
+two simultaneous uploads per workspace/eight globally, and bounded per-stream
+segment windows. The server administrator can size constructor limits for its
+deployment; this is not an unlimited bandwidth/storage promise. Removing a
+workspace from the registry and restarting disables its routes without deleting
+its retained replay metadata. Restart always returns streams Offline.
+
+For a single-organisation local rehearsal, omit `LUMEN_WATCH_TENANTS_FILE` and
+keep the existing legacy configuration. Tenant mode does not migrate, rename or
+publish existing stations automatically. Configure the tenant relay first, then
+explicitly bind and restart the intended station; normal Go Live confirmation
+is still required. Studio devices, Main audio and social stream keys remain
+station-local. Never expose the local Studio backend as a shared tenant gateway.
+
+## Secure clean Program output
+
+The relay can additionally host a protected, interface-free Program output for
+remote production tools such as OBS Browser Source. This is separate from the
+public audience-facing `/watch/live` page. Configure an explicitly protected slug
+and a **different**, randomly generated viewer key on the HTTPS relay:
+
+```dotenv
+LUMEN_WATCH_SLUGS=live,program
+LUMEN_WATCH_PRIVATE_SLUGS=program
+LUMEN_WATCH_VIEWER_TOKEN=<a separate high-entropy secret of 32–256 printable characters>
+```
+
+Never put a real secret in this repository or reuse `LUMEN_WATCH_PUSH_TOKEN` as
+the viewer key. Invalid private configuration fails closed at startup; it never
+silently makes the requested private slug public. Public `live` behavior remains
+unchanged. The operator-facing station configuration must point its protected
+output publishing at the same `program` slug. The relay does not start streaming
+or change the station's selected destinations, recording or Main audio.
+
+Use `https://your-relay.example/output/program#key=<viewer-key>` as the clean
+viewer/OBS page. Adding `&audio=1` to the fragment explicitly requests audio;
+ordinary browsers may still require a play gesture. Default playback is muted.
+The page fills its viewport with the picture, without Watch branding, navigation
+or permanent playback controls. Double-click or `F` requests fullscreen; `M`
+toggles sound. A relay feed has the normal HLS buffering delay and is not a
+zero-latency monitor connection.
+
+The fragment is not sent in HTTP requests. The page consumes it immediately,
+removes it from the address bar, then exchanges it in an Authorization header
+for a one-hour, HttpOnly, Secure, SameSite=Strict signed cookie. The cookie name
+and signature are scoped to the output slug; `Path=/` covers that slug's status
+and HLS paths. The key stays only in page memory for renewal while the page is
+open. It is not written to browser storage, HTML or the cookie. Both the legacy
+Watch API and **all** HLS playlists/segments for a protected slug require viewer
+authorization, so alternate URLs cannot bypass the clean player's access gate.
+Protected responses are private/no-store. Avoid proxy/CDN rules that override
+these headers, and keep normal TLS-proxy rate limiting in place.
+
+To revoke all current links and browser sessions, rotate
+`LUMEN_WATCH_VIEWER_TOKEN` on the relay and restart it, then update the station's
+viewer-key setting and distribute the new link. Old keys and signed cookies are
+rejected immediately. This phase does not implement individually named viewer
+accounts or per-recipient revocation. Links are bearer capabilities: share only
+with trusted recipients and protect any OBS configuration containing one.
+
+For station-side verification, `GET /api/output/program/info` accepts the viewer
+key as `Authorization: Bearer <viewer-key>` and returns only
+`{ protected: true, slug: 'program', watchUrl: '/output/program', status }`.
+`POST /api/output/program/session` performs the cookie exchange. Publishing still
+uses its separate existing `/api/push/program/...` credential and protocol. No
+operator endpoint, source list, saved stream key or live-control command is
+available to output viewers.
+
+External links require the separately configured HTTPS relay to be deployed and
+the station to be sending its Program to that protected slug. Merely generating
+a link does not expose a localhost station or automatically Go Live. No domain,
+server, DNS record, tunnel or paid service is deployed by this feature.
 
 ## Run Studio and Watch together locally
 
@@ -172,3 +297,20 @@ The latter generates actual H.264/AAC HLS with FFmpeg, publishes it through the
 station adapter, decodes it in headless Chrome with the local hls.js player, and
 checks mobile layout, fullscreen, stale/offline behavior and end/cleanup. It
 uses no physical devices, live station, real credentials or external deployment.
+
+The protected-output tests also check expiry/rotation, all alternate status/media
+paths, cookie scope and unchanged public Watch behavior. With the parent Lumen
+application dependencies installed, run the opt-in real-browser check from the
+repository root:
+
+```sh
+LUMEN_TEST_OUTPUT_BROWSER=1 node --test watch-relay/test/output-browser.test.mjs
+```
+
+It generates H.264/AAC test media, opens the clean output in headless Chrome,
+checks actual picture decoding through the HttpOnly cookie, confirms that no
+request URL contains its fragment key, and checks access denial after session
+removal. It uses only disposable loopback services and generated credentials.
+The normal environment has no insecure-cookie toggle; the explicit
+constructor-only local-test capability is checked against the socket's loopback
+address and is never used by the command-line relay launcher.
