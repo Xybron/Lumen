@@ -41,7 +41,7 @@ export const api = {
       await fetch(`${BASE}/content`, {
         method: 'PUT',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Lumen-Content-Version': content.updatedAt },
         body: JSON.stringify(content),
       }),
     );

@@ -9,7 +9,7 @@ export interface ScriptureQuoteMatch {
   reason: string;
 }
 
-interface Row { id: number; versionId: string; book: number; chapter: number; verse: number; text: string }
+interface Row { id: number; versionId: string; book: number; chapter: number; verse: number; endVerse?: number | null; text: string }
 interface Run { length: number; heard: number; verse: number }
 interface Alignment { matches: number; meaningful: number; edits: number; negationMismatch: boolean; start: number; end: number }
 interface Candidate { row: Row; tokens: string[]; run: Run; alignment: Alignment; score: number }
@@ -140,7 +140,7 @@ export function matchScriptureQuote(db: Database.Database, versionId: string, te
   if (heard.length > MAX_HEARD_WORDS || text.length > 12000) return empty('Too much speech in one window to identify a quotation safely; waiting for a clearer phrase.');
   if (heard.length < 4 || meaningful(heard) < 2) return empty('Quotation is too short or common to identify a verse reliably.');
   const rows = new Map<number, Row>();
-  const select = db.prepare(`SELECT v.id,v.versionId,v.book,v.chapter,v.verse,v.text ${BASE} ORDER BY rank,v.id LIMIT ${CANDIDATE_LIMIT}`);
+  const select = db.prepare(`SELECT v.id,v.versionId,v.book,v.chapter,v.verse,v.endVerse,v.text ${BASE} ORDER BY rank,v.id LIMIT ${CANDIDATE_LIMIT}`);
   const retrieve = (expressions: string[]) => {
     if (!expressions.length) return;
     for (const row of select.all(expressions.join(' OR '), versionId) as Row[]) rows.set(row.id, row);
@@ -167,7 +167,7 @@ export function matchScriptureQuote(db: Database.Database, versionId: string, te
     .sort((a, b) => b.run.length - a.run.length || b.score - a.score || a.row.id - b.row.id);
   const best = candidates[0];
   if (!best) return empty('Only weak quotation matches were found; waiting for clearer speech.');
-  const selection: ScriptureSelection = { kind: 'scripture', versionId, book: best.row.book, chapter: best.row.chapter, verse: best.row.verse };
+  const selection: ScriptureSelection = { kind: 'scripture', versionId, book: best.row.book, chapter: best.row.chapter, verse: best.row.verse, ...(best.row.endVerse != null ? { endVerse: best.row.endVerse } : {}) };
   const result: ScriptureQuoteMatch = { selection, score: Math.round(best.score * 100) / 100, eligible: false, reason: '' };
   const quote = heard.slice(best.run.heard, best.run.heard + best.run.length);
   const boundary = boundaryDifference(text, heard, best.tokens, best.run);

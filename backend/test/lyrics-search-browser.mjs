@@ -167,7 +167,8 @@ try {
 
   await first('distant lant', 'Zzz Overflow Anthem');
   await input.press('Enter'); await prepared('overflow', 'overflow_v1');
-  assert.ok((await page.locator('.w-song-cues').innerText()).includes('Zzz Overflow Anthem'), 'A result outside the blank-library page still exposes its song sections');
+  assert.equal(await page.locator('.w-song-heading h2').innerText(), 'Zzz Overflow Anthem', 'A result outside the blank-library page opens the selected song column');
+  assert.equal(await page.locator('.w-song-cues .w-section-cue').count(), fixtures.find(song => song.id === 'overflow').sections.length, 'The selected song column exposes every section');
   await privateState('Search beyond the first library page');
   checks.push('Search covers the full local library and correctly opens songs outside the first 500-song browse page');
 
@@ -303,7 +304,8 @@ try {
   await overflowSetlist.waitFor();
   assert.ok((await workspace()).setlist.includes('overflow'), 'The overflow song pin persists after reload');
   await overflowSetlist.click(); await prepared('overflow', 'overflow_v1');
-  assert.ok((await page.locator('.w-song-cues').innerText()).includes('Zzz Overflow Anthem'), 'A pinned song outside the first library page opens all its sections after reload');
+  assert.equal(await page.locator('.w-song-heading h2').innerText(), 'Zzz Overflow Anthem', 'A pinned song outside the first library page opens the selected song column after reload');
+  assert.equal(await page.locator('.w-song-cues .w-section-cue').count(), fixtures.find(song => song.id === 'overflow').sections.length, 'Every pinned song section remains available after reload');
   const afterPin = await workspace();
   assert.deepEqual(afterPin.live, beforePin.live, 'Pinning and preparing an overflow song never replace the live cue');
   assert.equal(afterPin.blanked, beforePin.blanked);

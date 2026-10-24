@@ -10,9 +10,12 @@ import { ProductionError } from './production-store.js';
 import type { BibleVersion, Verse, Song, CueSelection, LiveCue, WorshipWorkspace, WorshipCommand, ScriptureSelection, ScriptureSearchResult, LyricsSearchHit } from '../../shared/worship.js';
 
 const key = z.string().regex(/^[\w-]{1,80}$/);
+const importedVerse = z.object({ book: z.number().int().min(1).max(66), chapter: z.number().int().min(1).max(150), verse: z.number().int().min(1).max(200), endVerse: z.number().int().min(1).max(200).optional(), text: z.string().trim().min(1).max(12000) }).superRefine((value, ctx) => {
+  if (value.endVerse !== undefined && (value.endVerse < value.verse || value.endVerse - value.verse > 11)) ctx.addIssue({ code: 'custom', path: ['endVerse'], message: 'A source passage must span 1–12 verses.' });
+});
 export const BibleImportSchema = z.object({
   version: z.object({ id: key, name: z.string().trim().min(1).max(160), language: z.string().min(2).max(20).default('en'), attribution: z.string().trim().min(1).max(1500) }),
-  verses: z.array(z.object({ book: z.number().int().min(1).max(66), chapter: z.number().int().min(1).max(150), verse: z.number().int().min(1).max(200), text: z.string().trim().min(1).max(12000) })).min(1).max(40000),
+  verses: z.array(importedVerse).min(1).max(40000),
   replace: z.boolean().default(false),
 });
 export const SongSchema = z.object({
@@ -35,6 +38,16 @@ export const WorshipCommandSchema = z.discriminatedUnion('type', [
 ]);
 const CATALOG = [ ['NKJV','New King James Version'], ['KJV','King James Version'], ['NIV','New International Version'], ['NLT','New Living Translation'], ['AMP','Amplified Bible'], ['GNT','Good News Translation'], ['TPT','The Passion Translation'] ];
 
+function coversVerses(rows: { verse: number; endVerse?: number | null }[], start: number, end: number) {
+  let next = start;
+  for (const row of rows) {
+    if (row.verse > next) return false;
+    next = Math.max(next, (row.endVerse ?? row.verse) + 1);
+    if (next > end) return true;
+  }
+  return false;
+}
+
 export class WorshipLibrary {
   readonly db: Database.Database;
   constructor(filename: string) {
@@ -42,7 +55,7 @@ export class WorshipLibrary {
     this.db.pragma('journal_mode = WAL'); this.db.pragma('foreign_keys = ON'); this.db.pragma('busy_timeout = 5000');
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS bible_versions (id TEXT PRIMARY KEY, name TEXT NOT NULL, language TEXT NOT NULL, attribution TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS verses (id INTEGER PRIMARY KEY, versionId TEXT NOT NULL REFERENCES bible_versions(id) ON DELETE CASCADE, book INTEGER NOT NULL, chapter INTEGER NOT NULL, verse INTEGER NOT NULL, text TEXT NOT NULL, UNIQUE(versionId,book,chapter,verse));
+      CREATE TABLE IF NOT EXISTS verses (id INTEGER PRIMARY KEY, versionId TEXT NOT NULL REFERENCES bible_versions(id) ON DELETE CASCADE, book INTEGER NOT NULL, chapter INTEGER NOT NULL, verse INTEGER NOT NULL, text TEXT NOT NULL, endVerse INTEGER, UNIQUE(versionId,book,chapter,verse));
       CREATE VIRTUAL TABLE IF NOT EXISTS verses_fts USING fts5(text, content='verses', content_rowid='id', prefix='2 3 4');
       CREATE TRIGGER IF NOT EXISTS verse_insert AFTER INSERT ON verses BEGIN INSERT INTO verses_fts(rowid,text) VALUES(new.id,new.text); END;
       CREATE TRIGGER IF NOT EXISTS verse_delete AFTER DELETE ON verses BEGIN INSERT INTO verses_fts(verses_fts,rowid,text) VALUES('delete',old.id,old.text); END;
@@ -50,11 +63,15 @@ export class WorshipLibrary {
       CREATE VIRTUAL TABLE IF NOT EXISTS songs_fts USING fts5(id UNINDEXED,title,body,prefix='2 3 4');
       CREATE VIRTUAL TABLE IF NOT EXISTS songs_vocab USING fts5vocab(songs_fts,'row');
       CREATE TABLE IF NOT EXISTS worship_workspaces (channelId TEXT PRIMARY KEY, state TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS worship_preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     `);
+    this.db.transaction(() => {
+      if (!(this.db.pragma('table_info(verses)') as { name: string }[]).some(column => column.name === 'endVerse')) this.db.exec('ALTER TABLE verses ADD COLUMN endVerse INTEGER');
+    })();
     ensureLyricsSearchIndex(this.db);
   }
   versions(): BibleVersion[] {
-    const installed = this.db.prepare('SELECT b.*,count(v.id) AS verseCount FROM bible_versions b LEFT JOIN verses v ON v.versionId=b.id GROUP BY b.id').all() as Omit<BibleVersion, 'installed'>[];
+    const installed = this.db.prepare('SELECT b.*,coalesce(sum(coalesce(v.endVerse,v.verse)-v.verse+1),0) AS verseCount FROM bible_versions b LEFT JOIN verses v ON v.versionId=b.id GROUP BY b.id').all() as Omit<BibleVersion, 'installed'>[];
     const rows = installed.map(v => ({ ...v, installed: true }));
     return [...CATALOG.map(([id,name]) => rows.find(v => v.id === id) ?? { id,name,language:'en',attribution:'Import an authorised digital edition to enable this version.',verseCount:0,installed:false }), ...rows.filter(v => !CATALOG.some(([id]) => id === v.id))];
   }
@@ -62,20 +79,27 @@ export class WorshipLibrary {
     const input = BibleImportSchema.parse(raw);
     const id = input.version.id.toUpperCase();
     const ids = new Set<string>();
-    for (const verse of input.verses) { const key = `${verse.book}:${verse.chapter}:${verse.verse}`; if (ids.has(key)) throw new ProductionError(422, `Duplicate verse ${key}.`); ids.add(key); }
+    for (const verse of input.verses) for (let number = verse.verse; number <= (verse.endVerse ?? verse.verse); number++) {
+      const key = `${verse.book}:${verse.chapter}:${number}`;
+      if (ids.has(key)) throw new ProductionError(422, `Duplicate or overlapping verse ${key}.`);
+      ids.add(key);
+    }
     this.db.transaction(() => {
       if (this.db.prepare('SELECT 1 FROM bible_versions WHERE id=?').get(id) && !input.replace) throw new ProductionError(409, 'This version is installed. Explicitly enable replacement to import a new edition.');
       this.db.prepare('DELETE FROM bible_versions WHERE id=?').run(id);
       this.db.prepare('INSERT INTO bible_versions VALUES(?,?,?,?)').run(id,input.version.name,input.version.language,input.version.attribution);
-      const insert = this.db.prepare('INSERT INTO verses(versionId,book,chapter,verse,text) VALUES(?,?,?,?,?)');
-      for (const v of input.verses) insert.run(id,v.book,v.chapter,v.verse,v.text);
+      const insert = this.db.prepare('INSERT INTO verses(versionId,book,chapter,verse,endVerse,text) VALUES(?,?,?,?,?,?)');
+      for (const v of input.verses) insert.run(id,v.book,v.chapter,v.verse,v.endVerse && v.endVerse > v.verse ? v.endVerse : null,v.text);
     })();
     return this.versions().find(v => v.id === id)!;
   }
   private requireVersion(id: string) {
     if (!this.db.prepare('SELECT 1 FROM bible_versions WHERE id=?').get(id)) throw new ProductionError(409, `${id} is not installed. Import its authorised text in Library.`);
   }
-  private verse(row: unknown): Verse { const v = row as Verse; return { ...v, bookName: BOOK_NAMES[v.book - 1] }; }
+  private verse(row: unknown): Verse {
+    const { endVerse, ...v } = row as Verse & { endVerse?: number | null };
+    return { ...v, ...(endVerse != null && endVerse > v.verse ? { endVerse } : {}), bookName: BOOK_NAMES[v.book - 1] };
+  }
   searchScripture(versionId: string, query: string, mode: 'manual' | 'listening' = 'manual'): ScriptureSearchResult {
     this.requireVersion(versionId);
     // Operator search may resolve abbreviations and typos. Speech recognition
@@ -92,10 +116,10 @@ export class WorshipLibrary {
         let sql='FROM verses WHERE versionId=? AND book=?';
         const params:(string|number)[]=[versionId,reference.book];
         if(reference.chapter!==undefined){sql+=' AND chapter=?';params.push(reference.chapter);}
-        if(reference.verse!==undefined){sql+=' AND verse BETWEEN ? AND ?';params.push(reference.verse,reference.endVerse??reference.verse);}
+        if(reference.verse!==undefined){sql+=' AND verse<=? AND coalesce(endVerse,verse)>=?';params.push(reference.endVerse??reference.verse,reference.verse);}
         if(reference.endVerse!==undefined&&reference.verse!==undefined){
-          const row=this.db.prepare(`SELECT COUNT(*) AS total ${sql}`).get(...params) as {total:number};
-          return row.total===reference.endVerse-reference.verse+1;
+          const rows=this.db.prepare(`SELECT verse,endVerse ${sql} ORDER BY verse`).all(...params) as {verse:number;endVerse:number|null}[];
+          return coversVerses(rows,reference.verse,reference.endVerse);
         }
         return !!this.db.prepare(`SELECT 1 ${sql} LIMIT 1`).get(...params);
       }) : [],
@@ -104,17 +128,17 @@ export class WorshipLibrary {
     let keywordMode: ScriptureSearchResult['keywordMode'] = null;
     let ignoredWords: string[] = [];
     if (ref) {
-      let sql = 'SELECT versionId,book,chapter,verse,text FROM verses WHERE versionId=? AND book=?';
+      let sql = 'SELECT versionId,book,chapter,verse,endVerse,text FROM verses WHERE versionId=? AND book=?';
       const params: (string | number)[] = [versionId,ref.book];
       if (ref.chapter) { sql += ' AND chapter=?'; params.push(ref.chapter); }
-      if (ref.verse) { sql += ' AND verse>=? AND verse<=?'; params.push(ref.verse,ref.endVerse ?? ref.verse); }
+      if (ref.verse) { sql += ' AND verse<=? AND coalesce(endVerse,verse)>=?'; params.push(ref.endVerse ?? ref.verse,ref.verse); }
       rows = this.db.prepare(`${sql} ORDER BY book,chapter,verse LIMIT 200`).all(...params);
     } else if (mode === 'manual' && resolution.kind === 'text') {
       const result = searchScriptureKeywords(this.db,versionId,query);
       rows = result.rows; keywordMode = result.mode; ignoredWords = result.ignoredWords;
     } else if (mode === 'listening') {
       const q = ftsQuery(query);
-      rows = q ? this.db.prepare('SELECT v.versionId,v.book,v.chapter,v.verse,v.text FROM verses_fts f JOIN verses v ON v.id=f.rowid WHERE verses_fts MATCH ? AND v.versionId=? ORDER BY rank LIMIT 80').all(q,versionId) : [];
+      rows = q ? this.db.prepare('SELECT v.versionId,v.book,v.chapter,v.verse,v.endVerse,v.text FROM verses_fts f JOIN verses v ON v.id=f.rowid WHERE verses_fts MATCH ? AND v.versionId=? ORDER BY rank LIMIT 80').all(q,versionId) : [];
     } else rows = [];
     return { verses: rows.map(r => this.verse(r)), reference: ref, resolution, keywordMode, ignoredWords };
   }
@@ -124,9 +148,10 @@ export class WorshipLibrary {
     this.requireVersion(selection.versionId);
     const end = selection.endVerse ?? selection.verse;
     if (end < selection.verse || end - selection.verse > 11) throw new ProductionError(422, 'Choose a passage of 1–12 verses.');
-    const rows = this.db.prepare('SELECT versionId,book,chapter,verse,text FROM verses WHERE versionId=? AND book=? AND chapter=? AND verse BETWEEN ? AND ? ORDER BY verse').all(selection.versionId,selection.book,selection.chapter,selection.verse,end);
-    if (rows.length !== end - selection.verse + 1) throw new ProductionError(404, 'That passage is not present in the installed edition.');
-    return rows.map(v => this.verse(v));
+    const rows = this.db.prepare('SELECT versionId,book,chapter,verse,endVerse,text FROM verses WHERE versionId=? AND book=? AND chapter=? AND verse<=? AND coalesce(endVerse,verse)>=? ORDER BY verse').all(selection.versionId,selection.book,selection.chapter,end,selection.verse).map(v => this.verse(v));
+    if (!coversVerses(rows,selection.verse,end)) throw new ProductionError(404, 'That passage is not present in the installed edition.');
+    if ((rows.at(-1)!.endVerse ?? rows.at(-1)!.verse) - rows[0].verse > 11) throw new ProductionError(422, 'Choose a passage of 1–12 verses, including the full source passage.');
+    return rows;
   }
   songs(query = ''): Song[] {
     const q = ftsQuery(query);
@@ -156,9 +181,10 @@ export class WorshipLibrary {
   }
   cue(selection: CueSelection): LiveCue {
     if (selection.kind === 'scripture') {
-      const verses = this.passage(selection), first = verses[0];
-      const ref = `${first.bookName} ${first.chapter}:${first.verse}${verses.length>1 ? `–${verses.at(-1)!.verse}` : ''}`;
-      return { selection,title:ref,text:verses.map(v=>verses.length>1?`${v.verse} ${v.text}`:v.text).join('\n\n'),reference:`${ref} · ${selection.versionId}`,attribution:this.versions().find(v=>v.id===selection.versionId)!.attribution,takenAt:new Date().toISOString() };
+      const verses = this.passage(selection), first = verses[0], last = verses.at(-1)!, end = last.endVerse ?? last.verse;
+      const ref = `${first.bookName} ${first.chapter}:${first.verse}${end>first.verse ? `–${end}` : ''}`;
+      const actual: ScriptureSelection = { ...selection, verse: first.verse, ...(end > first.verse ? { endVerse: end } : {}) };
+      return { selection:actual,title:ref,text:verses.map(v=>verses.length>1?`${v.verse}${v.endVerse ? `–${v.endVerse}` : ''} ${v.text}`:v.text).join('\n\n'),reference:`${ref} · ${selection.versionId}`,attribution:this.versions().find(v=>v.id===selection.versionId)!.attribution,takenAt:new Date().toISOString() };
     }
     const song = this.song(selection.songId), section = song.sections.find(s=>s.id===selection.sectionId);
     if (!section) throw new ProductionError(404,'Song section not found.');
@@ -175,7 +201,7 @@ export class WorshipLibrary {
       if (state.revision !== revision) throw new ProductionError(409,'This channel changed. Your view has been refreshed; please retry.');
       if (command.type === 'take') {
         state.live = this.cue(command.selection); state.blanked = false;
-        state.recent = [command.selection,...state.recent.filter(r=>JSON.stringify(r)!==JSON.stringify(command.selection))].slice(0,30);
+        state.recent = [state.live.selection,...state.recent.filter(r=>JSON.stringify(r)!==JSON.stringify(state.live!.selection))].slice(0,30);
         if (command.selection.kind === 'scripture') state.versionId = command.selection.versionId;
       } else if (command.type === 'step') {
         if (!state.live) throw new ProductionError(409,'Send a verse or lyric section live first.');
@@ -183,9 +209,10 @@ export class WorshipLibrary {
         let next: CueSelection;
         if (sel.kind === 'scripture') {
           const operator = command.direction === 1 ? '>' : '<', order = command.direction === 1 ? 'ASC' : 'DESC';
-          const row = this.db.prepare(`SELECT versionId,book,chapter,verse FROM verses WHERE versionId=? AND (book,chapter,verse) ${operator} (?,?,?) ORDER BY book ${order},chapter ${order},verse ${order} LIMIT 1`).get(sel.versionId,sel.book,sel.chapter,command.direction===1 ? sel.endVerse ?? sel.verse : sel.verse) as ScriptureSelection | undefined;
+          const row = this.db.prepare(`SELECT versionId,book,chapter,verse,endVerse FROM verses WHERE versionId=? AND (book,chapter,verse) ${operator} (?,?,?) ORDER BY book ${order},chapter ${order},verse ${order} LIMIT 1`).get(sel.versionId,sel.book,sel.chapter,command.direction===1 ? sel.endVerse ?? sel.verse : sel.verse) as (ScriptureSelection & { endVerse?: number | null }) | undefined;
           if (!row) throw new ProductionError(409,'You have reached the end of the installed text.');
-          next = { ...row,kind:'scripture' };
+          const { endVerse, ...start } = row;
+          next = { ...start,...(endVerse != null ? { endVerse } : {}),kind:'scripture' };
         } else {
           const song = this.song(sel.songId), index = song.sections.findIndex(s=>s.id===sel.sectionId)+command.direction;
           if (index<0 || index>=song.sections.length) throw new ProductionError(409,'You have reached the end of this song.');

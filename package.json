@@ -10,6 +10,7 @@
     "mobile:setup": "node scripts/mobile-local.mjs setup",
     "dev:mobile": "node scripts/mobile-local.mjs start",
     "test:mobile": "npm run build && node backend/test/mobile-controller-browser.mjs",
+    "test:data-transfer": "npm run build && node backend/test/data-transfer-browser.mjs",
     "team:sync": "node scripts/team-sync.mjs",
     "test:team:browser": "node backend/test/team-browser.mjs",
     "test:team:real": "node backend/test/team-real-browser.mjs",

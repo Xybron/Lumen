@@ -5,6 +5,7 @@ export interface ScriptureKeywordRow {
   book: number;
   chapter: number;
   verse: number;
+  endVerse?: number | null;
   text: string;
 }
 
@@ -26,7 +27,7 @@ const CONNECTORS = new Set([
   'her', 'they', 'them', 'their', 'thy', 'thou', 'thine', 'thee',
 ]);
 const LIMIT = 80;
-const SELECT = `SELECT v.versionId,v.book,v.chapter,v.verse,v.text
+const SELECT = `SELECT v.versionId,v.book,v.chapter,v.verse,v.endVerse,v.text
   FROM verses_fts f JOIN verses v ON v.id=f.rowid
   WHERE verses_fts MATCH ? AND v.versionId=?
   ORDER BY rank,v.book,v.chapter,v.verse LIMIT ${LIMIT}`;

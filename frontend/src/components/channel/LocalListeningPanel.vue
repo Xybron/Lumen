@@ -8,7 +8,7 @@ import { useListeningInput } from '@/composables/useListeningInput';
 import { useConfirmation } from '@/composables/useConfirmation';
 import type { ListeningDecision } from '../../../../shared/worship';
 
-const props=defineProps<{channelId:string;kind:string;canOperate:boolean}>(),store=useWorshipStore(),identity=useIdentityStore();
+const props=defineProps<{channelId:string;kind:string;canOperate:boolean;compact?:boolean}>(),store=useWorshipStore(),identity=useIdentityStore();
 const {confirmAction}=useConfirmation();
 const {devices,deviceId,processing,permission,error:inputError,refreshing,testing,level:testLevel,clipping:testClipping,selectedLabel,missing,canUse,refreshDevices,startTest,stopTest,syncCaptureInfo}=useListeningInput();
 const settingsOpen=ref(false),modelChoice=ref(''),modelBusy=ref(false),modelError=ref('');
@@ -69,7 +69,7 @@ async function checkModels(){
 </script>
 
 <template>
-  <section class="w-listener panel-soft" :class="{armed:view?.session?.mode==='automatic','is-listening':active}" aria-label="Local listening">
+  <section class="w-listener panel-soft" :class="{armed:view?.session?.mode==='automatic','is-listening':active,'w-listener-compact':compact}" aria-label="Local listening">
     <div class="w-listener-title">
       <span class="w-ai-icon"><AudioLines :size="17" /></span>
       <div><h3>Local listening <span v-if="view?.session" class="w-pill">{{view.session.mode==='automatic'?'AUTO ARMED':'PREPARE ONLY'}}</span></h3><p>{{view?.starting?'Starting local recognition…':active?'Listening. Manual changes stop listening.':kind==='lyrics'?'Find the right song section as it is sung.':'Prepare Scripture as the speaker quotes it.'}}</p></div>

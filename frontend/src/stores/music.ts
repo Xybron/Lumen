@@ -146,6 +146,16 @@ export const useMusicStore = defineStore('music', () => {
     if (m === 'off') pause();
   });
 
+  // A remote clear can remove the playing queue entry without going through
+  // removeTrack(). Release its cached audio so Play cannot resurrect that file.
+  watch(() => [queue.value, content.content.music.current] as const, () => {
+    const track = currentTrack.value;
+    if (track && !queue.value.includes(track) && content.content.music.current !== track) {
+      audio.pause(); audio.removeAttribute('src'); audio.load();
+      currentTrack.value = null; playing.value = false; queueIndex.value = 0;
+    }
+  });
+
   return {
     playing,
     currentTrack,

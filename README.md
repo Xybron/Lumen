@@ -110,6 +110,10 @@ slides to a song** to review and save older stanza-based slides.
 - The Library dialog downloads a format example. Supply
   `{ version: { id, name, language, attribution }, verses: [{ book, chapter,
   verse, text }] }`. Book IDs are the 66-book canonical order (John = 43).
+  A source passage that groups several verses can include `endVerse` (up to
+  12 verses). Its text is stored once; searching any verse inside the group
+  prepares the full passage with its actual range label. Overlapping entries
+  are rejected, and missing verses are never filled from another edition.
   Required publisher attribution is retained on the output. Importing or
   replacing texts is a deliberate action and requires an author role.
 
@@ -140,6 +144,60 @@ selections are local to each operator; only authorised live changes are shared.
 Concurrent live edits reject stale revisions; another channel's output is not
 affected. Back up `worship.db` with the station stopped (or use a SQLite online
 backup), alongside `content.json`, `production.json`, `lumen.db` and media.
+
+### Move data between Lumen installations
+
+Open the **profile image → Data settings** menu. A station administrator or a
+station-wide author can export a single `.lumen` file and import it on another
+Lumen computer, including while offline.
+
+1. Choose **Export**, select individual Bible translations, songs,
+   presentations, media, Studio scenes, finalized recordings, service setlists,
+   or Clips projects, and download the archive. Required local media, channels,
+   songs, Bibles and recordings travel with the items you select. Clips projects
+   include their private media and completed permanent exports. Display settings
+   are optional. **Select all content** includes all available categories.
+2. On the other computer, choose **Import**, open the `.lumen` file, review its
+   contents, and select which entries to bring in. Opening a file only previews
+   it; **Import selected** applies the selection.
+3. Existing Bible and song IDs are kept and reported as skipped. Presentations,
+   scenes, recordings, setlists and Clips projects are added as new copies,
+   with new IDs and remapped dependencies. Imported channels start in manual mode;
+   Studio inputs start muted and paused. Clip ownership moves to the importing
+   operator. Selecting display settings explicitly
+   replaces the destination's timing and typography defaults.
+
+Imports make a recovery snapshot in `data/backups/data-transfer/` before changing
+saved data. Library changes refresh open worship views. Data transfer does not
+take a cue live or replace the current Program, routing, music playback, or
+Studio outputs. Camera, screen and microphone inputs need reconnecting on the
+new computer. Accounts, passwords, device bindings, team connections and active
+recording/export jobs stay local. Keep a full station backup separately when needed.
+
+Format v2 uses a bounded gzip manifest and streamed, length-framed binary files
+with SHA-256 checks. Archives support up to 1 TiB, subject to free disk space;
+library metadata is limited to 256 MiB expanded. Large recordings are streamed
+to disk during upload and download. Existing v1 exports remain importable.
+Invalid archives are rejected before import. Preview and download sessions
+expire after 15 minutes or a station restart.
+The archive contains the actual selected content and works without the original
+EasyWorship files. Building an installer does not automatically bundle a
+station's library—export it here and import the file on the new installation.
+
+Station administrators also have **Clear data** in this menu. Select individual
+items, review the counts and dependency checks, then type **CLEAR** to apply.
+Nothing is selected initially. Stop Studio before clearing content that could
+affect an output; active recordings and pending clip exports must finish first.
+Selected setlists are emptied without deleting their songs unless those songs
+are also selected. Display settings reset only presentation timing and typography.
+Clearing KJV is remembered across restarts.
+
+Clears save recovery data in `data/backups/data-clear/`: a SQLite online backup,
+the previous content file, changed production/Clips metadata and moved media or
+recording files. These recovery folders are retained, so clearing removes data
+from the active library but does not immediately reclaim all disk space.
+The backup manifest records original paths for manual recovery with Lumen stopped;
+use a `.lumen` export when you want a portable, selectively importable backup.
 
 ### Install and use local AI
 

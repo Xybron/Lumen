@@ -11,14 +11,14 @@ import type { ClipAsset } from '../../shared/clips.js';
 
 export const CLIP_UPLOAD_BYTES = 512 * 1024 * 1024;
 export const CLIP_INPUT_FORMATS = 'mov,matroska,webm,mp3,wav,ogg,image2,png_pipe,jpeg_pipe,webp_pipe';
-const schema = z.object({
+export const clipAssetSchema = z.object({
   id: z.string().regex(/^asset_[\w-]+$/), name: z.string().min(1).max(160),
   kind: z.enum(['video', 'image', 'audio']), mime: z.string().max(80), bytes: z.number().int().positive(),
   durationMs: z.number().int().min(0).max(86400000), width: z.number().int().min(0).max(16384), height: z.number().int().min(0).max(16384),
   ownerId: z.string().min(1).max(150), ownerName: z.string().min(1).max(150), createdAt: z.string().datetime(),
   extension: z.enum(['mp4', 'webm', 'mp3', 'wav', 'ogg', 'png', 'jpg', 'webp']),
 }).strict();
-type SavedAsset = z.infer<typeof schema>;
+export type SavedAsset = z.infer<typeof clipAssetSchema>;
 export class ClipAssetError extends Error { constructor(public status: number, message: string) { super(message); } }
 function signature(bytes: Buffer, mime: string): Pick<SavedAsset, 'kind' | 'mime' | 'extension'> | null {
   if (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return { kind: 'image', mime: 'image/png', extension: 'png' };
@@ -40,7 +40,7 @@ export async function createClipAssets(dir: string) {
   const incoming = path.join(dir, 'incoming'); await fs.mkdir(incoming, { recursive: true });
   const indexPath = path.join(dir, 'assets.json');
   let assets: SavedAsset[] = [];
-  try { assets = z.array(schema).max(2000).parse(JSON.parse(await fs.readFile(indexPath, 'utf8'))); }
+  try { assets = z.array(clipAssetSchema).max(2000).parse(JSON.parse(await fs.readFile(indexPath, 'utf8'))); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('The imported-media index could not be read. Existing files are preserved.'); }
   let writes: Promise<unknown> = Promise.resolve(), uploading = 0, closed = false;
   const pending = new Set<Promise<unknown>>();
@@ -102,5 +102,9 @@ export async function createClipAssets(dir: string) {
     try { const resolved = resolve(String(req.params.id)); res.type(resolved.asset.mime).set('Cache-Control', 'private, max-age=3600').sendFile(path.resolve(resolved.path), error => { if (error && !res.headersSent) next(error); }); }
     catch (error) { next(error); }
   });
-  return { router, list, resolve, async close() { closed = true; await Promise.allSettled([...pending]); await writes; } };
+  return { router, list, resolve,
+    withTransferLock<T>(operation: (session: { assets: SavedAsset[]; dir: string; file: string; replaceSync(next: SavedAsset[]): void }) => Promise<T>) {
+      return serial(() => operation({ assets: structuredClone(assets), dir, file: indexPath, replaceSync: next => { assets = structuredClone(next); } }));
+    },
+    async close() { closed = true; await Promise.allSettled([...pending]); await writes; } };
 }

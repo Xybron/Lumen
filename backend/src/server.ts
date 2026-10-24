@@ -13,6 +13,8 @@ import { startVpsBridge } from './vps-bridge.js';
 import { startMediaStatusPoller } from './media-engine.js';
 import { createProduction } from './production.js';
 import { createWorship } from './worship.js';
+import { createDataTransferRouter } from './data-transfer-routes.js';
+import { createDataClearRouter } from './data-clear-routes.js';
 import { DATA_DIR, FRONTEND_DIST, INCOMING_DIR, MEDIA_DIR, MEDIA_KINDS } from './paths.js';
 import { acquireStationLock } from './station-lock.js';
 import { createTeamConfigRouter } from './team-config.js';
@@ -79,6 +81,10 @@ export async function startLumenServer(options: LumenServerOptions = {}) {
     development: options.development ?? (process.argv[1]?.endsWith('.ts') ?? false),
   }, worship.sceneCueGates, options.productionDependencies);
   cleanup.push(() => production.close());
+  const dataTransfer = createDataTransferRouter(worship.library, DATA_DIR, relay, production.transfer);
+  cleanup.push(() => dataTransfer.close());
+  const dataClear = createDataClearRouter(worship.library, DATA_DIR, relay, production.transfer, worship.dataCleared);
+  cleanup.push(() => dataClear.close());
   const localOrigins = [`http://${localHost}:${PORT}`, `http://127.0.0.1:5173`, `http://localhost:5173`];
   const configuredRenderer = options.rendererUrl ?? process.env.LUMEN_RENDERER_URL;
   if (configuredRenderer) {
@@ -130,6 +136,8 @@ export async function startLumenServer(options: LumenServerOptions = {}) {
 
   app.use('/api', identityRouter);
   app.use('/api', production.router);
+  app.use('/api', dataClear.router);
+  app.use('/api', dataTransfer.router);
   app.use('/api', worship.router);
   app.use('/api', router);
   app.use('/api', createMediaRouter(relay));

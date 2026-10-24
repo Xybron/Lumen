@@ -62,7 +62,7 @@ try {
   for (let index = 0; index < 12; index++) {
     const song = await request.post(`${base}/api/worship/songs`, { data: {
       id: `layout_song_${index}`, title: `Service song ${String(index + 1).padStart(2, '0')}`, author: 'Local test library',
-      sections: Array.from({ length: 4 }, (_, section) => ({ id: `section_${section}`, label: section === 0 ? 'Verse' : `Chorus ${section}`, text: 'Together in this place\nLet every voice sing out with joy\nA song for this moment\nHope for every heart' })),
+      sections: Array.from({ length: 12 }, (_, section) => ({ id: `section_${section}`, label: section === 0 ? 'Verse' : `Chorus ${section}`, text: 'Together in this place\nLet every voice sing out with joy\nA song for this moment\nHope for every heart' })),
     } });
     assert.equal(song.status(), 201, await song.text()); songIds.push((await song.json()).id);
   }
@@ -99,7 +99,7 @@ try {
     await expandDock();
     await dock.getByRole('button', { name: 'Reset toolbar position', exact: true }).click();
     await page.locator('.w-workspace').evaluate(element => { element.scrollTop = 0; });
-    await page.locator('.w-library,.w-search-panel,.w-cue-panel,.w-results').evaluateAll(elements => elements.forEach(element => { element.scrollTop = 0; }));
+    await page.locator('.w-library,.w-search-panel,.w-song-panel,.w-song-cues,.w-setlist-content,.w-setlist-list,.w-cue-panel,.w-results').evaluateAll(elements => elements.forEach(element => { element.scrollTop = 0; }));
     await settle();
   }
   async function geometry(kind, size) {
@@ -109,6 +109,13 @@ try {
       return {
         workspace: box(workspace), layout: box(layout),
         panels: [...layout.children].map(box),
+        search: box(layout.querySelector('.w-search-panel')),
+        song: layout.querySelector('.w-song-panel') ? box(layout.querySelector('.w-song-panel')) : null,
+        setlist: layout.querySelector('.w-setlist-panel') ? box(layout.querySelector('.w-setlist-panel')) : null,
+        cue: box(layout.querySelector('.w-cue-panel')),
+        listenerCount: layout.querySelectorAll('.w-listener').length,
+        listenerInSetlist: !!layout.querySelector('.w-setlist-panel .w-listener'),
+        listenerAfterSetlist: !!layout.querySelector('.w-setlist-content') && !!(layout.querySelector('.w-setlist-content').compareDocumentPosition(layout.querySelector('.w-listener')) & Node.DOCUMENT_POSITION_FOLLOWING),
         outerBottomPadding: parseFloat(getComputedStyle(workspace).paddingBottom),
         panelTopPadding: parseFloat(getComputedStyle(workspace).paddingTop),
         horizontalFits: document.documentElement.scrollWidth <= innerWidth,
@@ -119,7 +126,8 @@ try {
     measurements.push({ channel: kind, ...size, ...result });
     assert.ok(result.horizontalFits, `${kind} has no horizontal page overflow at ${size.width}×${size.height}`);
     assert.ok(result.outerBottomPadding <= 24, `${kind} uses a normal outer bottom gutter, not a reserved toolbar-sized empty row`);
-    if (size.width > 1024 && size.height >= 720) {
+    const fullHeightColumns = kind === 'lyrics' ? size.width >= 1280 : size.width > 1024;
+    if (fullHeightColumns && size.height >= 720) {
       assert.ok(result.documentFits, `${kind} stays inside the viewport on desktop`);
       assert.ok(Math.abs(result.workspace.bottom - size.height) < 1, `${kind} workspace fills the viewport below the header`);
       for (const [index, panel] of result.panels.entries()) {
@@ -127,8 +135,25 @@ try {
           `${kind} panel ${index + 1} reaches the normal bottom gutter (${size.height - panel.bottom}px gap)`);
       }
       assert.ok(Math.abs(result.outerBottomPadding - result.panelTopPadding) < 1, `${kind} top and bottom panel gutters match`);
-    } else if (size.width <= 1024) {
+    } else if (!fullHeightColumns) {
       assert.ok(result.scrollable, `${kind} stacked panels remain vertically scrollable`);
+    }
+    if (kind === 'lyrics') {
+      assert.equal(result.listenerCount, 1, 'Lyrics has one listening instance at every breakpoint');
+      assert.ok(result.listenerInSetlist && result.listenerAfterSetlist, 'Local listening stays below the service setlist');
+      assert.ok(result.song, 'Selected song has its own panel');
+      if (size.width > 650) {
+        assert.ok(Math.abs(result.search.top - result.song.top) < 2, `Song sections align beside Find a song at ${size.width}px`);
+        assert.ok(result.song.left >= result.search.right, `Song sections do not cover the search column at ${size.width}px`);
+        if (size.width >= 1280) {
+          assert.ok(result.setlist.right <= result.search.left && result.song.right <= result.cue.left, 'Desktop columns follow setlist, search, selected song, prepared/live order');
+        } else {
+          assert.ok(result.cue.top >= result.search.bottom, 'Prepared/live controls move below the working columns on narrower screens');
+        }
+      } else {
+        assert.ok(result.song.top >= result.search.bottom && result.cue.top >= result.song.bottom && result.setlist.top >= result.cue.bottom,
+          'Phone layout keeps search, selected song, prepared/live, then setlist/listening in reading order');
+      }
     }
   }
   async function reachable(locator, label) {
@@ -154,10 +179,27 @@ try {
     assert.ok(hit.reachable, `${label} is scroll-reachable and not covered by the floating toolbar: ${JSON.stringify(hit)}`);
   }
 
+  async function independentLyricsScroll(size) {
+    const scrolls = () => page.evaluate(() => ({
+      workspace: document.querySelector('.w-workspace').scrollTop,
+      search: document.querySelector('.w-lyrics-results').scrollTop,
+      song: document.querySelector('.w-song-panel').scrollTop + document.querySelector('.w-song-cues').scrollTop,
+    }));
+    const before = await scrolls();
+    await page.locator('.w-song-cues .w-section-cue').last().evaluate(element => element.scrollIntoView({ block: 'end', inline: 'nearest' }));
+    await settle();
+    const after = await scrolls();
+    assert.ok(after.song > before.song, `The long song has its own scroll area at ${size.width}×${size.height}`);
+    assert.equal(after.workspace, before.workspace, 'Reading later sections does not move the workspace');
+    assert.equal(after.search, before.search, 'Reading later sections preserves the song-search position');
+    await resetAndTop();
+  }
+
   for (const kind of ['scripture', 'lyrics']) {
     await openChannel(kind);
-    for (const size of [{ width: 1512, height: 982 }, { width: 2048, height: 1287 }, { width: 1280, height: 720 }, { width: 1280, height: 600 }, { width: 1024, height: 768 }, { width: 390, height: 844 }]) {
+    for (const size of [{ width: 1512, height: 982 }, { width: 2048, height: 1287 }, { width: 1280, height: 720 }, { width: 1280, height: 600 }, { width: 1100, height: 768 }, { width: 1024, height: 768 }, { width: 800, height: 900 }, { width: 390, height: 844 }]) {
       await page.setViewportSize(size); await resetAndTop(); await geometry(kind, size);
+      if (kind === 'lyrics' && size.width >= 1280 && size.height >= 720) await independentLyricsScroll(size);
       await page.screenshot({ path: path.join(dir, `${kind}-${size.width}x${size.height}.png`), fullPage: false });
       for (const collapsed of [false, true]) {
         if (collapsed) await dock.getByRole('button', { name: 'Collapse toolbar', exact: true }).click();
@@ -167,8 +209,13 @@ try {
         await reachable(page.getByRole('button', { name: 'Send live', exact: true }), `${label}: Send live`);
         await reachable(page.getByRole('button', { name: 'Next', exact: true }), `${label}: Next`);
         await reachable(page.getByRole('button', { name: kind === 'scripture' ? 'Manage versions' : 'Add a song', exact: true }), `${label}: Library action`);
+        if (kind === 'lyrics') {
+          await reachable(page.locator('.w-song-cues .w-section-cue').last(), `${label}: Last song section`);
+          await reachable(page.locator('.w-song-select').last(), `${label}: Last search result`);
+          await reachable(page.locator('.w-setlist-song').last().locator('button').first(), `${label}: Last setlist song`);
+        }
       }
-      if (size.width <= 1024) {
+      if (size.width <= 1024 || kind === 'lyrics' && size.width < 1280) {
         await page.locator('.w-workspace').evaluate(element => { element.scrollTop = element.scrollHeight; }); await settle();
         const bottom = await page.evaluate(() => {
           const workspace = document.querySelector('.w-workspace'), layout = document.querySelector('.w-layout');
@@ -177,7 +224,7 @@ try {
         assert.ok(bottom >= 0 && bottom <= 24, `${kind} stacked layout ends at its normal gutter, not an empty external toolbar row (${bottom}px)`);
       }
     }
-    checks.push(`${kind}: viewport-height panels, six responsive sizes, expanded/collapsed toolbar, nested-scroll action reachability`);
+    checks.push(`${kind}: eight responsive sizes, expanded/collapsed toolbar, nested-scroll action reachability${kind === 'lyrics' ? ', adjacent song sections and setlist listening' : ''}`);
   }
   assert.deepEqual(await (await request.get(`${base}/api/studio`)).json(), initialStudio, 'Layout-only interactions preserve scenes, Program, outputs and audio');
   for (const [index, id] of ['scripture', 'lyrics'].entries()) assert.deepEqual(await (await request.get(`${base}/api/worship/channels/${id}`)).json(), initialWorship[index], 'Preparing content and checking layout never publishes or changes channel state');

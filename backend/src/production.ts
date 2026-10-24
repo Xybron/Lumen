@@ -12,6 +12,7 @@ import { ProductionError, ProductionStore } from './production-store.js';
 import { ProductionSchema, CommandSchema } from './production-schema.js';
 import { RecordingStore } from './production-recordings.js';
 import { createClips } from './clips.js';
+import { ProductionDataTransfer } from './production-data-transfer.js';
 import { createBroadcast, type BroadcastWatchRelay } from './broadcast.js';
 import type { BroadcastSpawn } from './broadcast-process.js';
 import { createWatchRelayFromEnv } from './broadcast-relay.js';
@@ -416,6 +417,9 @@ export async function createProduction(rendererOptions: Pick<RendererOriginOptio
     res.status(code).json({ error: error instanceof z.ZodError ? error.issues[0].message : error.message });
   });
   return { router, wss: hub.wss,
+    transfer: new ProductionDataTransfer(store, recordings, 'transfer' in clips ? clips.transfer : undefined,
+      () => !!browser || !!launchTask || recoveryRequests > 0 || status.state === 'starting' || status.state === 'running'
+        || recordings.list().some(item => ['starting', 'recording', 'stopping', 'finalizing'].includes(item.status))),
     mobile: {
       get: () => store.get(), status: snapshot,
       attachProgramViewer: (ws: import('ws').WebSocket) => hub.attachMobileProgramViewer(ws),

@@ -219,6 +219,8 @@ export type BroadcastMsg =
   | { t: 'config'; settings: Settings }
   | { t: 'music'; current: string | null; playing: boolean }
   | { t: 'content-updated'; updatedAt: string }
+  | { t: 'library-updated' }
+  | { t: 'data-cleared' }
   | { t: 'media-added'; kind: 'backgrounds' | 'music'; pendingId: string; contributor?: string }
   | { t: 'mediastatus'; egress: EgressStatus[]; ingest: Array<{ sourceId: string; connected: boolean }> }
   | { t: 'agents'; agents: AgentSnapshot[] }

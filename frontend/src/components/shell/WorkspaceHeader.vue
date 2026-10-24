@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import { useRoute } from 'vue-router';
 import { Aperture } from 'lucide-vue-next';
 import TeamButton from '@/components/team/TeamButton.vue';
+import AccountMenu from './AccountMenu.vue';
+const route = useRoute();
 </script>
 
 <template>
@@ -8,6 +11,7 @@ import TeamButton from '@/components/team/TeamButton.vue';
     <RouterLink to="/" class="lumen-brand" aria-label="Lumen home"><span><Aperture :size="22" :stroke-width="1.5" /></span>lumen</RouterLink>
     <div class="lumen-header-detail"><slot /></div>
     <TeamButton />
+    <AccountMenu v-if="route.name !== 'dashboard' && route.name !== 'studio'" placement="header" />
   </header>
 </template>
 

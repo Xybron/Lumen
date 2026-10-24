@@ -10,10 +10,11 @@ import { atomicWriteJson } from './atomic.js';
 import { ProductionError } from './production-store.js';
 import type { StudioRecording } from '../../shared/production.js';
 
-interface SavedRecording extends StudioRecording { nextChunk: number }
+export interface SavedRecording extends StudioRecording { nextChunk: number }
 export class RecordingStore {
   private records = new Map<string, SavedRecording>();
-  private chains = new Map<string, Promise<unknown>>();
+  private chain: Promise<unknown> = Promise.resolve();
+  private finalizing = new Set<string>();
   constructor(private dir: string, private changed: () => void) {}
   async init() {
     await fs.mkdir(this.dir, { recursive: true });
@@ -42,13 +43,19 @@ export class RecordingStore {
     return [...this.records.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(({ nextChunk: _, ...r }) => ({ ...r }));
   }
   active() { return this.list().find(r => ['starting', 'recording', 'stopping'].includes(r.status)) ?? null; }
+  busy(id: string) { return this.finalizing.has(id) || ['starting', 'recording', 'stopping', 'finalizing'].includes(this.records.get(id)?.status ?? ''); }
   private async persist(r: SavedRecording) { await atomicWriteJson(path.join(this.dir, r.id, 'recording.json'), r); }
-  private serial<T>(id: string, fn: () => Promise<T>): Promise<T> {
-    const run = (this.chains.get(id) ?? Promise.resolve()).then(fn);
-    this.chains.set(id, run.catch(() => {}));
+  private serial<T>(_id: string, fn: () => Promise<T>): Promise<T> {
+    const run = this.chain.then(fn);
+    this.chain = run.catch(() => {});
     return run;
   }
+  withTransferLock<T>(operation: (session: { records: SavedRecording[]; dir: string; replaceSync(records: SavedRecording[]): void; publish(): void }) => Promise<T>): Promise<T> {
+    return this.serial('transfer', () => operation({ records: structuredClone([...this.records.values()]), dir: this.dir,
+      replaceSync: records => { this.records = new Map(structuredClone(records).map(record => [record.id, record])); }, publish: this.changed }));
+  }
   async create(name: string) {
+    return this.serial('create', async () => {
     if (this.active()) throw new ProductionError(409, 'A recording is already in progress.');
     const r: SavedRecording = {
       id: `rec_${randomUUID()}`, name, status: 'starting', createdAt: new Date().toISOString(),
@@ -59,6 +66,7 @@ export class RecordingStore {
     try { await fs.mkdir(path.join(this.dir, r.id)); await this.persist(r); }
     catch (e) { this.records.delete(r.id); throw e; }
     this.changed(); return { ...r };
+    });
   }
   async setStatus(id: string, status: SavedRecording['status'], error?: string) {
     return this.serial(id, async () => {
@@ -92,19 +100,21 @@ export class RecordingStore {
   async finish(id: string, durationMs?: number) {
     await this.serial(id, async () => {
       const r = this.require(id);
-      if (r.status === 'complete' || r.status === 'finalizing') return;
+      if (r.status === 'complete' || r.status === 'finalizing' || this.finalizing.has(id)) return;
       if (!r.nextChunk) throw new ProductionError(409, 'No recorded media has arrived yet.');
       if (durationMs !== undefined) r.durationMs = durationMs;
       r.status = 'finalizing'; r.error = undefined;
       await this.persist(r); this.changed();
       // The request acknowledges the queued finalization. MediaRecorder chunks
       // form ONE stream; they are joined in sequence, never treated as clips.
-      void this.remux(r).catch(async error => {
-        r.status = 'error'; r.error = `Finalization failed: ${(error as Error).message}. Saved chunks are retained; retry recovery.`;
-        try { await this.persist(r); }
+      this.finalizing.add(id);
+      void this.remux(r).catch(error => this.serial(r.id, async () => {
+        const current = this.require(r.id);
+        current.status = 'error'; current.error = `Finalization failed: ${(error as Error).message}. Saved chunks are retained; retry recovery.`;
+        try { await this.persist(current); }
         catch (storageError) { console.error('[studio] Could not persist finalization error:', storageError); }
         this.changed();
-      });
+      })).finally(() => { this.finalizing.delete(id); });
     });
   }
   private async remux(r: SavedRecording) {
@@ -127,10 +137,13 @@ export class RecordingStore {
       proc.once('error', reject);
       proc.once('close', code => code === 0 ? resolve() : reject(new Error(stderr || `FFmpeg exited ${code}`)));
     });
-    await fs.rename(temp, path.join(dir, 'recording.webm'));
-    r.bytes = (await fs.stat(path.join(dir, 'recording.webm'))).size;
-    r.status = 'complete'; r.error = undefined;
-    await this.persist(r); this.changed();
+    await this.serial(r.id, async () => {
+      const current = this.require(r.id);
+      await fs.rename(temp, path.join(dir, 'recording.webm'));
+      current.bytes = (await fs.stat(path.join(dir, 'recording.webm'))).size;
+      current.status = 'complete'; current.error = undefined;
+      await this.persist(current); this.changed();
+    });
   }
   download(id: string) {
     const r = this.require(id);

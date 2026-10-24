@@ -1,7 +1,7 @@
 export interface BibleVersion {
   id: string; name: string; language: string; attribution: string; verseCount: number; installed: boolean;
 }
-export interface Verse { versionId: string; book: number; bookName: string; chapter: number; verse: number; text: string }
+export interface Verse { versionId: string; book: number; bookName: string; chapter: number; verse: number; endVerse?: number; text: string }
 export interface ScriptureSearchReference { book: number; chapter?: number; verse?: number; endVerse?: number; complete: boolean }
 export interface ScriptureSearchChoice { reference: ScriptureSearchReference; label: string; match: 'exact' | 'prefix' | 'corrected' }
 export interface ScriptureSearchResult {

@@ -56,6 +56,7 @@ coverage/
 
 # Lumen runtime data — keep folder shells via .gitkeep files
 # but ignore everything generated or uploaded at runtime.
+*.lumen
 
 # SQLite identity/ops store (users, sessions, roles) — local runtime state
 data/lumen.db

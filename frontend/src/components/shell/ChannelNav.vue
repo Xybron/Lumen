@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
-import { Plus, LogOut, Shield, ChevronUp, Inbox, Clapperboard, Cpu, GripVertical, ChevronsLeft, ChevronsRight, RotateCcw, Presentation, BookOpen, Music2, Grid2X2, Scissors } from 'lucide-vue-next';
+import { Plus, Inbox, Clapperboard, GripVertical, ChevronsLeft, ChevronsRight, RotateCcw, Presentation, BookOpen, Music2, Grid2X2, Scissors } from 'lucide-vue-next';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import { useContentStore } from '@/stores/content';
 import { useEnginesStore } from '@/stores/engines';
@@ -16,9 +15,8 @@ import { usePresenceStore } from '@/stores/presence';
 import { useStagingStore } from '@/stores/staging';
 import { useWorshipStore } from '@/stores/worship';
 import ChannelChip from './ChannelChip.vue';
-import UsersDialog from './UsersDialog.vue';
+import AccountMenu from './AccountMenu.vue';
 import ApprovalDialog from './ApprovalDialog.vue';
-import AgentManagerDialog from './AgentManagerDialog.vue';
 import { openProjection } from '@/lib/tauri';
 import type { ChannelKind } from '@/types';
 import { useFloatingDock } from '@/composables/useFloatingDock';
@@ -131,17 +129,6 @@ async function deleteChannel(id: string, name: string) {
   if (identity.can(id, 'author') && !presence.controlledByOther(id) && content.channels.some(item => item.id === id)) await content.removeChannel(id);
 }
 
-const usersOpen = ref(false);
-const agentsOpen = ref(false);
-async function signOut() {
-  const userId = identity.me?.id;
-  if (!userId || !await confirmAction({
-    title: 'Sign out?',
-    description: 'You will need to sign in again to control this station.',
-    confirmLabel: 'Sign out',
-  })) return;
-  if (identity.me?.id === userId) await identity.logout();
-}
 </script>
 
 <template>
@@ -229,33 +216,7 @@ async function signOut() {
 
     <!-- account / admin menu -->
     <div class="w-px h-6 bg-hair mx-0.5 shrink-0" />
-    <DropdownMenu v-if="identity.me">
-      <DropdownMenuTrigger as-child>
-        <button
-          class="dock-tool dock-account"
-          :title="`Signed in as ${identity.me.displayName}`"
-          :aria-label="`Account menu for ${identity.me.displayName}`"
-        >
-          <span class="h-6 w-6 rounded-full bg-accent/20 text-accent text-[11px] font-semibold flex items-center justify-center uppercase">
-            {{ identity.me.displayName.charAt(0) }}
-          </span>
-          <ChevronUp :size="13" class="opacity-60" />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" :side-offset="8" class="w-48">
-        <div class="px-2 py-1.5 text-xs text-white/50 truncate">{{ identity.me.displayName }}</div>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem v-if="identity.me.isAdmin" @select="usersOpen = true">
-          <Shield :size="13" /> Team &amp; roles
-        </DropdownMenuItem>
-        <DropdownMenuItem v-if="identity.me.isAdmin" @select="agentsOpen = true">
-          <Cpu :size="13" /> Capture agents
-        </DropdownMenuItem>
-        <DropdownMenuItem @select="signOut">
-          <LogOut :size="13" /> Sign out
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <AccountMenu />
     </div>
     <div class="dock-divider" />
     <button class="dock-control dock-reset" aria-label="Reset toolbar position" title="Reset toolbar position" @click="reset"><RotateCcw :size="13" /></button>
@@ -264,9 +225,7 @@ async function signOut() {
       <ChevronsRight v-if="collapsed" :size="16" /><ChevronsLeft v-else :size="16" />
     </button>
   </div>
-  <UsersDialog v-model:open="usersOpen" />
   <ApprovalDialog v-model:open="approvalOpen" />
-  <AgentManagerDialog v-model:open="agentsOpen" />
 </template>
 
 <style scoped>
@@ -279,7 +238,6 @@ async function signOut() {
 .dock-tool { position: relative; display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 36px; height: 38px; border-radius: 6px; color: var(--text-muted); transition: color 120ms, background-color 120ms; }
 .dock-tool:disabled { opacity: .4; cursor: not-allowed; }
 .dock-tool.dock-studio-current { color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px #7dd3fc1f; }
-.dock-account { width: auto; padding: 0 7px; gap: 6px; }
 .floating-dock .dock-grip { width: 24px; cursor: grab; touch-action: none; user-select: none; }
 .floating-dock.dock-dragging, .floating-dock.dock-dragging .dock-grip { cursor: grabbing; user-select: none; }
 .dock-divider { height: 22px; width: 1px; background: var(--border-hair); flex-shrink: 0; }

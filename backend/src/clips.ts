@@ -9,7 +9,7 @@ import { atomicWriteJson } from './atomic.js';
 import type { RecordingStore } from './production-recordings.js';
 import type { ClipDraft, ClipDraftInput, ClipExport, ClipSettings, ClipTimeline, ClipWorkspace } from '../../shared/clips.js';
 import { clipExportOptionsSchema, clipExportProfile, normalizeClipExportOptions, clipExportMatches, exportArguments, MAX_CLIP_MS, MAX_EXPORT_BYTES, parseMediaInfo, runClipMedia, type MediaProcess } from './clip-media.js';
-import { createClipAssets, ClipAssetError, CLIP_INPUT_FORMATS } from './clip-assets.js';
+import { createClipAssets, ClipAssetError, CLIP_INPUT_FORMATS, type SavedAsset } from './clip-assets.js';
 import { timelineSchema, timelineDuration, timelineSourceKey, validateTimelineSources, exportTimelineArguments, prepareTimelineText, parseTimelineMediaInfo, TimelineError, type ResolvedTimelineSource } from './clip-timeline.js';
 import { createClipPreviews, ClipPreviewError } from './clip-previews.js';
 
@@ -30,12 +30,12 @@ export const clipDraftInputSchema = inputObject.refine(v => {
   message: 'Choose a clip between a quarter of a second and two hours.', path: ['outMs'],
 });
 const dateSchema = z.string().datetime();
-const savedDraftSchema = inputObject.extend({
+export const savedDraftSchema = inputObject.extend({
   id: idSchema, recordingId: idSchema, revision: z.number().int().nonnegative(),
   ownerId: z.string().min(1).max(150), ownerName: z.string().min(1).max(150),
   createdAt: dateSchema, updatedAt: dateSchema,
 }).strict();
-const savedExportSchema = z.object({
+export const savedExportSchema = z.object({
   id: idSchema, draftId: idSchema, draftRevision: z.number().int().nonnegative(), recordingId: idSchema,
   name: z.string().min(1).max(120), ownerId: z.string().min(1).max(150),
   status: z.enum(['queued', 'waiting-live', 'exporting', 'complete', 'cancelled', 'error', 'interrupted']),
@@ -45,13 +45,13 @@ const savedExportSchema = z.object({
   options: clipExportOptionsSchema.optional(),
   temporary: z.boolean().optional(), expiresAt: dateSchema.optional(), deliveredAt: dateSchema.optional(), expiredAt: dateSchema.optional(),
 }).strict();
-const indexSchema = z.object({
+export const clipIndexSchema = z.object({
   version: z.literal(1), drafts: z.array(savedDraftSchema).max(10_000), exports: z.array(savedExportSchema).max(10_000),
   media: z.record(z.object({ durationMs: z.number().positive(), width: z.number().int().min(2).max(16384), height: z.number().int().min(2).max(16384) })).default({}),
 }).strict();
 type SavedDraft = z.infer<typeof savedDraftSchema>;
 type SavedExport = z.infer<typeof savedExportSchema>;
-type ClipIndex = z.infer<typeof indexSchema>;
+export type ClipIndex = z.infer<typeof clipIndexSchema>;
 class ClipError extends Error { constructor(public status: number, message: string) { super(message); } }
 const asyncRoute = (fn: (req: Request, res: Response) => Promise<unknown>) =>
   (req: Request, res: Response, next: NextFunction) => { void fn(req, res).catch(next); };
@@ -69,6 +69,24 @@ function input(value: unknown): ClipDraftInput {
   return result.data;
 }
 
+
+export interface ClipTransferSession {
+  data: ClipIndex;
+  assets: SavedAsset[];
+  file: string;
+  assetFile: string;
+  assetDir: string;
+  exportsDir: string;
+  downloads: Set<string>;
+  replaceSync(data: ClipIndex, assets: SavedAsset[]): void;
+}
+export interface ClipTransferAccess {
+  snapshot(): { data: ClipIndex; assets: SavedAsset[] };
+  resolveAsset(id: string): string;
+  resolveExport(id: string): string;
+  withLock<T>(operation: (session: ClipTransferSession) => Promise<T>): Promise<T>;
+}
+
 interface ActiveWork { kind: 'poster' | 'export' | 'preview'; id: string; process: MediaProcess | null; reason: 'live' | 'cancel' | 'shutdown' | null; done: Promise<void> }
 export async function createClips(options: { dir: string; recordings: RecordingStore; isLive: () => boolean }) {
   const { dir, recordings, isLive } = options;
@@ -84,7 +102,7 @@ export async function createClips(options: { dir: string; recordings: RecordingS
   const assets = await createClipAssets(path.join(dir, 'assets'));
   const indexPath = path.join(dir, 'clips.json');
   let data: ClipIndex = { version: 1, drafts: [], exports: [], media: {} };
-  try { data = indexSchema.parse(JSON.parse(await fs.readFile(indexPath, 'utf8'))); }
+  try { data = clipIndexSchema.parse(JSON.parse(await fs.readFile(indexPath, 'utf8'))); }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('The Clips index could not be read. The existing file has been preserved.');
   }
@@ -120,6 +138,7 @@ export async function createClips(options: { dir: string; recordings: RecordingS
     }
   }
   await atomicWriteJson(indexPath, data);
+  let transferHolds = 0;
   let closed = false, liveHold = false, observedLive = false, holdUntil = 0;
   let active: ActiveWork | null = null, ticking = false;
   let writes: Promise<unknown> = Promise.resolve();
@@ -152,7 +171,7 @@ export async function createClips(options: { dir: string; recordings: RecordingS
     });
   }
   await cleanTemporaryExports();
-  const protectedNow = () => liveHold || isLive();
+  const protectedNow = () => transferHolds > 0 || liveHold || isLive();
   const previews = await createClipPreviews({
     dir: path.resolve(dir, 'timeline-previews'), isProtected: protectedNow,
     resolveSource: source => {
@@ -438,7 +457,7 @@ export async function createClips(options: { dir: string; recordings: RecordingS
   }
 
   async function tick() {
-    if (closed || ticking) return;
+    if (closed || ticking || transferHolds > 0) return;
     ticking = true;
     try {
       const live = isLive();
@@ -687,5 +706,24 @@ export async function createClips(options: { dir: string; recordings: RecordingS
     });
     await assets.close();
   }
-  return { router, pauseForLive, close };
+  const transfer: ClipTransferAccess = {
+    snapshot: () => ({ data: structuredClone(data), assets: assets.list().map(asset => structuredClone(assets.resolve(asset.id).asset)) }),
+    resolveAsset: id => assets.resolve(id).path,
+    resolveExport: id => artifactPath(requireExport(id)),
+    async withLock<T>(operation: (session: ClipTransferSession) => Promise<T>): Promise<T> {
+      transferHolds++;
+      try {
+        const work = active;
+        if (work && !work.reason) { work.reason = 'live'; work.process?.stop('Data transfer is preparing a consistent library snapshot.'); }
+        if (work) await work.done;
+        return await serial(() => assets.withTransferLock(assetSession => operation({
+          data: structuredClone(data), assets: assetSession.assets, file: indexPath,
+          assetFile: assetSession.file, assetDir: assetSession.dir, exportsDir,
+          downloads: new Set(downloads.keys()),
+          replaceSync: (next, nextAssets) => { data = structuredClone(next); assetSession.replaceSync(nextAssets); },
+        })));
+      } finally { transferHolds--; }
+    },
+  };
+  return { router, pauseForLive, close, transfer };
 }

@@ -39,6 +39,15 @@ fresh accounts and content. The Mac's scenes, media, songs, accounts and
 recordings are not transferred by these commands. Import the files you want to
 rehearse with through Lumen.
 
+## Bring your existing library from the Mac
+
+On the Mac, open **profile image → Data settings → Export**, choose the Bibles,
+songs, presentations, media, scenes or other content you want, and download the
+`.lumen` file. Copy that file to the Windows laptop. In Windows Lumen, open
+**profile image → Data settings → Import**, select the file, review its contents,
+then choose **Import selected**. Accounts and camera device selections stay local;
+select the Windows capture card again after importing.
+
 ## Camera and display check
 
 1. Connect and power on the camera: camera HDMI → capture card → USB. Allow

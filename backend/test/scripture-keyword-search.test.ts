@@ -7,7 +7,7 @@ import { searchScriptureKeywords } from '../src/scripture-keyword-search.js';
 function database() {
   const db = new Database(':memory:');
   db.exec(`
-    CREATE TABLE verses(id INTEGER PRIMARY KEY,versionId TEXT,book INTEGER,chapter INTEGER,verse INTEGER,text TEXT);
+    CREATE TABLE verses(id INTEGER PRIMARY KEY,versionId TEXT,book INTEGER,chapter INTEGER,verse INTEGER,text TEXT,endVerse INTEGER);
     CREATE VIRTUAL TABLE verses_fts USING fts5(text,content='verses',content_rowid='id',prefix='2 3 4');
     CREATE TRIGGER verse_insert AFTER INSERT ON verses BEGIN
       INSERT INTO verses_fts(rowid,text) VALUES(new.id,new.text);

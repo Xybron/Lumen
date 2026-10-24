@@ -27,6 +27,13 @@ export class ProductionStore {
     }
   }
   get(): ProductionState { return structuredClone(this.state); }
+  /** The transfer coordinator publishes only after all other stores commit. */
+  withTransferLock<T>(operation: (session: { state: ProductionState; file: string; replaceSync(state: ProductionState): void; publish(): void }) => Promise<T>): Promise<T> {
+    const run = this.chain.then(() => operation({ state: this.get(), file: path.join(this.dir, 'production.json'),
+      replaceSync: state => { this.state = structuredClone(state); }, publish: () => this.changed(this.get()) }));
+    this.chain = run.catch(() => {});
+    return run;
+  }
   private mutate(revision: number, fn: (draft: ProductionState) => void | boolean | Promise<void | boolean>, commit?: () => void) {
     const run = this.chain.then(async () => {
       if (revision !== this.state.revision) throw new ProductionError(409, 'Studio changed on another device. Your view has been refreshed; please retry.');

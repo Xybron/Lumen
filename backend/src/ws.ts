@@ -21,6 +21,8 @@ const GLOBAL = '__global__';
 const GLOBAL_TYPES = new Set([
   'music',
   'content-updated',
+  'library-updated',
+  'data-cleared',
   'config',
   'presence',
   'media-added',
@@ -256,7 +258,7 @@ export function attachWebSocket() {
         if (!ch || !canAuthor(m, ch)) return;
         if (authoritative.has(ch) || (t==='state' && msg.payload && typeof msg.payload==='object' && 'cue' in msg.payload)) return;
       }
-      if (t === 'worship-state') return;
+      if (t === 'worship-state' || t === 'library-updated' || t === 'data-cleared') return;
       // The Program/Preview bus is an authoritative switcher action — require an
       // authenticated operator (unauth Live/Output sockets must never cut air).
       if (t === 'program' && !m.user) return;

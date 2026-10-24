@@ -70,20 +70,29 @@ export const useContentStore = defineStore('content', () => {
 
   // Optimistic save: mutate locally, then PUT. On failure, restore the snapshot.
   // Returns true on success so callers can branch (e.g. defer side effects).
-  async function save(mutator: (draft: Content) => void): Promise<boolean> {
+  let saveChain: Promise<unknown> = Promise.resolve();
+  let pendingSaves = 0;
+  function save(mutator: (draft: Content) => void): Promise<boolean> {
+    pendingSaves++; saving.value = true;
+    // Apply each queued edit to the latest acknowledged version, so rapid
+    // slider inputs and edits from this window do not conflict with themselves.
+    const run = saveChain.then(() => saveNow(mutator));
+    saveChain = run.catch(() => {});
+    return run.finally(() => { pendingSaves--; saving.value = pendingSaves > 0; });
+  }
+
+  async function saveNow(mutator: (draft: Content) => void): Promise<boolean> {
     const snapshot = snapshotContent(content.value);
     mutator(content.value);
-    saving.value = true;
     try {
       content.value = await api.putContent(content.value);
       broadcast({ t: 'content-updated', updatedAt: content.value.updatedAt });
       return true;
     } catch (e) {
       content.value = snapshot;
+      if (e instanceof Error && e.message.startsWith('409 ')) await load();
       toast.error(`Save failed: ${(e as Error).message}`);
       return false;
-    } finally {
-      saving.value = false;
     }
   }
 

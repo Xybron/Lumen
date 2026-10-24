@@ -12,7 +12,7 @@
 .w-workspace button:disabled,.w-dialog button:disabled{opacity:.4;cursor:not-allowed}
 .w-workspace button:focus-visible,.w-workspace a:focus-visible,.w-workspace input:focus-visible,.w-workspace select:focus-visible,.w-workspace summary:focus-visible,.w-dialog input:focus-visible,.w-dialog textarea:focus-visible,.w-dialog button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .w-layout{min-height:600px;flex:1;display:grid;grid-template-columns:216px minmax(300px,1fr) 300px;gap:12px}
-.w-library.panel,.w-search-panel.panel,.w-cue-panel.panel{min-height:0;min-width:0;padding:16px;background:var(--surface-1,#18191c);border:1px solid var(--border-hair,#ffffff12);border-radius:var(--radius-panel,12px);box-shadow:none;backdrop-filter:none}
+.w-library.panel,.w-search-panel.panel,.w-song-panel.panel,.w-cue-panel.panel{min-height:0;min-width:0;padding:16px;background:var(--surface-1,#18191c);border:1px solid var(--border-hair,#ffffff12);border-radius:var(--radius-panel,12px);box-shadow:none;backdrop-filter:none}
 .w-library,.w-cue-panel{overflow-y:auto}
 .w-library{display:flex;flex-direction:column;gap:13px}
 .w-section-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-shrink:0;min-height:24px}
@@ -220,7 +220,6 @@
 .w-setlist-song .w-icon{min-height:24px;min-width:24px;padding:4px}
 .w-song-result{display:flex;align-items:center;gap:5px;padding:9px;border:1px solid transparent;border-bottom-color:var(--border-hair);border-radius:7px;margin-bottom:3px;background:transparent}
 .w-song-result:hover{background:#ffffff04}
-.w-lyrics-results.has-selection>.w-song-list{max-height:160px;overflow:auto}
 .w-song-result.selected{background:#7dd3fc09;border-color:#7dd3fc40}
 .w-song-result.keyboard-active{outline:1px solid var(--accent);outline-offset:-1px;background:#7dd3fc0c}
 .w-song-select{display:flex;align-items:center;gap:10px;flex:1;min-width:0;text-align:left}
@@ -232,8 +231,15 @@
 .w-song-match b{font-weight:500;color:var(--accent);margin-right:7px;font-size:10px}
 .w-song-icon{display:grid;place-items:center;width:32px;height:32px;border:1px solid var(--border-hair);border-radius:6px;color:var(--text-muted);flex-shrink:0}
 .w-song-result.selected .w-song-icon,.w-icon.pinned{color:var(--accent)}
-.w-song-cues{margin-top:18px;padding-top:14px;border-top:1px solid var(--border-hair)}
-.w-song-cues>.w-section-heading{margin-bottom:10px}
+.w-song-panel{display:flex;flex-direction:column;gap:14px;overflow:hidden}
+.w-song-heading{display:flex;align-items:flex-start;gap:8px;flex-shrink:0;padding-bottom:14px;border-bottom:1px solid var(--border-hair)}
+.w-song-heading>div:first-child{flex:1;min-width:0}
+.w-song-eyebrow{display:block;font-size:8px;letter-spacing:.7px;color:var(--text-muted);margin-bottom:6px}
+.w-song-heading h2{font-size:14px;font-weight:600;letter-spacing:-.2px;line-height:1.5;overflow-wrap:anywhere}
+.w-song-heading p{font-size:10px;color:var(--text-muted);line-height:1.6;margin-top:4px;overflow-wrap:anywhere}
+.w-song-actions{display:flex;flex-shrink:0;gap:2px}
+.w-song-cues{flex:1;min-height:0;overflow-y:auto;padding:2px;scroll-padding:4px}
+.w-song-empty{flex:1;min-height:180px}
 .w-section-cue{width:100%;display:flex;text-align:left;align-items:center;gap:10px;padding:11px;border:1px solid var(--border-hair);border-radius:7px;margin-bottom:6px}
 .w-section-cue:hover{background:#ffffff04}
 .w-section-cue>span{color:var(--text-muted);font-size:9px;font-variant-numeric:tabular-nums}
@@ -348,4 +354,71 @@
 }
 @media(prefers-reduced-motion:reduce){
   .w-workspace button,.w-dialog button,.w-input-meter span{transition:none}
+}
+
+/* Lyrics keeps the library and selected song side by side. The setlist owns
+   its listener, with one mounted instance across all responsive layouts. */
+.w-lyrics-layout{grid-template-columns:236px minmax(0,.9fr) minmax(0,1.1fr) 280px}
+.w-lyrics-layout>.w-search-panel{overflow:hidden}
+.w-lyrics-layout .w-search-heading{align-items:flex-start;flex-wrap:wrap;gap:6px}
+.w-lyrics-layout .w-search-hint{font-size:9px}
+.w-lyrics-layout .w-results{min-height:0;max-height:none}
+.w-setlist-panel.panel{gap:16px}
+.w-setlist-content{display:flex;flex-direction:column;gap:12px;flex:1;min-height:190px}
+.w-setlist-content>.w-library-heading{margin:0;flex-shrink:0}
+.w-setlist-content>.w-muted,.w-setlist-content>.w-button{flex-shrink:0}
+.w-setlist-content>.w-setlist-list{flex:1;min-height:60px;max-height:none;scroll-padding:4px}
+.w-setlist-content>.w-setlist-empty{flex:1;min-height:60px;justify-content:center;padding:12px 0}
+.w-setlist-panel .w-button.wide{white-space:normal}
+.w-listener-compact.panel-soft{margin-top:auto;padding:15px 0 0;border-width:1px 0 0;border-radius:0;background:none;gap:10px}
+.w-listener-compact .w-ai-icon,.w-listener-compact .w-local{display:none}
+.w-listener-compact .w-listener-title{align-items:flex-start;gap:5px}
+.w-listener-compact .w-listener-title>div{flex:1}
+.w-listener-compact .w-listener-title p{font-size:10px;line-height:1.5}
+.w-listener-compact .w-listener-settings{margin-top:-4px;margin-right:-5px}
+.w-listener-compact .w-listener-transport{grid-template-columns:minmax(0,1fr) auto;gap:7px}
+.w-listener-compact .w-listener-device{grid-column:1/-1;padding:8px}
+.w-listener-compact .w-listener-device b{font-size:10px}
+.w-listener-compact .w-listener-start{min-width:0;padding:8px;font-size:10px}
+.w-listener-compact .w-listener-signal{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px}
+.w-listener-compact .w-listener-meter{grid-column:1/-1;width:100%}
+.w-listener-compact .w-listener-note{font-size:9px;overflow-wrap:anywhere}
+.w-listener-compact .w-transcript p{font-size:11px;overflow-wrap:anywhere}
+.w-listener-compact.armed{border-top-color:#e3ba6666}
+@media(min-width:1600px){
+  .w-lyrics-layout{grid-template-columns:248px minmax(0,.85fr) minmax(0,1.15fr) 300px}
+}
+@media(min-width:1280px){
+  .w-lyrics-layout>.w-song-panel{padding-bottom:var(--w-toolbar-clearance);scroll-padding-bottom:var(--w-toolbar-clearance)}
+}
+@media(min-width:1025px) and (max-width:1399px){
+  .w-lyrics-layout{grid-template-columns:220px minmax(0,.9fr) minmax(0,1.1fr) 250px;gap:10px}
+  .w-lyrics-layout .w-song-icon{display:none}
+  .w-lyrics-layout .w-search-hint{display:none}
+}
+@media(min-width:651px) and (max-width:1279px){
+  .w-lyrics-layout{flex:none;grid-template-columns:220px minmax(0,.9fr) minmax(0,1.1fr);grid-template-rows:minmax(540px,calc(100dvh - 100px)) auto;gap:12px}
+  .w-lyrics-layout>.w-library,.w-lyrics-layout>.w-search-panel,.w-lyrics-layout>.w-song-panel{padding-bottom:16px;scroll-padding-bottom:16px}
+  .w-lyrics-layout>.w-cue-panel{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;align-items:start;gap:18px}
+  .w-lyrics-layout .w-cue-group-live{padding:0 0 0 18px;border-top:0;border-left:1px solid var(--border-hair)}
+  .w-lyrics-layout .w-ownership{grid-column:1/-1}
+}
+@media(min-width:651px) and (max-width:1024px){
+  .w-lyrics-layout{grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);grid-template-rows:540px auto}
+  .w-lyrics-layout>.w-search-panel{grid-column:1;grid-row:1;min-height:0}
+  .w-lyrics-layout>.w-song-panel{grid-column:2;grid-row:1}
+  .w-lyrics-layout>.w-library{grid-column:1;grid-row:2;max-height:none;min-height:620px;padding-bottom:var(--w-toolbar-clearance)}
+  .w-lyrics-layout>.w-cue-panel{grid-column:2;grid-row:2;display:flex}
+  .w-lyrics-layout .w-cue-group-live{padding:14px 0 0;border-left:0;border-top:1px solid var(--border-hair)}
+  .w-setlist-content>.w-setlist-list{max-height:320px}
+}
+@media(max-width:650px){
+  .w-lyrics-layout>.w-search-panel{order:0;min-height:0;height:400px;flex-shrink:0}
+  .w-lyrics-layout>.w-song-panel{order:1;padding:13px;height:460px;flex-shrink:0}
+  .w-lyrics-layout>.w-cue-panel{order:2}
+  .w-lyrics-layout>.w-library{order:3;display:flex;min-height:460px}
+  .w-lyrics-layout .w-search-hint{display:none}
+  .w-lyrics-layout .w-song-heading h2{font-size:13px}
+  .w-setlist-content{flex:none;min-height:0}
+  .w-setlist-content>.w-setlist-list{flex:none;max-height:240px}
 }

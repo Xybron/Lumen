@@ -15,7 +15,7 @@ import type { WorshipWorkspace } from '../../shared/worship.js';
 const route=(fn:(req:Request,res:Response)=>Promise<unknown>|unknown)=>(req:Request,res:Response,next:NextFunction)=>{Promise.resolve().then(()=>fn(req,res)).catch(next);};
 export async function createWorship(relay:RelayHandle) {
   const library=new WorshipLibrary(path.join(DATA_DIR,'worship.db'));
-  if (!library.versions().find(v=>v.id==='KJV')?.installed) {
+  if (!library.versions().find(v=>v.id==='KJV')?.installed && !library.db.prepare("SELECT 1 FROM worship_preferences WHERE key='suppress_default_kjv' AND value='1'").get()) {
     try {
       const books=JSON.parse((await fs.readFile(path.join(ROOT,'backend/assets/kjv.source.json'),'utf8')).replace(/^\uFEFF/,'')) as {chapters:string[][]}[];
       if (books.length!==66) throw new Error('KJV dataset must contain 66 books.');
@@ -128,6 +128,7 @@ export async function createWorship(relay:RelayHandle) {
     });
   }
   return {router,library,sceneCueGates,
+    dataCleared(channelIds: string[]) { for (const id of channelIds) { invalidateListening(id); publish(library.workspace(id)); } },
     mobile: {
       workspace: (channelId:string) => library.workspace(channelId),
       search: (channelId:string, query:string) => {

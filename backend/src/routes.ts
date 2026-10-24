@@ -73,10 +73,23 @@ router.put('/content', requireSession, async (req: Request, res: Response) => {
     return res.status(422).json({ error: 'invalid content', issues: parsed.error.issues });
   }
   const next = { ...parsed.data, updatedAt: new Date().toISOString() };
+  let stale = false;
   await withContentLock(async () => {
+    // Current editors send the version they loaded. In particular, a queued
+    // save from another window must not erase newly imported presentations.
+    const expected = req.get('X-Lumen-Content-Version');
+    if (expected) {
+      try {
+        const current = JSON.parse(await fs.readFile(CONTENT_FILE, 'utf8'));
+        if (current.updatedAt !== expected) { stale = true; return; }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }
     await backupContent();
     await atomicWriteJson(CONTENT_FILE, next);
   });
+  if (stale) return res.status(409).json({ error: 'Content changed on this station. Your view has been refreshed; please try the edit again.' });
   // Drop secret stream keys for any destination removed by this write.
   pruneOrphanTargets(next.destinations.map((d) => d.id));
   res.json(next);

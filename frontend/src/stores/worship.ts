@@ -29,6 +29,13 @@ export const useWorshipStore=defineStore('worship',()=>{
     for(const id of captures.keys())if(!identity.isAuthenticated||presence.controlledByOther(id))void stopListening(id);
   },{deep:true});
   subscribeWs(message=>{if(message.t==='worship-state'){const old=workspaces[message.channel];if(!old||message.workspace.revision>=old.revision)workspaces[message.channel]=message.workspace;}});
+  subscribeWs(message=>{if(message.t==='library-updated')window.dispatchEvent(new Event('lumen:library-imported'));});
+  subscribeWs(message=>{if(message.t==='data-cleared')window.dispatchEvent(new Event('lumen:data-cleared'));});
+  window.addEventListener('lumen:data-cleared',()=>{
+    for(const id of new Set([...Object.keys(drafts),...prepareVersion.keys()])) { prepareVersion.set(id,(prepareVersion.get(id)??0)+1); drafts[id]=null; preparing[id]=false; }
+    for(const id of captures.keys())void stopListening(id,false);
+    void refreshVersions().catch(()=>{});
+  });
   async function load(id:string){subscribeTopics([id]);const state=await worshipRequest<WorshipWorkspace>(`/channels/${id}`);if(!workspaces[id]||state.revision>=workspaces[id].revision)workspaces[id]=state;await refreshVersions();}
   async function refreshVersions(){versions.value=await worshipRequest<BibleVersion[]>('/versions');}
   async function refreshAi(){aiStatus.value=await worshipRequest<ListeningStatus>('/listening/status');}
