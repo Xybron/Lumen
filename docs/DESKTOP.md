@@ -101,7 +101,7 @@ update command again. This is MSYS2's [normal full-update procedure](https://www
 Then install the build tools, accepting the default package selection:
 
 ```sh
-pacman -S --needed base-devel mingw-w64-x86_64-toolchain
+pacman -S --needed base-devel mingw-w64-x86_64-toolchain perl diffutils
 ```
 
 Close the MSYS2 terminal when installation finishes. The Lumen build invokes

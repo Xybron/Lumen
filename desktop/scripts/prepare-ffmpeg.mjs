@@ -72,6 +72,9 @@ export async function prepareFfmpeg(resources, cache) {
   if (windows && (!await exists(bash) || !await exists(path.join(msys, 'mingw64/bin/gcc.exe')))) {
     throw new Error('Install MSYS2 and run "pacman -S --needed base-devel mingw-w64-x86_64-toolchain" in its MINGW64 terminal. Set LUMEN_MSYS2_ROOT if it is not installed in C:\\msys64. These are build-machine tools only.');
   }
+  if (windows && (!await exists(path.join(msys, 'usr/bin/perl.exe')) || !await exists(path.join(msys, 'usr/bin/diff.exe')))) {
+    throw new Error('Install MSYS2 Perl and diffutils in its MINGW64 terminal: pacman -S --needed perl diffutils. libvpx needs both build tools.');
+  }
   const msysEnv = windows ? { ...process.env, MSYSTEM: 'MINGW64', CHERE_INVOKING: '1', MSYS2_PATH_TYPE: 'inherit' } : null;
   const posixPath = async value => windows ? (await run(bash, ['-lc', `cygpath -u ${shellQuote(value)}`], { env: msysEnv }, true)).trim() : value;
   const downloads = path.join(cache, 'ffmpeg-sources'); await fs.mkdir(downloads, { recursive: true });
