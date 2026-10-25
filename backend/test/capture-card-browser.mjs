@@ -162,8 +162,11 @@ try {
   await open();
   assert.equal((await trace()).calls.length, 0, 'Opening input setup does not capture hardware');
   await dialog().getByTestId('input-device-discovery').filter({ hasText: 'Access needed' }).waitFor();
+  const allowCamera = dialog().getByRole('button', { name: 'Allow camera access', exact: true });
+  await allowCamera.waitFor();
   await page.evaluate(() => window.__captureDevices.failNext('NotReadableError'));
-  await startPreview();
+  await allowCamera.click();
+  await until(async () => (await trace()).calls.length === 1, 'access button requests camera permission');
   await until(() => video().locator('option[value="hdmi-video"]').textContent().then(text => text === 'USB Video'), 'already-connected generic card is found even when default camera is busy');
   await dialog().getByRole('alert').filter({ hasText: 'Close other apps' }).waitFor();
   const failedEnumeration = (await trace()).enumerations;
