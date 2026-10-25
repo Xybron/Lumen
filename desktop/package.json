@@ -1,0 +1,24 @@
+{
+  "name": "lumen-desktop",
+  "productName": "Lumen",
+  "version": "1.0.0",
+  "description": "Lumen presentation and live production studio",
+  "author": "Lumen",
+  "private": true,
+  "license": "UNLICENSED",
+  "main": "app/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "prepare:bundle": "node scripts/prepare.mjs",
+    "package": "node scripts/package.mjs",
+    "package:dir": "node scripts/package.mjs --dir",
+    "smoke": "node scripts/smoke.mjs",
+    "test:codecs": "node scripts/check-codecs.mjs",
+    "test": "node --test test/*.test.cjs"
+  },
+  "devDependencies": {
+    "electron": "45.0.0",
+    "electron-builder": "26.18.0",
+    "extract-zip": "2.0.1"
+  }
+}

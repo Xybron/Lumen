@@ -10,6 +10,11 @@ frontend/dist/
 media-sidecar/dist/
 *.tsbuildinfo
 
+# Desktop downloads, native staging and installers (application sources stay tracked)
+desktop/.cache/
+desktop/release/
+desktop/test-results/
+
 # Tauri / Rust build output + bundled sidecar binaries
 src-tauri/target/
 src-tauri/binaries/

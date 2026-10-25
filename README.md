@@ -33,6 +33,10 @@ unconfigured. The PowerSync trial uses only synthetic local data, not LAB.
 
 ## Quick start
 
+For installation without Git or Node.js, see the [Windows and Mac desktop guide](docs/DESKTOP.md).
+Electron packages the same interface and backend with their local runtimes; the
+web development and server commands below remain available.
+
 For a Windows church computer, follow the [local testing guide](docs/WINDOWS-LOCAL-TESTING.md),
 including prerequisites, the testing branch, and a separate station data folder.
 

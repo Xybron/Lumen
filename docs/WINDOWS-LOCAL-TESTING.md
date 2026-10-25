@@ -1,5 +1,9 @@
 # Test Lumen on the church Windows computer
 
+For the Electron installer and its local Windows build steps, use the
+[desktop setup guide](DESKTOP.md). The instructions below are for running the
+web edition directly from source.
+
 This runs Lumen from source on the computer connected to the cameras and
 displays. Use Windows 10/11 with Git, Node.js 22 (including npm), and Google
 Chrome installed. Node 22 matches the repository's build configuration.

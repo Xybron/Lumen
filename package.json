@@ -4,6 +4,12 @@
   "version": "1.0.0",
   "description": "Lumen — a sleek, single-operator projection & presentation platform.",
   "scripts": {
+    "desktop:install": "npm --prefix desktop ci",
+    "desktop:prepare": "npm run build && npm --prefix desktop run prepare:bundle",
+    "desktop:package": "npm run desktop:prepare && npm --prefix desktop run package",
+    "desktop:package:dir": "npm run desktop:prepare && npm --prefix desktop run package:dir",
+    "desktop:test": "node --test desktop/test/*.test.cjs",
+    "desktop:smoke": "node desktop/scripts/smoke.mjs",
     "dev": "concurrently -k -n backend,frontend -c blue,magenta \"npm:dev:backend\" \"npm:dev:frontend\"",
     "dev:watch": "node scripts/dev-watch.mjs",
     "dev:team": "node scripts/dev-team.mjs",
