@@ -77,7 +77,7 @@ export async function prepareFfmpeg(resources, cache) {
   const downloads = path.join(cache, 'ffmpeg-sources'); await fs.mkdir(downloads, { recursive: true });
   const archives = new Map();
   for (const source of sources) archives.set(source.id, await download(source, downloads));
-  const revision = 'static-v3';
+  const revision = windows ? 'static-v4' : 'static-v3';
   // Keep Windows compiler flags in a short MSYS path even when the checkout
   // lives in a Windows user directory containing spaces.
   const work = windows ? path.join(msys, 'var/tmp', `lumen-ffmpeg-${revision}-${process.arch}`) : path.join(cache, `ffmpeg-${revision}-${process.arch}`);
@@ -105,7 +105,9 @@ export async function prepareFfmpeg(resources, cache) {
         'set -eu', `cd ${shellQuote(await posixPath(trees.get(id)))}`,
         `export PATH=${shellQuote(`${buildPrefix}/bin`)}:/mingw64/bin:/usr/bin:$PATH`,
         `export PKG_CONFIG_PATH='' PKG_CONFIG_LIBDIR=${shellQuote(`${buildPrefix}/lib/pkgconfig`)}`,
-        `export CFLAGS='-O2' CXXFLAGS='-O2' LDFLAGS=${shellQuote(`-L${buildPrefix}/lib -static-libgcc -static`)}`,
+        // pkgconf's Windows headers otherwise declare imports from a DLL even
+        // though this recipe deliberately builds and links libpkgconf static.
+        `export CFLAGS=${shellQuote(id === 'pkgconf' ? '-O2 -DPKGCONFIG_IS_STATIC' : '-O2')} CXXFLAGS='-O2' LDFLAGS=${shellQuote(`-L${buildPrefix}/lib -static-libgcc -static`)}`,
         `exec ${[command, ...args].map(shellQuote).join(' ')}`,
       ].join('\n');
       return run(bash, ['-lc', script], { env: msysEnv });
