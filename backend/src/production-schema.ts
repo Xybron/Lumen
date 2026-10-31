@@ -123,6 +123,8 @@ export const CommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('take'), sceneId: id, transition: z.enum(['cut', 'fade']).optional(), durationMs: transitionDuration.optional(), swapPreview: z.boolean().optional() }).strict(),
   z.object({ type: z.literal('route'), outputId: id, sceneId: id.nullable() }).strict(),
   z.object({ type: z.literal('blank'), outputId: id, blanked: z.boolean() }).strict(),
+  z.object({ type: z.literal('clear-program') }).strict(),
+  z.object({ type: z.literal('remove-source'), sourceId: id }).strict(),
   z.object({ type: z.literal('set-main-audio'), sourceId: id.nullable() }).strict(),
   z.object({ type: z.literal('save-animation-preset'), name, animation: LayerAnimationSchema }).strict(),
   z.object({ type: z.literal('rename-animation-preset'), presetId: id, name }).strict(),

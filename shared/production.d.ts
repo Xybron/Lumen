@@ -166,6 +166,8 @@ export type StudioCommand =
   | { type: 'take'; sceneId: string; transition?: 'cut' | 'fade'; durationMs?: number; swapPreview?: boolean }
   | { type: 'route'; outputId: string; sceneId: string | null }
   | { type: 'blank'; outputId: string; blanked: boolean }
+  | { type: 'clear-program' }
+  | { type: 'remove-source'; sourceId: string }
   | { type: 'set-main-audio'; sourceId: string | null }
   | { type: 'save-animation-preset'; name: string; animation: LayerAnimation }
   | { type: 'rename-animation-preset'; presetId: string; name: string }

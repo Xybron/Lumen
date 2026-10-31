@@ -172,14 +172,33 @@ async function deleteScene() {
 async function deleteSource(source: StudioSource) {
   if (!canOperate.value) return;
   const { id, name } = source;
+  const programUsesSource = !!studio.state?.program?.layers.some(layer => layer.sourceId === id);
+  const pinnedOutputs = studio.state?.outputs.filter(output => output.scene?.layers.some(layer => layer.sourceId === id)).map(output => output.name) ?? [];
+  const livePlaces = [...(programUsesSource ? ['Program'] : []), ...pinnedOutputs];
+  const isMainAudio = studio.state?.mainAudioSourceId === id;
+  const clearsProgram = programUsesSource && studio.state?.program?.layers.every(layer => layer.sourceId === id);
+  const liveNote = livePlaces.length ? engineRunning.value
+    ? clearsProgram ? 'Program will go blank immediately.' : 'The affected live picture will change immediately.'
+    : 'The saved output picture will change.' : '';
   if (!await confirmAction({
-    title: 'Remove source?',
-    description: `“${name}” and its layers will be removed from draft scenes.`,
-    note: 'Sources used in live outputs must be removed from those outputs first.',
-    confirmLabel: 'Remove source',
+    title: livePlaces.length ? 'Remove source from output?' : 'Remove source?',
+    description: `“${name}” will be removed from Sources and all scenes${livePlaces.length ? `, including ${livePlaces.join(' and ')}` : ''}.`,
+    note: [liveNote, isMainAudio ? 'Main audio will be cleared.' : ''].filter(Boolean).join(' ') || undefined,
+    confirmLabel: livePlaces.length && engineRunning.value ? 'Remove from live & delete' : 'Remove source',
     tone: 'danger',
   })) return;
   if (canOperate.value && studio.state?.sources.some(input => input.id === id)) run(studio.removeSource(id));
+}
+async function clearProgram() {
+  if (!canOperate.value || !studio.state?.program) return;
+  if (!await confirmAction({
+    title: 'Clear Program?',
+    description: 'Program and outputs following it will show a blank picture.',
+    note: 'Pinned outputs keep their own picture. Your saved sources remain available.',
+    confirmLabel: 'Clear Program',
+    tone: 'danger',
+  })) return;
+  if (canOperate.value && studio.state?.program) run(studio.command({ type: 'clear-program' }));
 }
 async function connect(source: StudioSource) { try { await studio.connectSource(source); } catch (e) { toast.error((e as Error).message); } }
 function updateAudio(source: StudioSource, patch: Partial<StudioSource['audio']>) {
@@ -290,6 +309,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keydown));
         <details class="engine-diagnostics" @toggle="showEngineDiagnostics"><summary>Technical details</summary><pre>{{ diagnosticsLoading ? 'Loading details…' : engineDiagnostics }}</pre></details>
       </div>
       <div v-if="studio.state.channelInsert" class="studio-banner" role="status">An earlier channel override is still on Program. Cut or Fade a Studio scene to return to scene-only control.</div>
+      <div v-if="!studio.state.scenes.length && studio.state.program" class="studio-banner studio-clear-program" role="status"><span>Program is still showing the last live scene.</span><button class="s-button" @click="clearProgram">Clear Program</button></div>
       <div class="monitors-grid">
         <section class="monitor-panel preview-panel"><div class="monitor-title"><span><span class="tiny-dot" />PREVIEW</span><small>{{ selected?.name ?? 'Choose a scene' }}<i v-if="liveEdited">Unpublished edits</i></small></div>
           <StudioCanvas :scene="selected" :sources="studio.state.sources" :engine-running="engineRunning" @inspect="inspectLayer" />

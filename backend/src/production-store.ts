@@ -117,6 +117,41 @@ export class ProductionStore {
         if (previous && previous.id !== source?.id) previous.audio.muted = true;
         if (source) source.audio.muted = false;
         draft.mainAudioSourceId = source?.id ?? null;
+      } else if (command.type === 'clear-program') {
+        if (!draft.program && !draft.channelInsert) return false;
+        draft.program = null;
+        delete draft.programTransition;
+        delete draft.channelInsert;
+        delete draft.programCueGate;
+        delete draft.programCueGates;
+      } else if (command.type === 'remove-source') {
+        const source = draft.sources.find(item => item.id === command.sourceId);
+        if (!source) throw new ProductionError(404, 'This source was already removed. Refresh Studio and try again.');
+        const removeLayers = (scene: NonNullable<ProductionState['program']>) => {
+          scene.layers = scene.layers.filter(layer => layer.sourceId !== source.id);
+        };
+        draft.sources = draft.sources.filter(item => item.id !== source.id);
+        for (const scene of draft.scenes) removeLayers(scene);
+        const programUsedSource = !!draft.program?.layers.some(layer => layer.sourceId === source.id);
+        if (draft.program) {
+          removeLayers(draft.program);
+          if (programUsedSource && !draft.program.layers.length) {
+            draft.program = null;
+            delete draft.programTransition;
+            delete draft.channelInsert;
+            delete draft.programCueGate;
+            delete draft.programCueGates;
+          } else if (programUsedSource) {
+            draft.programTransition = { id: randomUUID(), kind: 'cut', durationMs: 0 };
+          }
+        }
+        for (const output of draft.outputs) if (output.scene) removeLayers(output.scene);
+        if (draft.mainAudioSourceId === source.id) draft.mainAudioSourceId = null;
+        if (draft.channelInsert?.sourceId === source.id) delete draft.channelInsert;
+        if (source.channelId && !draft.program?.layers.some(layer => draft.sources.some(item => item.id === layer.sourceId && item.channelId === source.channelId))) {
+          if (draft.programCueGate?.channelId === source.channelId) delete draft.programCueGate;
+          if (draft.programCueGates) draft.programCueGates = draft.programCueGates.filter(gate => gate.channelId !== source.channelId);
+        }
       } else if (command.type === 'route' || command.type === 'blank') {
         const output = draft.outputs.find(o => o.id === command.outputId);
         if (!output) throw new ProductionError(404, 'Output not found.');

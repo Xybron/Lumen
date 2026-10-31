@@ -111,6 +111,40 @@ try {
   await until(async () => !(await get()).outputs.some(output => output.id === 'confirm_output'), 'confirmed output removal');
   checks.push('source/output removal requires explicit action-specific confirmation; cancellation preserves state');
 
+  const sourceForReset = { id: 'reset_source', name: 'Reset camera', kind: 'camera', loop: false,
+    audio: { volume: 0.8, muted: true, mode: 'follow', delayMs: 0 } };
+  const prepareResetScene = async () => {
+    await save(state => {
+      if (!state.sources.some(source => source.id === sourceForReset.id)) state.sources.push(sourceForReset);
+      state.scenes = [{ id: 'reset_scene', name: 'Reset scene', background: '#000000', layers: [
+        { id: 'reset_layer', name: 'Reset camera', kind: 'source', sourceId: sourceForReset.id, visible: true, locked: false,
+          x: 0, y: 0, width: 100, height: 100, opacity: 1, fit: 'cover', text: '', color: '#ffffff', background: '#00000000', fontSize: 48, fontWeight: 500, align: 'center', radius: 0 },
+      ] }];
+      state.previewSceneId = 'reset_scene';
+    });
+    const state = await get();
+    const taken = await request.post(`${base}/api/studio/command`, { data: { revision: state.revision, command: { type: 'take', sceneId: 'reset_scene' } } });
+    assert.equal(taken.status(), 200, await taken.text());
+    await save(state => { state.scenes = []; state.previewSceneId = null; });
+    await page.getByRole('button', { name: 'Clear Program', exact: true }).waitFor();
+  };
+  await prepareResetScene();
+  await page.getByRole('button', { name: 'Clear Program', exact: true }).click();
+  const clearDialog = dialog('Clear Program?'); await clearDialog.waitFor();
+  await dismissVia('Clear Program?', modal => modal.getByRole('button', { name: 'Cancel', exact: true }).click());
+  assert.ok((await get()).program, 'Cancelling leaves Program visible');
+  await page.getByRole('button', { name: 'Clear Program', exact: true }).click();
+  await clearDialog.getByRole('button', { name: 'Clear Program', exact: true }).click();
+  await until(async () => !(await get()).program, 'Program cleared without a draft scene');
+  assert.ok((await get()).sources.some(source => source.id === sourceForReset.id), 'Clearing Program retains the reusable source');
+  await prepareResetScene();
+  await page.getByRole('button', { name: 'Remove Reset camera', exact: true }).click();
+  const liveSourceDialog = dialog('Remove source from output?'); await liveSourceDialog.waitFor();
+  assert.match(await liveSourceDialog.textContent(), /including Program/);
+  await liveSourceDialog.getByRole('button', { name: 'Remove source', exact: true }).click();
+  await until(async () => { const state = await get(); return !state.sources.some(source => source.id === sourceForReset.id) && !state.program; }, 'source and final live picture removed together');
+  checks.push('empty draft scenes explain why Program stays live; clearing Program and removing a live source both use explicit confirmation');
+
   await page.getByRole('button', { name: /^Account menu for / }).click();
   await page.getByRole('menuitem', { name: 'Capture agents', exact: true }).click();
   const manager = dialog('Capture agents'); await manager.waitFor();

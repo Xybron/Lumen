@@ -351,8 +351,9 @@ export const useStudioStore = defineStore('studio', () => {
     }
   }
   async function removeSource(id: string) {
-    // The server refuses deleting a source still used by a committed live scene.
-    await edit(d => { d.sources = d.sources.filter(s => s.id !== id); for (const scene of d.scenes) scene.layers = scene.layers.filter(l => l.sourceId !== id); });
+    // Removing a source also changes any committed Program or pinned picture.
+    // The server applies all references in one deliberate command.
+    await command({ type: 'remove-source', sourceId: id });
     disconnectSource(id);
     try { localStorage.removeItem(`lumen:input:${id}`); } catch { /* storage unavailable */ }
   }

@@ -43,6 +43,51 @@ test('draft changes cannot change Program or a pinned output until explicitly co
   assert.deepEqual(restarted.get(), state);
 });
 
+test('removing live sources updates Program and pinned references after drafts are deleted', async () => {
+  const { dir, store } = await fixture();
+  try {
+    const initial = store.get();
+    initial.sources.push({ id: 'camera_one', name: 'Camera', kind: 'camera', loop: false,
+      audio: { volume: 0.8, muted: false, mode: 'follow', delayMs: 0 } });
+    initial.sources.push({ id: 'camera_two', name: 'Second camera', kind: 'camera', loop: false,
+      audio: { volume: 0.8, muted: true, mode: 'follow', delayMs: 0 } });
+    initial.scenes[0].layers = [
+      { ...initial.scenes[0].layers[0], id: 'camera_layer', name: 'Camera layer', kind: 'source', sourceId: 'camera_one' },
+      { ...initial.scenes[0].layers[0], id: 'second_layer', name: 'Second layer', kind: 'source', sourceId: 'camera_two' },
+    ];
+    let state = await store.save(initial);
+    state = await store.command(state.revision, { type: 'take', sceneId: 'scene_welcome' });
+    state = await store.command(state.revision, { type: 'route', outputId: 'screen_main', sceneId: 'scene_welcome' });
+    state = await store.command(state.revision, { type: 'set-main-audio', sourceId: 'camera_one' });
+    state.scenes = []; state.previewSceneId = null;
+    state = await store.save(state);
+    assert.equal(state.program?.layers[0].sourceId, 'camera_one');
+    state = await store.command(state.revision, { type: 'remove-source', sourceId: 'camera_one' });
+    assert.deepEqual(state.program?.layers.map(layer => layer.sourceId), ['camera_two']);
+    assert.deepEqual(state.outputs[0].scene?.layers.map(layer => layer.sourceId), ['camera_two']);
+    assert.equal(state.mainAudioSourceId, null);
+    state = await store.command(state.revision, { type: 'remove-source', sourceId: 'camera_two' });
+    assert.equal(state.sources.length, 0);
+    assert.equal(state.scenes.length, 0);
+    assert.equal(state.program, null);
+    assert.equal(state.outputs[0].scene?.layers.length, 0);
+    const reopened = new ProductionStore(dir); await reopened.init();
+    assert.deepEqual(reopened.get(), state);
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test('clearing Program blanks following outputs while retaining saved sources and pinned scenes', async () => {
+  const { store } = await fixture();
+  let state = await store.command(0, { type: 'take', sceneId: 'scene_welcome' });
+  state = await store.command(state.revision, { type: 'route', outputId: 'screen_main', sceneId: 'scene_welcome' });
+  const pinned = structuredClone(state.outputs[0].scene);
+  state = await store.command(state.revision, { type: 'clear-program' });
+  assert.equal(state.program, null);
+  assert.equal(state.programTransition, undefined);
+  assert.deepEqual(state.outputs[0].scene, pinned);
+  assert.equal(state.outputs[1].mode, 'program');
+});
+
 test('independent blanking and routing preserve every other output and master audio', async () => {
   const { store } = await fixture();
   let state = await store.command(0, { type: 'route', outputId: 'screen_main', sceneId: 'scene_message' });
