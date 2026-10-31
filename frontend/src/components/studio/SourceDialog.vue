@@ -108,8 +108,8 @@ const canAdd = computed(() => !!name.value.trim() && !adding.value && !uploading
   (kind.value !== 'camera' || (editing.value && !selectionChanged.value) || (cameraLive.value && !cameraConnecting.value)) &&
   (kind.value !== 'channel' || !!channelId.value));
 const targetHint = computed(() => editing.value ? 'Changes apply wherever this source is used.' : ['audio', 'microphone'].includes(kind.value)
-  ? 'Starts muted'
-  : 'Adds to Preview');
+  ? 'Adds an audio source to the mixer, muted at first.'
+  : studio.selectedScene ? `Creates a reusable source and places it in ${studio.selectedScene.name}.` : 'Creates a reusable source. Place it in a scene when ready.');
 
 function stopCameraPreview(reset = true) {
   cameraRequest++; cameraCapture.stop(); cameraStream.value = null;

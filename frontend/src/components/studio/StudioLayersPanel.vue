@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
-import { Layers, Type, Square, Film, Plus, Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowUp, ArrowDown, SlidersHorizontal, GripVertical } from 'lucide-vue-next';
+import { Layers, Type, Square, Film, Plus, Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowUp, ArrowDown, SlidersHorizontal, GripVertical, Camera, Monitor, Image, Presentation } from 'lucide-vue-next';
 import { useStudioStore } from '@/stores/studio';
 import LayerContextMenu from './LayerContextMenu.vue';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import type { StudioSource } from '../../../../shared/production';
 
 const emit = defineEmits<{ 'add-source': []; inspect: [] }>();
 const studio = useStudioStore();
@@ -12,9 +14,17 @@ const renamingId = ref<string | null>(null), renameValue = ref('');
 const draggingId = ref<string | null>(null);
 const dropTarget = ref<{ id: string; placement: 'before' | 'after' } | null>(null);
 const selectedIndex = computed(() => layers.value.findIndex(layer => layer.id === studio.selectedLayerId));
+const addOpen = ref(false);
+const visualSources = computed(() => studio.state?.sources.filter(source => !['audio', 'microphone'].includes(source.kind)) ?? []);
+const selectedSceneName = computed(() => studio.selectedScene?.name ?? 'this scene');
+const sourceIcon = (source: StudioSource) => ({ camera: Camera, screen: Monitor, image: Image, video: Film, channel: Presentation })[source.kind as 'camera' | 'screen' | 'image' | 'video' | 'channel'] ?? Film;
+function placeSource(source: StudioSource) {
+  addOpen.value = false;
+  run(studio.addLayer({ kind: 'source', name: source.name, sourceId: source.id, x: 0, y: 0, width: 100, height: 100 }));
+}
 function run(operation: Promise<unknown>) { void operation.catch(() => {}); }
 function clearDrag() { draggingId.value = null; dropTarget.value = null; }
-watch(() => studio.selectedScene?.id, () => { renamingId.value = null; clearDrag(); });
+watch(() => studio.selectedScene?.id, () => { renamingId.value = null; addOpen.value = false; clearDrag(); });
 async function beginRename(id: string) {
   const layer = studio.selectedScene?.layers.find(item => item.id === id);
   if (!layer) return;
@@ -79,10 +89,10 @@ function rowKey(event: KeyboardEvent, id: string) {
 
 <template>
   <section ref="panel" class="tool-panel layers-panel" aria-label="Layers">
-    <div class="tool-heading"><h2><Layers :size="14" />Layers <small class="panel-count">{{ layers.length }}</small></h2><div>
+    <div class="tool-heading"><h2><Layers :size="14" />Scene layers <small class="panel-count">{{ layers.length }}</small></h2><div>
       <button class="s-icon" title="Add text" aria-label="Add text layer" :disabled="!studio.selectedScene" @click="run(studio.addLayer({ kind: 'text', name: 'Text' }))"><Type :size="14" /></button>
       <button class="s-icon" title="Add shape" aria-label="Add shape layer" :disabled="!studio.selectedScene" @click="run(studio.addLayer({ kind: 'shape', name: 'Shape', background: '#b7cfad', x: 10, y: 70, width: 40, height: 15, radius: 12 }))"><Square :size="13" /></button>
-      <button class="s-icon" title="Add source" aria-label="Add source layer" @click="emit('add-source')"><Plus :size="15" /></button>
+      <button class="s-icon layer-add-button" title="Place an input in this scene" aria-label="Add to scene" :disabled="!studio.selectedScene" @click="addOpen = true"><Plus :size="15" /><span>Add</span></button>
     </div></div>
     <div class="layer-list" role="tree" aria-label="Scene layers" @dragleave="leaveList">
       <LayerContextMenu v-for="layer in layers" :key="layer.id" :layer-id="layer.id" @inspect="emit('inspect')" @rename="beginRename(layer.id)">
@@ -97,7 +107,7 @@ function rowKey(event: KeyboardEvent, id: string) {
           <button class="s-icon layer-row-action" :aria-label="(layer.visible ? 'Hide ' : 'Show ') + layer.name" :title="layer.visible ? 'Hide layer' : 'Show layer'" @click.stop="run(studio.updateLayer(layer.id, { visible: !layer.visible }))"><Eye v-if="layer.visible" :size="12" /><EyeOff v-else :size="12" /></button>
         </div>
       </LayerContextMenu>
-      <div v-if="!layers.length" class="panel-empty"><Layers :size="22" /><span>A blank canvas.<br />Add a source, text, or shape.</span></div>
+      <div v-if="!layers.length" class="panel-empty"><Layers :size="22" /><span>This scene is empty.<br />Add an input, text, or shape.</span></div>
     </div>
     <div class="layer-panel-footer">
       <span>{{ studio.selectedLayer?.locked ? 'Unlock to edit' : 'Top layer appears in front' }}</span>
@@ -111,6 +121,22 @@ function rowKey(event: KeyboardEvent, id: string) {
       </div>
     </div>
   </section>
+  <Dialog v-model:open="addOpen">
+    <DialogContent class="studio-dialog scene-source-picker sm:max-w-[460px]">
+      <DialogHeader>
+        <DialogTitle>Add to {{ selectedSceneName }}</DialogTitle>
+        <DialogDescription>Place an existing source in this scene, or create a new one.</DialogDescription>
+      </DialogHeader>
+      <div class="scene-source-options" role="group" aria-label="Available visual inputs">
+        <button v-for="source in visualSources" :key="source.id" type="button" class="scene-source-option" :aria-label="'Place ' + source.name + ' in scene'" @click="placeSource(source)">
+          <component :is="sourceIcon(source)" :size="17" aria-hidden="true" />
+          <span>{{ source.name }}</span><Plus :size="14" aria-hidden="true" />
+        </button>
+        <p v-if="!visualSources.length" class="scene-source-empty">No visual inputs yet.</p>
+      </div>
+      <button type="button" class="scene-source-create" @click="addOpen = false; emit('add-source')"><Plus :size="15" />Create a new source<span>Visual sources are placed in this scene</span></button>
+    </DialogContent>
+  </Dialog>
 </template>
 
 <style scoped>
@@ -136,5 +162,15 @@ function rowKey(event: KeyboardEvent, id: string) {
 .layer-footer-actions .s-icon { width: 27px; height: 27px; }
 .layer-action-divider { width: 1px; height: 14px; margin: 0 3px; background: #ffffff12; }
 .layer-delete-action:not(:disabled):hover { color: #f3a7a1; background: #f88d8512; }
+.layer-add-button { width: auto!important; padding: 0 8px!important; gap: 4px; font-size: 11px; color: var(--s-accent); }
+.scene-source-options { display: grid; gap: 5px; max-height: min(45vh, 300px); overflow-y: auto; }
+.scene-source-option { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 42px; padding: 8px 11px; border: 1px solid var(--border-hair); border-radius: 8px; background: var(--surface-2); color: var(--text-primary); text-align: left; }
+.scene-source-option:hover, .scene-source-create:hover { border-color: var(--s-accent); background: #7dd3fc0d; }
+.scene-source-option > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scene-source-option > svg:first-child, .scene-source-create > svg { color: var(--s-accent); flex-shrink: 0; }
+.scene-source-option > svg:last-child { color: var(--text-muted); flex-shrink: 0; }
+.scene-source-empty { padding: 13px 4px; color: var(--text-muted); font-size: 11px; }
+.scene-source-create { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; width: 100%; padding: 12px; border: 1px dashed #7dd3fc66; border-radius: 8px; text-align: left; color: var(--text-primary); }
+.scene-source-create span { margin-left: auto; font-size: 10px; color: var(--text-muted); }
 @media (pointer: coarse) { .layer-lock-action:not(.is-locked), .layer-grip { opacity: .6; }.layer-row .layer-row-action { width: 30px; height: 30px; } }
 </style>
