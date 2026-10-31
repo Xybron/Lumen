@@ -275,6 +275,8 @@ try {
   const liveOpened = context.waitForEvent('page'); await studioLiveButton.click();
   const programView = await liveOpened; await programView.waitForURL(`${base}/studio/output/program`);
   await until(() => programView.locator('video').evaluate(v => v.readyState >= 2 && v.videoWidth > 0), 'Studio live view renders actual Program even when the first output is pinned');
+  await programView.locator('video').dispatchEvent('stalled');
+  assert.ok(await programView.locator('video').evaluate(video => video.classList.contains('is-ready')), 'A transient playback stall keeps the last good Program frame visible');
   assert.equal(await programView.getByText('Output not found', { exact: true }).count(), 0);
   await programView.screenshot({ path: path.join(dir, 'program-live-view.png') });
   await programView.close();

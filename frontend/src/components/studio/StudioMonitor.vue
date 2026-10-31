@@ -37,7 +37,7 @@ onBeforeUnmount(() => { clearInterval(retry); reset(); signal?.close(); });
 function playing() { ready.value = true; emit('ready', true); }
 defineExpose({ video });
 </script>
-<template><video ref="video" :muted="!audible" autoplay playsinline class="studio-video" :class="{ 'is-ready': ready }" @playing="playing" @stalled="ready = false" /></template>
+<template><video ref="video" :muted="!audible" autoplay playsinline class="studio-video" :class="{ 'is-ready': ready }" @playing="playing" /></template>
 <style scoped>
 .studio-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #080a0d; opacity: 0; }
 .studio-video.is-ready { opacity: 1; }

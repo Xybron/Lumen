@@ -347,8 +347,10 @@ export class StudioCompositor {
   private bus(id: string) {
     let bus = this.buses.get(id);
     if (!bus) {
-      const canvas = document.createElement('canvas');
-      canvas.width = id === 'preview' ? 960 : 1920; canvas.height = id === 'preview' ? 540 : 1080;
+      // Program is already painted at output resolution. Capture that canvas
+      // directly instead of copying another 1920 × 1080 frame on every tick.
+      const canvas = id === 'program' ? this.programCanvas : document.createElement('canvas');
+      if (id !== 'program') { canvas.width = id === 'preview' ? 960 : 1920; canvas.height = id === 'preview' ? 540 : 1080; }
       const destination = this.audio.createMediaStreamDestination(), master = this.audio.createGain(), analyser = this.audio.createAnalyser();
       analyser.fftSize = 256;
       master.connect(analyser); analyser.connect(destination);
@@ -448,9 +450,11 @@ export class StudioCompositor {
       const bus = this.bus(id);
       const followsProgram = id !== 'preview' && output?.mode !== 'scene';
       if (followsProgram && !output?.blanked) {
-        const ctx = bus.canvas.getContext('2d', { alpha: false })!;
-        ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
-        ctx.drawImage(this.programCanvas, 0, 0, bus.canvas.width, bus.canvas.height);
+        if (bus.canvas !== this.programCanvas) {
+          const ctx = bus.canvas.getContext('2d', { alpha: false })!;
+          ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+          ctx.drawImage(this.programCanvas, 0, 0, bus.canvas.width, bus.canvas.height);
+        }
       } else {
         const run = id === 'preview' ? null : this.animationRuns.output(id);
         paintScene(bus.canvas, scene, this.bank, output?.blanked, run ? now - run.startedAt : null);

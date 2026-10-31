@@ -246,6 +246,25 @@ try{
   const songId=(await workspace('lyrics')).setlist[0];
   const songDetails=await (await request.get(`${base}/api/worship/songs`)).json(),testSong=songDetails.find(song=>song.id===songId);
   assert.equal(testSong.title,'A song of welcome');
+  const firstSection=page.locator('.w-section-cue').first(),lastSection=page.locator('.w-section-cue').last();
+  const beforeLyricsTap=publishRequests.length;
+  await prepareClick(firstSection,'Verse 1');
+  assert.equal(publishRequests.length,beforeLyricsTap,'One click previews a lyric section without publishing');
+  await lastSection.dblclick();
+  await until(async()=>selectionMatches((await workspace('lyrics')).live?.selection,{kind:'lyrics',songId,sectionId:testSong.sections[1].id}),'double-click sends the exact lyric section live');
+  assert.equal(publishRequests.length,beforeLyricsTap+1,'Double-click publishes exactly once');
+  await until(()=>page.getByRole('button',{name:'Send live',exact:true}).isEnabled(),'double-click command settles before the next gesture');
+  const touchTakes=publishRequests.length,touchPreviews=previewRequests.length;
+  await firstSection.dispatchEvent('pointerup',{pointerType:'touch'});await firstSection.dispatchEvent('click',{detail:1});
+  assert.equal(publishRequests.length,touchTakes,'First touch remains in preview');
+  assert.equal(previewRequests.length,touchPreviews+1,'First touch requests the lyric preview');
+  await firstSection.dispatchEvent('pointerup',{pointerType:'touch'});await firstSection.dispatchEvent('click',{detail:2});
+  await until(async()=>selectionMatches((await workspace('lyrics')).live?.selection,{kind:'lyrics',songId,sectionId:testSong.sections[0].id}),'second touch sends lyric section live');
+  assert.equal(publishRequests.length,touchTakes+1,'Double-tap publishes exactly once');
+  await until(()=>page.getByRole('button',{name:'Send live',exact:true}).isEnabled(),'touch command settles');
+  const setlistTakes=publishRequests.length;
+  await page.locator('.w-setlist-song > button').first().dblclick();
+  await until(()=>publishRequests.length===setlistTakes+1,'double-clicking a setlist song publishes it once');
   for(const chord of ['Control+Enter','Meta+Enter']){
     await prepareClick(page.locator('.w-song-select').first(),'Verse 1');
     await shortcutSend('lyrics',chord,{kind:'lyrics',songId,sectionId:testSong.sections[0].id},`${chord} publishes immediately after selecting a song`);
@@ -262,6 +281,10 @@ try{
   await page.keyboard.press('Escape');
   await page.getByLabel('Search songs',{exact:true}).fill('A song of welcome');
   await until(()=>page.locator('.w-song-select').count().then(count=>count===1),'song result before plain Enter');
+  const searchTakes=publishRequests.length;
+  await page.locator('.w-song-select').first().dblclick();
+  await until(()=>publishRequests.length===searchTakes+1,'double-clicking a search result publishes it once');
+  await until(()=>page.getByRole('button',{name:'Send live',exact:true}).isEnabled(),'search result command settles');
   const songEnterTakes=publishRequests.length,songEnterPreviews=previewRequests.length;
   await page.keyboard.press('Enter');await until(()=>previewRequests.length===songEnterPreviews+1,'plain Enter prepares the first song');
   await until(()=>page.getByRole('button',{name:'Send live',exact:true}).isEnabled(),'plain Enter song preparation completes');
@@ -285,6 +308,15 @@ try{
   const lyricsOutput=await lyricsOpened;await lyricsOutput.waitForURL(`${base}/live/lyrics`);await lyricsOutput.getByText('Let every voice sing out with joy',{exact:false}).waitFor();await lyricsOutput.close();
   for(const width of [1512,820,768,700,390,320]){await page.setViewportSize({width,height:844});await checkChannelHeader();}
   await page.screenshot({path:path.join(dir,'lyrics-mobile.png'),fullPage:true});await page.setViewportSize({width:1512,height:982});
+  await page.getByLabel('Search songs',{exact:true}).fill('welcome');
+  await until(()=>page.locator('.w-song-select').count().then(count=>count===1),'lyrics search before navigation');
+  await prepareClick(page.locator('.w-section-cue').last(),'Chorus');
+  await openStudio();
+  await dock.getByRole('button',{name:'Worship — lyrics',exact:true}).click();
+  await page.getByRole('heading',{name:'Find a song'}).waitFor();
+  assert.equal(await page.getByLabel('Search songs',{exact:true}).inputValue(),'welcome','Returning from Studio preserves the lyrics search');
+  assert.ok((await page.getByTestId('prepared-cue').textContent()).includes('Chorus'),'Returning from Studio preserves the prepared section');
+  assert.equal(await page.locator('.w-song-select').count(),1,'Returning from Studio keeps lyrics results visible');
   await page.getByRole('button',{name:'Presentation — presentation',exact:true}).click();
   await page.getByRole('button',{name:'Collapse toolbar',exact:true}).press('Enter');
   await page.getByRole('button',{name:'Expand toolbar',exact:true}).press('Space');

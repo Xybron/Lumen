@@ -9,14 +9,17 @@ import { useContentStore } from '@/stores/content';
 import { useStudioStore } from '@/stores/studio';
 import { openProjection } from '@/lib/tauri';
 import { worshipRequest } from '@/lib/worship/api';
+import { lyricsViews } from '@/lib/worship/lyrics-view-cache';
 import ChannelCuePreview from '@/components/channel/ChannelCuePreview.vue';
 import BibleLibraryDialog from '@/components/channel/BibleLibraryDialog.vue';
 import SongEditorDialog from '@/components/channel/SongEditorDialog.vue';
 import LocalListeningPanel from '@/components/channel/LocalListeningPanel.vue';
 import type { Channel } from '@/types';
 import type { Verse,Song,SongSection,CueSelection,WorshipCommand,ScriptureSelection,ScriptureSearchResult,ScriptureSearchChoice,LyricsSearchHit } from '../../../shared/worship';
+type LyricsSelection=Extract<CueSelection,{kind:'lyrics'}>;
 
 const props=defineProps<{channel:Channel}>(),store=useWorshipStore(),identity=useIdentityStore(),presence=usePresenceStore(),content=useContentStore(),studio=useStudioStore();
+const savedLyrics=props.channel.kind==='lyrics'?lyricsViews.get(props.channel.id):undefined;
 const workspace=ref<HTMLElement|null>(null);
 const songCues=ref<HTMLElement|null>(null);
 const scripture=computed(()=>props.channel.kind==='scripture'),state=computed(()=>store.workspaces[props.channel.id]),draft=computed(()=>store.drafts[props.channel.id]);
@@ -32,10 +35,10 @@ const onProgram=computed(()=>{
   return production.program?.layers.some(layer=>layer.kind==='source'&&sources.has(layer.sourceId??'')&&layer.visible&&layer.opacity>0&&layer.x<100&&layer.y<100&&layer.x+layer.width>0&&layer.y+layer.height>0)??false;
 });
 const canLibrary=computed(()=>identity.me?.isAdmin||identity.grants.some(g=>['owner','author'].includes(g.role)));
-const query=ref(''),searchInput=ref<HTMLInputElement>(),verses=ref<Verse[]>([]),songs=ref<Song[]>([]),allSongs=ref<Song[]>([]),searching=ref(false),searchError=ref(''),loading=ref(true),loadError=ref('');
-const searchInfo=ref<ScriptureSearchResult|null>(null),searchActive=ref(-1),completedSearch=ref('');
-const songMatches=ref<Record<string,LyricsSearchHit['match']>>({}),selectedSongSnapshot=ref<Song|null>(null);
-const rememberedSongs=ref<Record<string,Song>>({});
+const query=ref(savedLyrics?.query??''),searchInput=ref<HTMLInputElement>(),verses=ref<Verse[]>([]),songs=ref<Song[]>(savedLyrics?.songs??[]),allSongs=ref<Song[]>(savedLyrics?.allSongs??[]),searching=ref(false),searchError=ref(''),loading=ref(!state.value),loadError=ref('');
+const searchInfo=ref<ScriptureSearchResult|null>(null),searchActive=ref(-1),completedSearch=ref(savedLyrics?.completedSearch??'');
+const songMatches=ref<Record<string,LyricsSearchHit['match']>>(savedLyrics?.songMatches??{}),selectedSongSnapshot=ref<Song|null>(savedLyrics?.selectedSongSnapshot??null);
+const rememberedSongs=ref<Record<string,Song>>(savedLyrics?.rememberedSongs??{});
 const searchChoices=computed(()=>searchInfo.value?.resolution.suggestions??[]);
 const searchResultsId=computed(()=>`${scripture.value?'scripture':'lyrics'}-results-${props.channel.id}`);
 const activeSearchId=computed(()=>searchActive.value<0?undefined:`${searchResultsId.value}-${searchActive.value}`);
@@ -47,7 +50,7 @@ const searchLabel=computed(()=>{
   if(info?.resolution.label)return info.resolution.label;
   return info?.keywordMode==='relaxed'?'Matching key words':'Matching words';
 });
-const books=ref<{book:number;name:string;chapters:number}[]>([]),book=ref(43),chapter=ref(3),libraryOpen=ref(false),songOpen=ref(false),editingSong=ref<Song|null>(null),legacySections=ref<SongSection[]>([]),selectedSongId=ref('');
+const books=ref<{book:number;name:string;chapters:number}[]>([]),book=ref(43),chapter=ref(3),libraryOpen=ref(false),songOpen=ref(false),editingSong=ref<Song|null>(null),legacySections=ref<SongSection[]>([]),selectedSongId=ref(savedLyrics?.selectedSongId??'');
 // A search hit may be outside the first 500 browse entries. Keep its canonical
 // song available as queries change, without treating the browse cap as a library
 // limit or losing the matched section while the operator is preparing it.
@@ -116,8 +119,8 @@ async function loadSongs(){
 }
 function searchKey(){return `${props.channel.id}\n${scripture.value?state.value?.versionId??'KJV':'lyrics'}\n${query.value}`;}
 function resetScriptureResults(){verses.value=[];searchInfo.value=null;searchActive.value=-1;passage.value=null;}
-async function search(){
-  searchAbort?.abort();const abort=new AbortController();searchAbort=abort;const revision=++searchRevision,key=searchKey();searching.value=true;searchError.value='';passage.value=null;
+async function search(silent=false){
+  searchAbort?.abort();const abort=new AbortController();searchAbort=abort;const revision=++searchRevision,key=searchKey();searching.value=!silent;searchError.value='';passage.value=null;
   try{
     if(scripture.value){const result=await worshipRequest<ScriptureSearchResult>(`/scripture?version=${encodeURIComponent(state.value?.versionId??'KJV')}&q=${encodeURIComponent(query.value)}`,{signal:abort.signal});if(revision!==searchRevision||disposed)return;verses.value=result.verses;searchInfo.value=result;completedSearch.value=key;const r=result.reference;
       if(r?.chapter&&r.verse&&r.endVerse&&r.endVerse>=r.verse&&r.endVerse-r.verse<=11&&coversPassage(result.verses,r.verse,r.endVerse))passage.value={kind:'scripture',versionId:state.value.versionId,book:r.book,chapter:r.chapter,verse:r.verse,endVerse:r.endVerse};
@@ -149,8 +152,25 @@ async function moveSearch(e:KeyboardEvent){
   await nextTick();if(activeSearchId.value)document.getElementById(activeSearchId.value)?.scrollIntoView({block:'nearest'});
 }
 async function firstResult(event?:KeyboardEvent){if(event?.isComposing)return;event?.preventDefault();clearTimeout(timer);const original=searchKey();if(searching.value||completedSearch.value!==original)await search();if(disposed||original!==searchKey()||searchError.value)return;const index=Math.max(0,searchActive.value);if(scripture.value){if(searchChoices.value[index])chooseBook(searchChoices.value[index]);else if(passage.value&&searchActive.value<0)run(prepare(passage.value));else if(verses.value[index])prepareVerse(verses.value[index]);}else if(songs.value[index])selectSearchSong(songs.value[index]);}
-function selectSong(song:Song,sectionId?:string){const section=sectionId?song.sections.find(section=>section.id===sectionId):song.sections[0];if(!section)return;selectedSongSnapshot.value=song;selectedSongId.value=song.id;rememberSong(song);run(prepare({kind:'lyrics',songId:song.id,sectionId:section.id}));}
-function selectSearchSong(song:Song,event?:MouseEvent){if(event&&event.detail>1||searching.value||completedSearch.value!==searchKey()||!songs.value.some(result=>result.id===song.id))return;selectSong(song,songMatches.value[song.id]?.sectionId??undefined);}
+function songSelection(song:Song,sectionId?:string):LyricsSelection|null{const section=sectionId?song.sections.find(section=>section.id===sectionId):song.sections[0];return section?{kind:'lyrics',songId:song.id,sectionId:section.id}:null;}
+function selectSong(song:Song,sectionId?:string){const selection=songSelection(song,sectionId);if(!selection)return;selectedSongSnapshot.value=song;selectedSongId.value=song.id;rememberSong(song);run(prepare(selection));}
+let lastTouch:{key:string;at:number}|null=null,touchClickUntil=0;
+function lyricsPointerDown(event:PointerEvent){if(event.pointerType==='mouse')touchClickUntil=0;}
+function touchClick(event?:MouseEvent){return !!event&&event.detail>0&&performance.now()<touchClickUntil;}
+function lyricsPointerUp(event:PointerEvent,song:Song,sectionId?:string,fromSearch=false){
+  if(event.pointerType!=='touch'&&event.pointerType!=='pen')return;
+  if(fromSearch&&(searching.value||completedSearch.value!==searchKey()||!songs.value.some(result=>result.id===song.id)))return;
+  const selection=songSelection(song,sectionId);if(!selection)return;
+  const now=performance.now(),key=`${song.id}:${selection.sectionId}`;
+  touchClickUntil=now+700;
+  if(lastTouch?.key===key&&now-lastTouch.at<=400){lastTouch=null;sendLyrics(selection);}
+  else{lastTouch={key,at:now};selectSong(song,selection.sectionId);}
+}
+function sendLyrics(selection:LyricsSelection){if(disposed||!canOperate.value||sending.value)return;run(action({type:'take',selection}));}
+function sendSong(song:Song,sectionId?:string,event?:MouseEvent,fromSearch=false){if(touchClick(event)||fromSearch&&(searching.value||completedSearch.value!==searchKey()||!songs.value.some(result=>result.id===song.id)))return;const selection=songSelection(song,sectionId);if(selection)sendLyrics(selection);}
+function selectSearchSong(song:Song,event?:MouseEvent){if(touchClick(event)||event&&event.detail>1||searching.value||completedSearch.value!==searchKey()||!songs.value.some(result=>result.id===song.id))return;selectSong(song,songMatches.value[song.id]?.sectionId??undefined);}
+function selectSetlistSong(song:Song,event?:MouseEvent){if(touchClick(event)||event&&event.detail>1)return;selectSong(song);}
+function selectSection(song:Song,sectionId:string,event?:MouseEvent){if(touchClick(event)||event&&event.detail>1)return;selectSong(song,sectionId);}
 function songMatchLabel(song:Song){const match=songMatches.value[song.id];return match?.sectionId?song.sections.find(section=>section.id===match.sectionId)?.label??'Lyrics':'Lyrics';}
 function editSong(song:Song|null){editingSong.value=song;legacySections.value=[];songOpen.value=true;}
 async function savedSong(song:Song){await loadSongs();await search();selectSong(song);}
@@ -188,7 +208,9 @@ function keys(e:KeyboardEvent){
   if(e.key==='ArrowRight'&&state.value?.live){e.preventDefault();run(action({type:'step',direction:1}));}
   if(e.key==='ArrowLeft'&&state.value?.live){e.preventDefault();run(action({type:'step',direction:-1}));}
 }
-async function load(){loading.value=true;loadError.value='';try{await store.load(props.channel.id);if(!scripture.value)await loadSongs();await search();}catch(e){loadError.value=(e as Error).message;}finally{loading.value=false;}}
+async function load(){loading.value=!state.value;loadError.value='';try{await store.load(props.channel.id);if(!scripture.value)await loadSongs();await search(!!savedLyrics);}catch(e){if(!state.value)loadError.value=(e as Error).message;else toast.error((e as Error).message);}finally{loading.value=false;}}
+function scrollPosition(selector:string){return workspace.value?.querySelector<HTMLElement>(selector)?.scrollTop??0;}
+function restoreLyricsScroll(){if(!savedLyrics)return;for(const [selector,top] of [['.w-library',savedLyrics.scroll.library],['.w-setlist-list',savedLyrics.scroll.setlist],['.w-results',savedLyrics.scroll.results],['.w-song-cues',savedLyrics.scroll.cues]] as const){const el=workspace.value?.querySelector<HTMLElement>(selector);if(el)el.scrollTop=top;}}
 let libraryRefreshTimer:ReturnType<typeof setTimeout>;
 function libraryImported(){
   clearTimeout(libraryRefreshTimer);
@@ -196,9 +218,13 @@ function libraryImported(){
 }
 onMounted(()=>{
   if(openingSearchFocus){window.addEventListener('pointerdown',cancelOpeningSearchFocus,true);window.addEventListener('keydown',cancelOpeningSearchFocus,true);}
+  if(savedLyrics)void nextTick(restoreLyricsScroll);
   void load();window.addEventListener('keydown',keys);window.addEventListener('lumen:library-imported',libraryImported);
 });
-onBeforeUnmount(()=>{disposed=true;cancelOpeningSearchFocus();clearTimeout(timer);clearTimeout(libraryRefreshTimer);searchAbort?.abort();window.removeEventListener('keydown',keys);window.removeEventListener('lumen:library-imported',libraryImported);});
+onBeforeUnmount(()=>{
+  if(!scripture.value&&state.value)lyricsViews.set(props.channel.id,{query:query.value,songs:songs.value,allSongs:allSongs.value,songMatches:songMatches.value,selectedSongId:selectedSongId.value,selectedSongSnapshot:selectedSongSnapshot.value,rememberedSongs:rememberedSongs.value,completedSearch:completedSearch.value,scroll:{library:scrollPosition('.w-library'),setlist:scrollPosition('.w-setlist-list'),results:scrollPosition('.w-results'),cues:scrollPosition('.w-song-cues')}});
+  disposed=true;cancelOpeningSearchFocus();clearTimeout(timer);clearTimeout(libraryRefreshTimer);searchAbort?.abort();window.removeEventListener('keydown',keys);window.removeEventListener('lumen:library-imported',libraryImported);
+});
 </script>
 
 <template>
@@ -218,7 +244,7 @@ onBeforeUnmount(()=>{disposed=true;cancelOpeningSearchFocus();clearTimeout(timer
         </template>
         <template v-else><div class="w-setlist-content"><div class="w-section-heading w-library-heading"><h2><Music2 :size="15" />Service setlist</h2><span class="w-count">{{setlist.length}}</span></div><p class="w-muted">Pin songs in service order.</p>
           <div v-if="!setlist.length" class="w-setlist-empty"><Music2 :size="26" /><p>No songs in this setlist.</p></div>
-          <div v-if="setlist.length" class="w-setlist-list"><div v-for="(song,i) in setlist" :key="song.id" class="w-setlist-song" :class="{selected:selectedSongId===song.id}"><button data-channel-prepare @click="selectSong(song)"><span>{{String(i+1).padStart(2,'0')}}</span><b>{{song.title}}</b></button><div><button class="w-icon" :disabled="!canOperate||i===0" aria-label="Move song up" @click="reorder(i,-1)"><ArrowUp :size="12" /></button><button class="w-icon" :disabled="!canOperate||i===setlist.length-1" aria-label="Move song down" @click="reorder(i,1)"><ArrowDown :size="12" /></button><button class="w-icon" :disabled="!canOperate" aria-label="Remove from setlist" @click="pin(song)"><X :size="12" /></button></div></div></div>
+          <div v-if="setlist.length" class="w-setlist-list"><div v-for="(song,i) in setlist" :key="song.id" class="w-setlist-song" :class="{selected:selectedSongId===song.id}"><button data-channel-prepare title="Tap to preview · Double-tap to send live" @pointerdown="lyricsPointerDown" @pointerup="lyricsPointerUp($event,song)" @click="selectSetlistSong(song,$event)" @dblclick.prevent.stop="sendSong(song,undefined,$event)"><span>{{String(i+1).padStart(2,'0')}}</span><b>{{song.title}}</b></button><div><button class="w-icon" :disabled="!canOperate||i===0" aria-label="Move song up" @click="reorder(i,-1)"><ArrowUp :size="12" /></button><button class="w-icon" :disabled="!canOperate||i===setlist.length-1" aria-label="Move song down" @click="reorder(i,1)"><ArrowDown :size="12" /></button><button class="w-icon" :disabled="!canOperate" aria-label="Remove from setlist" @click="pin(song)"><X :size="12" /></button></div></div></div>
           <button class="w-button wide" :disabled="!canLibrary" @click="editSong(null)"><Plus :size="14" />Add a song</button><button v-if="legacyItems.length" class="w-button wide" :disabled="!canLibrary" @click="migrateLyrics">Copy existing slides to a song</button>
           </div>
           <LocalListeningPanel :channel-id="channel.id" :kind="channel.kind" :can-operate="canOperate" compact />
@@ -226,7 +252,7 @@ onBeforeUnmount(()=>{disposed=true;cancelOpeningSearchFocus();clearTimeout(timer
       </aside>
 
       <section class="w-search-panel panel">
-        <div class="w-search-heading"><div><h2>{{scripture?'Find a passage':'Find a song'}}</h2><p>{{scripture?'A short reference or a few remembered words.':'A little of the title, or a few remembered lyrics.'}}</p></div><span class="w-search-hint"><span v-if="scripture">Double-click to send live ·</span><span v-else>↑ ↓ Choose ·</span><kbd>↵</kbd> Prepare</span></div>
+        <div class="w-search-heading"><div><h2>{{scripture?'Find a passage':'Find a song'}}</h2><p>{{scripture?'A short reference or a few remembered words.':'A little of the title, or a few remembered lyrics.'}}</p></div><span class="w-search-hint"><span v-if="scripture">Double-click to send live ·</span><span v-else>Tap to preview · Double-tap live ·</span><kbd>↵</kbd> Prepare</span></div>
         <div class="w-search-box"><Search :size="19" /><input ref="searchInput" v-model="query" :aria-label="scripture?'Search scripture':'Search songs'" :placeholder="scripture?'jn3 16, jer20 11, or a few words…':'Part of a title or a few lyrics…'" role="combobox" aria-autocomplete="list" :aria-controls="searchResultsId" :aria-expanded="scripture?!!(query.trim()&&(verses.length||searchChoices.length)):!!songs.length" :aria-activedescendant="activeSearchId" autocomplete="off" spellcheck="false" @keydown="moveSearch" @keydown.enter.exact="firstResult" /><LoaderCircle v-if="searching" :size="16" class="w-spin" /><kbd v-else>⌘ K</kbd><button v-if="query" class="w-icon" aria-label="Clear search" @click="query='' "><X :size="14" /></button></div>
         <div class="w-results-meta" aria-live="polite"><span v-if="scripture" class="w-search-interpretation"><b v-if="searchLabel">{{searchLabel}}</b><span v-if="searchInfo?.resolution.match==='corrected'" class="w-match-note">Matched book name</span><span>{{query.trim()&&!searching&&!searchChoices.length?`${verses.length} ${verses.length===1?'verse':'verses'} · `:''}}{{state.versionId}}</span></span><span v-else>{{searching?'Searching…':query.trim()?`${songs.length} ${songs.length===1?'song':'songs'} · Titles and lyrics`:`Song library · ${songs.length}`}}</span><button v-if="passage" class="w-text-button" data-channel-prepare @click="prepare(passage)">Prepare passage<ArrowRight :size="13" /></button><button v-if="!scripture" class="w-text-button" :disabled="!canLibrary" @click="editSong(null)"><Plus :size="13" />New song</button></div>
         <p v-if="searchError" class="w-error" role="alert">{{searchError}}</p>
@@ -237,7 +263,7 @@ onBeforeUnmount(()=>{disposed=true;cancelOpeningSearchFocus();clearTimeout(timer
             <div v-if="query.trim()&&!searching&&!verses.length&&!searchChoices.length&&!searchError" class="w-empty"><Search :size="28" /><h3>{{searchInfo?.resolution.kind==='invalid'?'Check this reference':'No verses found'}}</h3><p>{{searchInfo?.resolution.kind==='invalid'?'Use a book, chapter and optional verse, such as jer20 11. Chapter and verse numbers must be valid.':['reference','ambiguous'].includes(searchInfo?.resolution.kind??'')?'This passage is not present in the selected edition. Check the chapter and verse, or choose another installed version.':'Try a short reference like jer20 11, or a few distinctive words. Only your selected, installed Bible is searched.'}}</p></div>
           </template>
           <template v-else><div v-if="!songs.length&&!searching&&!searchError" class="w-empty"><Music2 :size="28" :stroke-width="1.5" /><h3>{{query.trim()?'No matching songs':'No songs yet'}}</h3><p>{{query.trim()?'Try part of the title or a few distinctive words. Only songs saved in your library are searched.':'Add a song, split it into sections, then pin it to the service setlist.'}}</p><button v-if="!query.trim()" class="w-button primary" :disabled="!canLibrary" @click="editSong(null)"><Plus :size="14" />Add your first song</button></div>
-            <div :id="!scripture?searchResultsId:undefined" class="w-song-list" role="listbox" aria-label="Song search results" data-channel-search-results><div v-for="(song,i) in songs" :key="song.id" class="w-song-result" :data-search-active="searchActive===i" :class="{selected:selectedSongId===song.id,'keyboard-active':searchActive===i}"><button :id="`${searchResultsId}-${i}`" class="w-song-select" role="option" :aria-selected="searchActive===i" :data-search-active="searchActive===i" data-channel-prepare @click="searchActive=i;selectSearchSong(song,$event)"><span class="w-song-icon"><Music2 :size="17" /></span><div><h3>{{song.title}}<small v-if="songMatches[song.id]?.corrected" class="w-match-note">Similar spelling</small></h3><p>{{song.author||'Your library'}} · {{song.sections.length}} {{song.sections.length===1?'section':'sections'}}</p><p v-if="songMatches[song.id]?.kind==='lyrics'&&songMatches[song.id]?.excerpt" class="w-song-match"><b>{{songMatchLabel(song)}}</b>{{songMatches[song.id].excerpt}}</p></div></button><button class="w-icon" :class="{pinned:state.setlist.includes(song.id)}" :disabled="!canOperate" :aria-label="state.setlist.includes(song.id)?'Unpin song':'Pin song to setlist'" @click="pin(song)"><Check v-if="state.setlist.includes(song.id)" :size="15" /><Pin v-else :size="15" /></button><button class="w-icon" :disabled="!canLibrary" aria-label="Edit song" @click="editSong(song)"><Pencil :size="14" /></button></div></div>
+            <div :id="!scripture?searchResultsId:undefined" class="w-song-list" role="listbox" aria-label="Song search results" data-channel-search-results><div v-for="(song,i) in songs" :key="song.id" class="w-song-result" :data-search-active="searchActive===i" :class="{selected:selectedSongId===song.id,'keyboard-active':searchActive===i}"><button :id="`${searchResultsId}-${i}`" class="w-song-select" role="option" :aria-selected="searchActive===i" :data-search-active="searchActive===i" data-channel-prepare title="Tap to preview · Double-tap to send live" @pointerdown="lyricsPointerDown" @pointerup="lyricsPointerUp($event,song,songMatches[song.id]?.sectionId??undefined,true)" @click="searchActive=i;selectSearchSong(song,$event)" @dblclick.prevent.stop="sendSong(song,songMatches[song.id]?.sectionId??undefined,$event,true)"><span class="w-song-icon"><Music2 :size="17" /></span><div><h3>{{song.title}}<small v-if="songMatches[song.id]?.corrected" class="w-match-note">Similar spelling</small></h3><p>{{song.author||'Your library'}} · {{song.sections.length}} {{song.sections.length===1?'section':'sections'}}</p><p v-if="songMatches[song.id]?.kind==='lyrics'&&songMatches[song.id]?.excerpt" class="w-song-match"><b>{{songMatchLabel(song)}}</b>{{songMatches[song.id].excerpt}}</p></div></button><button class="w-icon" :class="{pinned:state.setlist.includes(song.id)}" :disabled="!canOperate" :aria-label="state.setlist.includes(song.id)?'Unpin song':'Pin song to setlist'" @click="pin(song)"><Check v-if="state.setlist.includes(song.id)" :size="15" /><Pin v-else :size="15" /></button><button class="w-icon" :disabled="!canLibrary" aria-label="Edit song" @click="editSong(song)"><Pencil :size="14" /></button></div></div>
           </template>
         </div>
         <LocalListeningPanel v-if="scripture" :channel-id="channel.id" :kind="channel.kind" :can-operate="canOperate" />
@@ -245,7 +271,7 @@ onBeforeUnmount(()=>{disposed=true;cancelOpeningSearchFocus();clearTimeout(timer
 
       <section v-if="!scripture" class="w-song-panel panel" aria-label="Selected song">
         <div class="w-song-heading"><div><span class="w-song-eyebrow">{{selectedSong?'SELECTED SONG':'SONG SECTIONS'}}</span><h2>{{selectedSong?.title||'Choose a song'}}</h2><p v-if="selectedSong">{{selectedSong.sections.length}} {{selectedSong.sections.length===1?'section':'sections'}}<template v-if="selectedSong.author"> · {{selectedSong.author}}</template></p><p v-else>Its sections will appear here.</p></div><div v-if="selectedSong" class="w-song-actions"><button class="w-icon" :class="{pinned:state.setlist.includes(selectedSong.id)}" :disabled="!canOperate" :aria-label="state.setlist.includes(selectedSong.id)?'Unpin selected song':'Pin selected song to setlist'" @click="pin(selectedSong)"><Check v-if="state.setlist.includes(selectedSong.id)" :size="15" /><Pin v-else :size="15" /></button><button class="w-icon" :disabled="!canLibrary" aria-label="Edit selected song" @click="editSong(selectedSong)"><Pencil :size="14" /></button></div></div>
-        <div v-if="selectedSong" ref="songCues" class="w-song-cues" aria-label="Song sections"><button v-for="(section,i) in selectedSong.sections" :key="`${selectedSong.id}-${section.id}`" class="w-section-cue" data-channel-prepare :class="{selected:draft?.selection.kind==='lyrics'&&draft.selection.songId===selectedSong.id&&draft.selection.sectionId===section.id}" @click="prepare({kind:'lyrics',songId:selectedSong.id,sectionId:section.id})"><span>{{String(i+1).padStart(2,'0')}}</span><div><b>{{section.label}}</b><p>{{section.text}}</p></div><ArrowRight :size="14" /></button></div>
+        <div v-if="selectedSong" ref="songCues" class="w-song-cues" aria-label="Song sections"><button v-for="(section,i) in selectedSong.sections" :key="`${selectedSong.id}-${section.id}`" class="w-section-cue" data-channel-prepare title="Tap to preview · Double-tap to send live" :class="{selected:draft?.selection.kind==='lyrics'&&draft.selection.songId===selectedSong.id&&draft.selection.sectionId===section.id}" @pointerdown="lyricsPointerDown" @pointerup="lyricsPointerUp($event,selectedSong,section.id)" @click="selectSection(selectedSong,section.id,$event)" @dblclick.prevent.stop="sendSong(selectedSong,section.id,$event)"><span>{{String(i+1).padStart(2,'0')}}</span><div><b>{{section.label}}</b><p>{{section.text}}</p></div><ArrowRight :size="14" /></button></div>
         <div v-else class="w-empty w-song-empty"><Music2 :size="28" :stroke-width="1.5" /><p>Select a song from the library or service setlist, then choose a section to prepare.</p></div>
       </section>
 
