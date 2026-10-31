@@ -9,7 +9,18 @@ export interface AdminUser extends User {
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new Error(`${res.status} ${res.statusText}: ${text}`);
+    let message = '';
+    try {
+      const body = JSON.parse(text) as { error?: unknown; message?: unknown };
+      const detail = typeof body.error === 'string' ? body.error : typeof body.message === 'string' ? body.message : '';
+      if (detail.length <= 300 && !/[<>\r\n]/.test(detail)) message = detail;
+    } catch { /* An HTML error page is for diagnostics, not a user-facing toast. */ }
+    if (!message) message = res.status === 401 ? 'Your session has expired. Sign in and try again.'
+      : res.status === 403 ? 'You do not have permission to do this.'
+        : res.status === 413 ? 'This file is too large to upload.'
+          : res.status >= 500 ? 'Lumen had trouble completing this request. Please try again.'
+            : 'Lumen could not complete this request. Please try again.';
+    throw new Error(message);
   }
   return (await res.json()) as T;
 }

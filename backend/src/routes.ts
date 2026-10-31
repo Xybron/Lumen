@@ -18,15 +18,17 @@ import {
 } from './paths.js';
 import { makeImageThumb, makeVideoThumb } from './thumbs.js';
 import { listMediaLibrary } from './media-library.js';
+import { preparePresentationVideo } from './media-video.js';
+
+export const OPERATOR_MEDIA_LIMIT_BYTES = 512 * 1024 * 1024;
 
 const upload = multer({
   storage: multer.diskStorage({
-    destination: async (req, _file, cb) => {
+    destination: (req, _file, cb) => {
       const kind = req.params.kind as MediaKind;
       if (!MEDIA_KINDS.includes(kind)) return cb(new Error('bad kind'), '');
       const dir = path.join(MEDIA_DIR, kind);
-      await fs.mkdir(dir, { recursive: true });
-      cb(null, dir);
+      void fs.mkdir(dir, { recursive: true }).then(() => cb(null, dir), error => cb(error, ''));
     },
     filename: (_req, file, cb) => {
       // Keep the original name but defuse traversal/odd chars.
@@ -34,7 +36,7 @@ const upload = multer({
       cb(null, `${Date.now()}-${safe}`);
     },
   }),
-  limits: { fileSize: 200 * 1024 * 1024 },
+  limits: { fileSize: OPERATOR_MEDIA_LIMIT_BYTES },
 });
 
 export const router = Router();
@@ -105,18 +107,34 @@ router.get('/media/:kind', async (req, res) => {
   }
 });
 
-router.post('/media/:kind', requireSession, upload.single('file'), async (req, res) => {
+router.post('/media/:kind', requireSession, (req, res, next) => {
+  if (!MEDIA_KINDS.includes(req.params.kind as MediaKind)) return res.status(400).json({ error: 'Choose a supported media library.' });
+  upload.single('file')(req, res, error => {
+    if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'This file is larger than 512 MB. Choose a smaller file.' });
+    if ((error as NodeJS.ErrnoException | undefined)?.code === 'ENOSPC') return res.status(507).json({ error: 'This station is low on storage. Free some space and try again.' });
+    if (error) return res.status(400).json({ error: 'This file could not be uploaded. Try selecting it again.' });
+    next();
+  });
+}, async (req, res) => {
   const kind = req.params.kind as MediaKind;
-  if (!MEDIA_KINDS.includes(kind)) return res.status(400).json({ error: 'bad kind' });
   const file = req.file;
-  if (!file) return res.status(400).json({ error: 'no file' });
-  const rel = `media/${kind}/${file.filename}`;
+  if (!file) return res.status(400).json({ error: 'Choose a file to upload.' });
+  let savedPath = file.path;
+  try {
+    if (kind === 'backgrounds') savedPath = await preparePresentationVideo(file.path, file.originalname);
+  } catch (error) {
+    console.warn('[media] MOV preparation failed:', (error as Error).message);
+    if ((error as NodeJS.ErrnoException).code === 'ENOSPC' || /No space left on device/i.test((error as Error).message))
+      return res.status(507).json({ error: 'This station is low on storage. Free some space and try again.' });
+    return res.status(422).json({ error: 'This MOV video could not be prepared for playback. Export it as MP4 (H.264) and try again.' });
+  }
+  const filename = path.basename(savedPath), rel = `media/${kind}/${filename}`;
   let thumbnail: string | null = null;
   if (kind === 'backgrounds') {
-    if (/\.(png|jpe?g|webp|gif)$/i.test(file.filename)) {
-      thumbnail = await makeImageThumb(file.path, file.filename);
-    } else if (/\.(mp4|webm|mov|m4v)$/i.test(file.filename)) {
-      thumbnail = await makeVideoThumb(file.path, file.filename);
+    if (/\.(png|jpe?g|webp|gif)$/i.test(filename)) {
+      thumbnail = await makeImageThumb(savedPath, filename);
+    } else if (/\.(mp4|webm|mov|m4v)$/i.test(filename)) {
+      thumbnail = await makeVideoThumb(savedPath, filename);
     }
   }
   res.json({ path: rel, thumbnail });

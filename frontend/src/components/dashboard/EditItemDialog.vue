@@ -12,6 +12,7 @@ import { Slider } from '@/components/ui/slider';
 import { Upload, Wand2, Plus, Trash2 } from 'lucide-vue-next';
 import type { Item, ItemType } from '@/types';
 import { api, mediaUrl } from '@/lib/api';
+import { probeVideoDurationMs } from '@/lib/media-duration';
 import { shortId } from '@/lib/ids';
 import { toast } from 'vue-sonner';
 
@@ -20,30 +21,6 @@ const FIT_MODES: { value: 'cover' | 'contain' | 'fill'; label: string }[] = [
   { value: 'contain', label: 'Contain' },
   { value: 'fill', label: 'Fill' },
 ];
-
-// Probe a video element off-screen to read its natural duration. We resolve
-// even on error so an unsupported codec doesn't hang the dialog.
-function probeVideoDurationMs(url: string): Promise<number | null> {
-  return new Promise((resolve) => {
-    const v = document.createElement('video');
-    v.preload = 'metadata';
-    v.muted = true;
-    const cleanup = () => {
-      v.src = '';
-      v.removeAttribute('src');
-    };
-    v.addEventListener('loadedmetadata', () => {
-      const ms = Number.isFinite(v.duration) ? Math.round(v.duration * 1000) : null;
-      cleanup();
-      resolve(ms);
-    });
-    v.addEventListener('error', () => {
-      cleanup();
-      resolve(null);
-    });
-    v.src = url;
-  });
-}
 
 const props = defineProps<{ open: boolean; item: Item | null }>();
 const emit = defineEmits<{

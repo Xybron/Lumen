@@ -10,7 +10,9 @@ import { useContentStore } from '@/stores/content';
 import { usePlaybackStore } from '@/stores/playback';
 import { useIdentityStore } from '@/stores/identity';
 import { usePresenceStore } from '@/stores/presence';
-import { api } from '@/lib/api';
+import { api, mediaUrl } from '@/lib/api';
+import { probeVideoDurationMs } from '@/lib/media-duration';
+import { MAX_MEDIA_BYTES, mediaExtensions } from '@/lib/studio/media-library';
 import type { Channel, Item, ItemType } from '@/types';
 
 const props = defineProps<{ channel: Channel | null }>();
@@ -43,6 +45,7 @@ function setSlideView(v: SlideView) {
 const dropTarget = ref<HTMLElement | null>(null);
 const mediaInput = ref<HTMLInputElement | null>(null);
 const uploading = ref(false);
+const uploadStatus = ref('');
 const { isOverDropZone } = useDropZone(dropTarget, { onDrop: handleDrop });
 const slideCount = computed(() => playback.items.filter(item => item.type !== 'section').length);
 
@@ -58,17 +61,26 @@ async function handleDrop(files: File[] | null) {
   try {
     for (const file of files) {
       if (!canWriteDestination()) break;
-      if (file.type.startsWith('image') || file.type.startsWith('video')) {
-        const { path } = await api.uploadMedia('backgrounds', file);
+      if (!file.size) throw new Error('This file is empty. Choose another file.');
+      if (file.size > MAX_MEDIA_BYTES) throw new Error('This file is larger than 512 MB. Choose a smaller file.');
+      const kind = mediaExtensions.video.test(file.name) ? 'video' : mediaExtensions.image.test(file.name) ? 'image' : mediaExtensions.audio.test(file.name) ? 'audio' : null;
+      if (!kind) throw new Error('Choose an image, video, or audio file in a supported format.');
+      uploadStatus.value = `Uploading ${kind}…`;
+      const onProgress = (percent: number) => { uploadStatus.value = percent < 100 ? `Uploading ${kind}… ${percent}%` : kind === 'video' ? 'Preparing video for playback…' : 'Finishing upload…'; };
+      if (kind === 'image' || kind === 'video') {
+        const { path } = await api.uploadMedia('backgrounds', file, { onProgress });
         if (!canWriteDestination()) throw new Error('Presentation control changed while uploading. The slide was not added.');
+        uploadStatus.value = kind === 'video' ? 'Adding video slide…' : 'Adding image slide…';
+        const durationMs = kind === 'video' ? await probeVideoDurationMs(mediaUrl(path)!) ?? 30000 : 30000;
         await content.addItem(playlistId, {
-          type: file.type.startsWith('video') ? 'video' : 'image',
+          type: kind,
           title: file.name,
-          durationMs: 30000,
-          background: { kind: file.type.startsWith('video') ? 'video' : 'image', src: path, fit: 'cover', overlayOpacity: 0 },
+          durationMs,
+          background: { kind, src: path, fit: 'cover', overlayOpacity: 0 },
         });
-      } else if (file.type.startsWith('audio')) {
-        const { path } = await api.uploadMedia('music', file);
+        toast.success(kind === 'video' ? 'Video added to this presentation.' : 'Image added to this presentation.');
+      } else {
+        const { path } = await api.uploadMedia('music', file, { onProgress });
         if (!canWriteDestination()) throw new Error('Presentation control changed while uploading. The music queue was not changed.');
         await content.updateMusic({
           queue: [...content.content.music.queue, path],
@@ -78,9 +90,10 @@ async function handleDrop(files: File[] | null) {
       }
     }
   } catch (error) {
-    toast.error(`Could not upload media: ${(error as Error).message}`);
+    toast.error(error instanceof TypeError ? 'Lumen could not reach this station. Check the connection and try again.' : (error as Error).message || 'This file could not be imported. Try again.');
   } finally {
     uploading.value = false;
+    uploadStatus.value = '';
     if (mediaInput.value) mediaInput.value.value = '';
   }
 }
@@ -139,7 +152,7 @@ const kindLabel = (kind?: string) => kindLabels[kind ?? ''] ?? 'Presentation';
 
 <template>
   <main ref="dropTarget" class="panel presentation-editor" :class="{ 'drop-active': isOverDropZone }" aria-label="Slide editor">
-    <input ref="mediaInput" type="file" class="hidden" accept="image/*,video/*,audio/*" multiple aria-label="Upload presentation media" @change="selectMedia" />
+    <input ref="mediaInput" type="file" class="hidden" accept=".png,.jpg,.jpeg,.webp,.gif,.mp4,.webm,.mov,.m4v,.mp3,.m4a,.wav,.aac,.ogg,.flac" multiple aria-label="Upload presentation media" @change="selectMedia" />
     <header class="presentation-editor-heading">
       <div class="min-w-0">
         <h1 class="text-[13px] font-semibold text-white truncate">
@@ -173,7 +186,7 @@ const kindLabel = (kind?: string) => kindLabels[kind ?? ''] ?? 'Presentation';
         </Button>
         <Button variant="ghost" size="md" class="!h-8 !text-xs" :disabled="!editorPlaylistId || uploading || !canEdit" title="Upload images, videos or audio" @click="mediaInput?.click()">
           <Upload :size="14" />
-          <span class="hidden xl:inline">{{ uploading ? 'Uploading…' : 'Import' }}</span>
+          <span class="hidden xl:inline">{{ uploading ? 'Working…' : 'Import' }}</span>
         </Button>
         <Button variant="accent" size="md" class="!h-8 !text-xs" :disabled="!editorPlaylistId || !canEdit" @click="addSlide">
           <Plus :size="14" />
@@ -197,7 +210,7 @@ const kindLabel = (kind?: string) => kindLabels[kind ?? ''] ?? 'Presentation';
         </p>
         <div v-if="editorPlaylist" class="flex items-center justify-center flex-wrap gap-2 mt-5">
           <Button variant="accent" size="md" :disabled="!canEdit" @click="addSlide"><Plus :size="14" />New slide</Button>
-          <Button variant="default" size="md" :disabled="uploading || !canEdit" @click="mediaInput?.click()"><Upload :size="14" />{{ uploading ? 'Uploading…' : 'Import media' }}</Button>
+          <Button variant="default" size="md" :disabled="uploading || !canEdit" @click="mediaInput?.click()"><Upload :size="14" />{{ uploading ? 'Working…' : 'Import media' }}</Button>
         </div>
       </div>
     </div>
@@ -230,7 +243,7 @@ const kindLabel = (kind?: string) => kindLabels[kind ?? ''] ?? 'Presentation';
         @jump="playback.jumpTo(i)"
       />
     </VueDraggable>
-    <div class="presentation-editor-footer"><span>{{ !canEdit ? 'Read-only workspace' : uploading ? 'Uploading media…' : isOverDropZone ? 'Drop media to import' : 'Drag to reorder · Double-click a slide to show it' }}</span><span class="hidden sm:inline">{{ playback.mode === 'auto' ? 'Auto advance' : 'Manual control' }}</span></div>
+    <div class="presentation-editor-footer"><span role="status">{{ !canEdit ? 'Read-only workspace' : uploading ? uploadStatus : isOverDropZone ? 'Drop media to import' : 'Drag to reorder · Double-click a slide to show it' }}</span><span class="hidden sm:inline">{{ playback.mode === 'auto' ? 'Auto advance' : 'Manual control' }}</span></div>
   </main>
 </template>
 

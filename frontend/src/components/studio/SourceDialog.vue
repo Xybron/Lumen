@@ -341,7 +341,7 @@ async function uploadFile(file: File) {
   if (!assetKind || adding.value) return;
   if (!mediaExtensions[assetKind].test(file.name)) { error.value = 'Choose ' + mediaFormatHint[assetKind] + ' for this source type.'; return; }
   if (!file.size) { error.value = 'This file is empty. Choose another file.'; return; }
-  if (file.size > MAX_MEDIA_BYTES) { error.value = 'This file is larger than 200 MB. Choose a smaller file.'; return; }
+  if (file.size > MAX_MEDIA_BYTES) { error.value = 'This file is larger than 512 MB. Choose a smaller file.'; return; }
   stopUpload();
   const context = epoch, sequence = uploadSequence;
   uploadFallback = editing.value ? url.value : null;
@@ -365,7 +365,7 @@ async function uploadFile(file: File) {
     void loadFiles();
   } catch (cause) {
     if (controller.signal.aborted || !open.value || context !== epoch || sequence !== uploadSequence) return;
-    error.value = 'Upload failed. Check your connection or choose another file, then try again.';
+    error.value = cause instanceof TypeError ? 'Lumen could not reach this station. Check the connection and try again.' : (cause as Error).message || 'This file could not be uploaded. Please try again.';
     if (uploadFallback !== null) url.value = uploadFallback;
     uploadFallback = null;
     pendingFile.value = null; clearLocalPreview();
@@ -516,7 +516,7 @@ async function saveProperties() {
                 <p>{{ query ? 'Try a different name or clear your search.' : 'Drop a file here, or upload one to get started.' }}</p>
                 <button type="button" class="s-button" @click="query ? query = '' : uploadInput?.click()">{{ query ? 'Clear search' : 'Choose a file' }}<ArrowUpRight :size="12" /></button>
               </div>
-              <div class="source-library-footnote"><span>{{ mediaFormatHint[mediaKind] }}</span><span>Up to 200 MB</span></div>
+              <div class="source-library-footnote"><span>{{ mediaFormatHint[mediaKind] }}</span><span>Up to 512 MB</span></div>
             </div>
 
             <aside ref="previewDetail" class="source-detail" aria-label="Selected media">
@@ -537,7 +537,7 @@ async function saveProperties() {
               <p class="source-preview-note"><Monitor :size="13" />Local preview</p>
               </div>
             </aside>
-            <div v-if="dragDepth > 0" class="source-drop-overlay"><Upload :size="28" /><b>Drop to upload</b><span>{{ mediaFormatHint[mediaKind] }} · Up to 200 MB</span></div>
+            <div v-if="dragDepth > 0" class="source-drop-overlay"><Upload :size="28" /><b>Drop to upload</b><span>{{ mediaFormatHint[mediaKind] }} · Up to 512 MB</span></div>
           </section>
 
           <section v-else class="source-input-workspace" :class="{ 'source-camera-workspace': kind === 'camera' }">

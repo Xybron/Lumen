@@ -24,7 +24,7 @@ test('media picker accepted extensions, filtering and format hints agree', () =>
     }
     assert.equal(mediaExtensions[kind].test('filename'), false);
   }
-  assert.equal(MAX_MEDIA_BYTES, 200 * 1024 * 1024);
+  assert.equal(MAX_MEDIA_BYTES, 512 * 1024 * 1024);
 });
 
 test('library search is case-insensitive, trimmed and searches the human filename', () => {
@@ -74,7 +74,7 @@ test('media sizes are concise and invalid or unknown sizes stay absent', () => {
   assert.equal(mediaFileSize(1536), '2 KB');
   assert.equal(mediaFileSize(1024 * 1024), '1.0 MB');
   assert.equal(mediaFileSize(2.5 * 1024 * 1024), '2.5 MB');
-  assert.equal(mediaFileSize(MAX_MEDIA_BYTES), '200.0 MB');
+  assert.equal(mediaFileSize(MAX_MEDIA_BYTES), '512.0 MB');
 });
 
 test('library URLs encode reserved filename characters without interpreting them as URL syntax', () => {

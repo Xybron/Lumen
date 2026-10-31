@@ -16,7 +16,7 @@ export const mediaFormatHint: Record<MediaAssetKind, string> = {
   video: 'MP4, WebM, MOV or M4V',
   audio: 'MP3, M4A, WAV, AAC, OGG or FLAC',
 };
-export const MAX_MEDIA_BYTES = 200 * 1024 * 1024;
+export const MAX_MEDIA_BYTES = 512 * 1024 * 1024;
 
 export function mediaDisplayName(name: string): string {
   return name.replace(/^\d{13}-/, '');
