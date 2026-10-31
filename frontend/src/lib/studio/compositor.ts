@@ -12,10 +12,11 @@ import { PROGRAM_MONITOR_OUTPUT_ID, PROGRAM_MONITOR_WIDTH, PROGRAM_MONITOR_HEIGH
 import { MULTIVIEW_OUTPUT_ID, MULTIVIEW_COLUMNS, MULTIVIEW_TILE_WIDTH, MULTIVIEW_TILE_HEIGHT,
   multiviewCanvasSize, multiviewSlots } from '../../../../shared/multiview-layout';
 
-function drawFitted(ctx: CanvasRenderingContext2D, media: CanvasImageSource, x: number, y: number, w: number, h: number, fit: 'cover' | 'contain') {
+function drawFitted(ctx: CanvasRenderingContext2D, media: CanvasImageSource, x: number, y: number, w: number, h: number, fit: 'cover' | 'contain' | 'fill') {
   const m = media as HTMLVideoElement & HTMLImageElement;
   const mw = m.videoWidth || m.naturalWidth || m.width, mh = m.videoHeight || m.naturalHeight || m.height;
   if (!mw || !mh) return;
+  if (fit === 'fill') { try { ctx.drawImage(media, x, y, w, h); } catch { /* media is not ready */ } return; }
   const scale = fit === 'cover' ? Math.max(w / mw, h / mh) : Math.min(w / mw, h / mh);
   try { ctx.drawImage(media, x + (w - mw * scale) / 2, y + (h - mh * scale) / 2, mw * scale, mh * scale); } catch { /* media is not ready */ }
 }
@@ -46,8 +47,8 @@ function drawText(ctx: CanvasRenderingContext2D, layer: SceneLayer, w: number, h
 function drawItem(ctx: CanvasRenderingContext2D, item: Item, bank: SceneSourceBank, video: HTMLVideoElement | null, w: number, h: number) {
   const bg = item.background;
   ctx.fillStyle = bg?.color ?? '#121820'; ctx.fillRect(0, 0, w, h);
-  if (bg?.kind === 'image' && bg.src) drawFitted(ctx, bank.image(bg.src), 0, 0, w, h, bg.fit === 'contain' ? 'contain' : 'cover');
-  if (bg?.kind === 'video' && video) drawFitted(ctx, video, 0, 0, w, h, 'cover');
+  if (bg?.kind === 'image' && bg.src) drawFitted(ctx, bank.image(bg.src), 0, 0, w, h, bg.fit ?? 'cover');
+  if (bg?.kind === 'video' && video) drawFitted(ctx, video, 0, 0, w, h, bg.fit ?? 'cover');
   if (bg?.kind === 'gradient') {
     const colors = bg.gradient?.match(/#[a-fA-F0-9]{6}/g) ?? ['#101923', '#243a40'];
     const gradient = ctx.createLinearGradient(0, 0, w, h);

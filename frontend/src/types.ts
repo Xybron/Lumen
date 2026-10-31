@@ -34,6 +34,9 @@ export interface Background {
   gradient?: string;
   fit?: 'cover' | 'contain' | 'fill';
   overlayOpacity?: number;
+  loop?: boolean;
+  muted?: boolean;
+  volume?: number;
 }
 
 export interface Typography {

@@ -76,7 +76,7 @@ async function handleDrop(files: File[] | null) {
           type: kind,
           title: file.name,
           durationMs,
-          background: { kind, src: path, fit: 'cover', overlayOpacity: 0 },
+          background: { kind, src: path, fit: 'cover', overlayOpacity: 0, ...(kind === 'video' ? { loop: false, muted: false, volume: 1 } : {}) },
         });
         toast.success(kind === 'video' ? 'Video added to this presentation.' : 'Image added to this presentation.');
       } else {

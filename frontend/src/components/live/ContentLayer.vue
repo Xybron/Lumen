@@ -105,7 +105,7 @@ const lyricStanzas = computed(() =>
   <!-- Announcement — lower-third frosted band. -->
   <div v-else-if="item && isAnnouncement" class="absolute inset-0 flex flex-col justify-end pb-[12vh] px-16 md:px-32" :class="alignClass">
     <div class="w-full max-w-5xl rounded-3xl bg-black/45 backdrop-blur-xl border border-white/10 px-10 py-7 space-y-2" :class="alignClass">
-      <div v-if="item.title" class="text-4xl md:text-6xl font-semibold tracking-display text-white drop-shadow-2xl" :style="{ fontWeight: weight }">
+      <div v-if="item.title" class="tracking-display text-white drop-shadow-2xl" :class="sizeClass" :style="{ fontWeight: weight }">
         {{ item.title }}
       </div>
       <div v-if="item.subtitle" class="text-2xl md:text-3xl text-accent/90 font-medium">{{ item.subtitle }}</div>
@@ -114,7 +114,7 @@ const lyricStanzas = computed(() =>
   </div>
 
   <!-- Scripture / text / fallback. -->
-  <div v-else-if="item" class="absolute inset-0 flex flex-col justify-center px-16 md:px-32" :class="alignClass">
+  <div v-else-if="item && !['image', 'video'].includes(item.type)" class="absolute inset-0 flex flex-col justify-center px-16 md:px-32" :class="alignClass">
     <div class="max-w-5xl w-full">
       <div v-if="item.body" class="tracking-display leading-[1.2] text-white drop-shadow-2xl" :class="sizeClass"
         :style="{ fontWeight: weight }">

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, useTemplateRef, watchEffect, onMounted, onBeforeUnmount } from 'vue';
-import { Maximize2, Clock3, ChevronLeft, ChevronRight } from 'lucide-vue-next';
+import { computed, ref, useTemplateRef, watch, watchEffect, onMounted, onBeforeUnmount } from 'vue';
+import { Maximize2, Clock3, ChevronLeft, ChevronRight, Headphones, VolumeX } from 'lucide-vue-next';
 import BackgroundLayer from '@/components/live/BackgroundLayer.vue';
 import ContentLayer from '@/components/live/ContentLayer.vue';
 import {
@@ -40,6 +40,8 @@ const hasNext = computed(() => !!playback.next);
 const wrap = useTemplateRef<HTMLElement>('wrap');
 const scale = ref(1);
 const expanded = ref(false);
+const monitorAudio = ref(false);
+watch(() => [props.item?.id, props.blanked, props.item?.background?.muted], () => { monitorAudio.value = false; });
 
 function recompute() {
   const el = wrap.value;
@@ -140,7 +142,7 @@ const totalLabel = computed(() => fmtTime(playback.totalMs));
   >
     <div class="absolute inset-0 overflow-hidden">
       <div :style="stageStyle" class="relative overflow-hidden">
-        <BackgroundLayer :background="item?.background" />
+        <BackgroundLayer :background="item?.background" :listen="monitorAudio && !blanked" />
         <ContentLayer :item="item" :prayer-label="prayerLabel" />
       </div>
     </div>
@@ -158,6 +160,19 @@ const totalLabel = computed(() => fmtTime(playback.totalMs));
     >
       No slide
     </div>
+
+    <button
+      v-if="navigable && item?.background?.kind === 'video'"
+      class="absolute bottom-2 left-2 h-8 px-2.5 rounded-lg bg-black/70 border border-hair text-[11px] text-white/85 flex items-center gap-1.5 hover:bg-black/90 disabled:opacity-55"
+      :disabled="blanked || item.background.muted"
+      :aria-label="item.background.muted ? 'Slide video is muted' : monitorAudio ? 'Stop listening to video' : 'Listen to video'"
+      :title="item.background.muted ? 'Unmute this slide in its settings to hear it' : 'Listen locally. Studio mixer still controls the final output.'"
+      @click.stop="monitorAudio = !monitorAudio"
+    >
+      <VolumeX v-if="item.background.muted" :size="13" />
+      <Headphones v-else :size="13" />
+      {{ item.background.muted ? 'Slide muted' : monitorAudio ? 'Listening' : 'Listen' }}
+    </button>
 
     <button
       v-if="expandable && item"

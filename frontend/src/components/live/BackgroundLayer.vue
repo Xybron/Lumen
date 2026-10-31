@@ -1,15 +1,21 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref, watchEffect } from 'vue';
 import type { Background } from '@/types';
 import { mediaUrl } from '@/lib/api';
 
-const props = defineProps<{ background?: Background }>();
+const props = withDefaults(defineProps<{ background?: Background; listen?: boolean }>(), { listen: false });
 
 const url = computed(() => mediaUrl(props.background?.src));
 const fit = computed(() => props.background?.fit ?? 'cover');
 const overlay = computed(() => props.background?.overlayOpacity ?? 0.35);
 const color = computed(() => props.background?.color ?? '#0a0a0c');
 const gradient = computed(() => props.background?.gradient);
+const video = ref<HTMLVideoElement | null>(null);
+watchEffect(() => {
+  if (!video.value) return;
+  video.value.muted = !props.listen || (props.background?.muted ?? false);
+  video.value.volume = Math.max(0, Math.min(1, props.background?.volume ?? 1));
+});
 </script>
 
 <template>
@@ -19,12 +25,13 @@ const gradient = computed(() => props.background?.gradient);
     </template>
     <template v-else-if="background?.kind === 'video' && url">
       <video
+        ref="video"
         :src="url"
         class="absolute inset-0 h-full w-full"
         :style="{ objectFit: fit }"
         autoplay
-        muted
-        loop
+        :muted="!listen || (background.muted ?? false)"
+        :loop="background.loop ?? true"
         playsinline
       />
     </template>

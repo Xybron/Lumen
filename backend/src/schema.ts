@@ -7,6 +7,9 @@ export const BackgroundSchema = z.object({
   gradient: z.string().optional(),
   fit: z.enum(['cover', 'contain', 'fill']).optional(),
   overlayOpacity: z.number().min(0).max(1).optional(),
+  loop: z.boolean().optional(),
+  muted: z.boolean().optional(),
+  volume: z.number().min(0).max(1).optional(),
 });
 
 export const TypographySchema = z.object({

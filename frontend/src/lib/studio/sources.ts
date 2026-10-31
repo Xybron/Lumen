@@ -47,6 +47,8 @@ export class SourceBank {
     this.stopWs = subscribeWs(message => {
       if (message.t === 'state' && message.channel && acceptChannelProjection(message.channel, this.channelStates.get(message.channel), message.payload)) {
         this.channelStates.set(message.channel, message.payload);
+        for (const input of this.inputs.values()) if (input.source.channelId === message.channel)
+          this.applyChannelAudio(input, this.channelItem(input, false));
         this.pruneMultiviewVideos();
       }
       if (message.t === 'content-updated') void this.loadContent();
@@ -54,7 +56,12 @@ export class SourceBank {
     void this.loadContent();
   }
   private async loadContent() {
-    try { const r = await fetch('/api/content'); if (r.ok) { this.content = await r.json(); this.pruneMultiviewVideos(); } } catch { /* retry on next update */ }
+    try { const r = await fetch('/api/content'); if (r.ok) {
+      this.content = await r.json();
+      for (const input of this.inputs.values()) if (input.source.kind === 'channel')
+        this.applyChannelAudio(input, this.channelItem(input, false));
+      this.pruneMultiviewVideos();
+    } } catch { /* retry on next update */ }
   }
   sync(sources: StudioSource[]) {
     for (const [id, input] of this.inputs) {
@@ -77,6 +84,7 @@ export class SourceBank {
       const previous = input.source;
       input.source = source;
       input.gain.gain.setTargetAtTime(source.audio.muted ? 0 : source.audio.volume, this.audio.currentTime, 0.015);
+      if (source.kind === 'channel') this.applyChannelAudio(input, this.channelItem(input, false));
       input.delay.delayTime.setTargetAtTime(source.audio.delayMs / 1000, this.audio.currentTime, 0.015);
       if (input.element instanceof HTMLMediaElement) {
         const element = input.element;
@@ -115,6 +123,13 @@ export class SourceBank {
   private play(input: MediaInput, live: boolean) {
     input.error = '';
     input.playback.play(error => { input.error = playbackError(error, live); });
+  }
+  private applyChannelAudio(input: MediaInput, item: Item | undefined) {
+    const background = item?.background?.kind === 'video' ? item.background : undefined;
+    const muted = input.source.audio.muted || background?.muted === true;
+    const level = muted ? 0 : input.source.audio.volume * (background?.volume ?? 1);
+    if (muted) input.gain.gain.setValueAtTime(0, this.audio.currentTime);
+    else input.gain.gain.setTargetAtTime(level, this.audio.currentTime, 0.015);
   }
   private clearElement(input: MediaInput) {
     // Invalidate callbacks before pause/load reject any in-flight play request.
@@ -191,15 +206,19 @@ export class SourceBank {
     const playlistId = state?.playlistId ?? this.content.channels.find(c => c.id === channelId)?.playlistId;
     const item = this.content.playlists.find(p => p.id === playlistId)?.items[state?.index ?? 0];
     if (!prepareMedia) return item;
-    const url = item?.background?.kind === 'video' ? item.background.src : undefined;
-    if (url !== input.channelItemKey) {
-      input.channelItemKey = url;
+    const background = item?.background?.kind === 'video' ? item.background : undefined;
+    const url = background?.src;
+    const key = url ? `${item?.id}:${url}` : undefined;
+    this.applyChannelAudio(input, item);
+    if (key !== input.channelItemKey) {
+      input.channelItemKey = key;
       if (url) this.setMedia(input, url);
       else {
         input.node?.disconnect(); input.node = null;
         this.clearElement(input);
       }
     }
+    if (input.element instanceof HTMLVideoElement) input.element.loop = background?.loop ?? true;
     return item;
   }
   /**
@@ -217,7 +236,7 @@ export class SourceBank {
       const item = this.channelItem(input, false);
       const url = item?.background?.kind === 'video' ? item.background.src : undefined;
       let element: HTMLVideoElement | null = null;
-      if (url && input.channelItemKey === url && input.element instanceof HTMLVideoElement) {
+      if (url && input.channelItemKey === `${item?.id}:${url}` && input.element instanceof HTMLVideoElement) {
         // Observe the exact live playback time without restarting/pausing it.
         element = input.element;
       } else if (url) {
@@ -227,7 +246,7 @@ export class SourceBank {
           this.releaseMultiviewVideo(id);
           const video = document.createElement('video');
           video.muted = video.defaultMuted = true; video.playsInline = true;
-          video.loop = input.source.loop; video.preload = 'auto';
+          video.loop = item?.background?.loop ?? true; video.preload = 'auto';
           video.src = `/${url.replace(/^\//, '')}`;
           preview = { url, element: video, paused: !!input.source.playback?.paused };
           this.multiviewVideos.set(id, preview);
@@ -237,7 +256,7 @@ export class SourceBank {
           if (preview.paused) preview.element.pause();
           else void preview.element.play().catch(() => {});
         }
-        preview.element.loop = input.source.loop;
+        preview.element.loop = item?.background?.loop ?? true;
         element = preview.element;
       }
       // Clone only the visual handle. Neither peek nor paint can write to the
