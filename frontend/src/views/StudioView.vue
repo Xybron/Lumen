@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { toast } from 'vue-sonner';
-import { useFullscreen, useResizeObserver } from '@vueuse/core';
+import { useResizeObserver } from '@vueuse/core';
 import { Aperture, ArrowRightLeft, Plus, Copy, Trash2, Layers, Camera, Monitor,
   Mic, Image, Film, Music2, Presentation, Lock, Volume2, VolumeX, Circle, Square as StopIcon,
   FolderOpen, LoaderCircle, Power, ChevronRight, Headphones, CircleHelp, RotateCcw, Play, Pause, Repeat, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Maximize2, Minimize2, AlertCircle, Search, X, LayoutGrid, List, Keyboard, Settings2 } from 'lucide-vue-next';
@@ -31,6 +31,7 @@ import { studioApi } from '@/lib/studio/api';
 import { useAnimationPreview } from '@/composables/useAnimationPreview';
 import { useStudioTransitions } from '@/composables/useStudioTransitions';
 import { useConfirmation } from '@/composables/useConfirmation';
+import { useAppFullscreen } from '@/composables/useAppFullscreen';
 import { animationTotalMs } from '@/lib/studio/animation';
 import { describeMainAudioStatus } from '@/lib/studio/main-audio-status';
 import { audioMeterPercent } from '@/lib/studio/audio-meter';
@@ -48,7 +49,7 @@ const propertiesSourceId = ref<string | null>(null);
 function addSourceDialog() { propertiesSourceId.value = null; sourceOpen.value = true; }
 function editSourceDialog(source: StudioSource) { propertiesSourceId.value = source.id; sourceOpen.value = true; }
 const sceneShortcutsOpen = ref(false);
-const { isFullscreen, isSupported: fullscreenSupported, toggle: toggleNativeFullscreen } = useFullscreen(document.documentElement);
+const { isFullscreen, isSupported: fullscreenSupported, toggle: toggleNativeFullscreen } = useAppFullscreen();
 async function toggleFullscreen() {
   try { await toggleNativeFullscreen(); }
   catch { toast.error('Fullscreen is unavailable in this window. Try opening Lumen in a browser window.'); }
@@ -260,10 +261,6 @@ function keydown(e: KeyboardEvent) {
     target?.closest('input, textarea, select, a, summary, [contenteditable]:not([contenteditable="false"]), [role="dialog"], [role="menu"], [role="menuitem"]') ||
     document.querySelector('[data-studio-layer-menu], [data-animation-editor]') || sourceOpen.value || guideOpen.value) return;
   const button = target?.closest('button');
-  if (!e.repeat && e.key.toLowerCase() === 'f' && fullscreenSupported.value &&
-    (!button || button.matches('.scene-card, .transition-button, .studio-fullscreen-toggle'))) {
-    e.preventDefault(); void toggleFullscreen(); return;
-  }
   // Scene and transition controls keep the Studio shortcuts after a click;
   // Enter still activates the focused button. Other buttons stay native.
   if (button && !button.matches('.scene-card, .transition-button')) return;

@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue';
-import { useFullscreen } from '@vueuse/core';
 import { Clapperboard, Maximize2, Minimize2, Grid2X2 } from 'lucide-vue-next';
 import { useIdentityStore } from '@/stores/identity';
 import { useStudioStore } from '@/stores/studio';
@@ -9,10 +8,11 @@ import { sceneShortcutProblem, sceneShortcutSurfaceBlocked } from '@/lib/studio/
 import StudioMultiview from '@/components/studio/StudioMultiview.vue';
 import LoginGate from '@/components/shell/LoginGate.vue';
 import WorkspaceHeader from '@/components/shell/WorkspaceHeader.vue';
+import { useAppFullscreen } from '@/composables/useAppFullscreen';
 
 const identity = useIdentityStore(), studio = useStudioStore(), content = useContentStore();
 const root = ref<HTMLElement | null>(null);
-const { isFullscreen, toggle } = useFullscreen(document.documentElement);
+const { isFullscreen, toggle } = useAppFullscreen();
 const board = ref<InstanceType<typeof StudioMultiview> | null>(null);
 async function toggleFullscreen() {
   try {

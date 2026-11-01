@@ -32,6 +32,7 @@
     "test:studio:camera-formats": "npm run build && node backend/test/camera-formats-browser.mjs",
     "test:studio:source-properties": "npm run build && node backend/test/source-properties-browser.mjs",
     "test:studio:editing": "npm run build && npm --prefix backend run test:studio:editing",
+    "test:app:fullscreen": "npm run build && node backend/test/app-fullscreen-browser.mjs",
     "test:studio:properties": "npm run build && node backend/test/studio-properties-browser.mjs",
     "test:clips": "npm run build && node backend/test/nle-browser.mjs",
     "test:clips:projects": "npm run build && node backend/test/clip-project-delete-browser.mjs",

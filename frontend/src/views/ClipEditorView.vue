@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, type Directive } from 'vue';
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router';
-import { useFullscreen } from '@vueuse/core';
 import { toast } from 'vue-sonner';
 import { ArrowDown, ArrowLeft, ArrowRightLeft, ArrowUp, Copy, Download, Film, FolderOpen, Layers, LoaderCircle, LockKeyhole, Maximize2, Minimize2, Music2, PanelRightClose, Plus, Save, Search, ShieldCheck, SlidersHorizontal, Type, Upload, X } from 'lucide-vue-next';
 import WorkspaceHeader from '@/components/shell/WorkspaceHeader.vue';
@@ -14,6 +13,7 @@ import EditorExportDialog from '@/components/clips/EditorExportDialog.vue';
 import { useIdentityStore } from '@/stores/identity';
 import { useClipDeliveryStore } from '@/stores/clip-delivery';
 import { useConfirmation } from '@/composables/useConfirmation';
+import { useAppFullscreen } from '@/composables/useAppFullscreen';
 import { clipsApi, ClipsRequestError } from '@/lib/clips';
 import { refreshTimelinePreviews, setTimelinePreviewSession } from '@/lib/timeline-previews';
 import { applyTransition, applyTransitionToAll, detachTransitionLinks, normalizeTrackTransitions, transitionAtCut } from '@/lib/clip-transitions';
@@ -48,7 +48,7 @@ const valid = computed(() => !!fields.name.trim() && fields.name.length <= 120 &
 const savedElsewhere = computed(() => !!draft.value && !!workspace.value?.drafts.some(item => item.id === draft.value?.id && item.revision > draft.value.revision));
 watch(() => workspace.value?.liveProtected, (live, previous) => { if (previous === true && live === false) refreshTimelinePreviews(); });
 watch(() => identity.isAuthenticated ? identity.me?.id ?? null : null, id => setTimelinePreviewSession(id), { immediate: true });
-const { isFullscreen, isSupported: fullscreenSupported, toggle: toggleNativeFullscreen } = useFullscreen(document.documentElement);
+const { isFullscreen, isSupported: fullscreenSupported, toggle: toggleNativeFullscreen } = useAppFullscreen();
 const mediaItems = computed(() => {
   const originals = (workspace.value?.recordings ?? []).filter(item => item.status === 'complete').map(item => ({ source: { kind: 'recording' as const, id: item.id }, name: item.name, kind: 'video' as const, durationMs: item.durationMs, width: item.width ?? 1920, height: item.height ?? 1080, url: clipsApi.media(item.id), poster: item.posterReady ? clipsApi.poster(item.id) : '' }));
   const imported = (workspace.value?.assets ?? []).map(item => ({ ...item, source: { kind: 'asset' as const, id: item.id }, url: clipsApi.asset(item.id), poster: '' }));

@@ -56,6 +56,7 @@ const dockIcon = computed(() => props.studio ? Clapperboard : focusedChannel.val
 function toolbarKeys(event: KeyboardEvent) {
   // Keep search available without letting toolbar keys advance slides or Take.
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') return;
+  if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === 'f') return;
   if (sceneShortcutProblem(event) === null) return;
   if (event.key === 'Escape' && dragging.value) { cancel(); event.preventDefault(); }
   event.stopPropagation();

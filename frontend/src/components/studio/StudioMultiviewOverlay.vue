@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { useFullscreen } from '@vueuse/core';
+import { useEventListener } from '@vueuse/core';
 import { Grid2X2, GripVertical, ArrowUpRight, Maximize2, Minimize2, Minus, RotateCcw, MoveDiagonal2 } from 'lucide-vue-next';
 import { useMultiview, useMultiviewWindow } from '@/composables/useMultiview';
 import StudioMultiview from '@/components/studio/StudioMultiview.vue';
@@ -9,17 +9,19 @@ import { sceneShortcutProblem } from '@/lib/studio/scene-shortcuts';
 
 const route = useRoute(), multiview = useMultiview();
 const { element, style, dragging, resizing, begin, move, finish, cancel, reset, keyboard } = useMultiviewWindow();
-const { isFullscreen, toggle, exit } = useFullscreen(element);
+const isFullscreen = ref(false);
+useEventListener(document, 'fullscreenchange', () => { isFullscreen.value = !!element.value && document.fullscreenElement === element.value; });
 const board = ref<InstanceType<typeof StudioMultiview> | null>(null);
 async function toggleFullscreen() {
   try {
-    await toggle();
+    if (isFullscreen.value) await document.exitFullscreen();
+    else await element.value?.requestFullscreen();
     await nextTick();
     board.value?.focus();
   } catch { /* The current window may not support fullscreen. */ }
 }
 async function collapse(restoreFocus = true) {
-  if (isFullscreen.value) await exit().catch(() => {});
+  if (element.value && document.fullscreenElement === element.value) await document.exitFullscreen().catch(() => {});
   multiview.collapse();
   if (restoreFocus) { await nextTick(); document.querySelector<HTMLButtonElement>('[data-multiview-trigger]')?.focus({ preventScroll: true }); }
 }
