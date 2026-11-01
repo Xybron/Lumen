@@ -224,7 +224,8 @@ interface Bus {
   destination: MediaStreamAudioDestinationNode;
   master: GainNode;
   analyser: AnalyserNode;
-  routes: Map<string, { gain: GainNode; input: GainNode }>;
+  routes: Map<string, { gain: GainNode; input: GainNode; target: number }>;
+  masterTarget?: number;
   stream: MediaStream;
 }
 
@@ -256,6 +257,7 @@ export class StudioCompositor {
   private animationRuns: AnimationRunTracker;
   private programCanvas = document.createElement('canvas');
   private sceneCanvas = document.createElement('canvas');
+  private previewPaintedAt = -Infinity;
   private multiview: { canvas: HTMLCanvasElement; stream: MediaStream; paintedAt: number } | null = null;
   private programMonitor: { canvas: HTMLCanvasElement; stream: MediaStream; paintedAt: number } | null = null;
   private broadcastVideo: BroadcastVideoSource | null = null;
@@ -297,8 +299,18 @@ export class StudioCompositor {
     }
     this.state = state;
     this.syncSources();
+    this.previewPaintedAt = -Infinity;
     if (this.multiview) this.multiview.paintedAt = -Infinity;
     this.draw();
+  }
+  private previewHasMotion(scene: StudioScene | null) {
+    return scene?.layers.some(layer => {
+      if (!layer.visible || layer.kind !== 'source' || !layer.sourceId) return false;
+      const input = this.bank.inputs.get(layer.sourceId);
+      if (!input) return false;
+      if (['camera', 'screen', 'video'].includes(input.source.kind)) return true;
+      return input.source.kind === 'channel' && this.bank.channelItem(input, false)?.background?.kind === 'video';
+    }) ?? false;
   }
   private programMix(now: number): SceneWeight[] {
     if (this.heldProgram) return this.heldProgram.mix;
@@ -456,7 +468,12 @@ export class StudioCompositor {
         output?.mode === 'scene' ? output.scene : this.state.program;
       const bus = this.bus(id);
       const followsProgram = id !== 'preview' && output?.mode !== 'scene';
-      if (followsProgram && !output?.blanked) {
+      let painted = true;
+      if (id === 'preview' && !this.previewHasMotion(scene) && now - this.previewPaintedAt < 100) {
+        // Static Preview scenes need no full canvas repaint every Program tick.
+        // A cue arriving independently will appear within 100 ms.
+        painted = false;
+      } else if (followsProgram && !output?.blanked) {
         if (bus.canvas !== this.programCanvas) {
           const ctx = bus.canvas.getContext('2d', { alpha: false })!;
           ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
@@ -465,6 +482,15 @@ export class StudioCompositor {
       } else {
         const run = id === 'preview' ? null : this.animationRuns.output(id);
         paintScene(bus.canvas, scene, this.bank, output?.blanked, run ? now - run.startedAt : null);
+      }
+      if (id === 'preview' && painted) this.previewPaintedAt = now;
+      const audioEnabled = outputAudioEnabled(id, output?.audioEnabled);
+      if (!audioEnabled) {
+        if (bus.masterTarget !== 0) {
+          bus.master.gain.setTargetAtTime(0, this.audio.currentTime, 0.015);
+          bus.masterTarget = 0;
+        }
+        continue;
       }
       const weights = followsProgram ? programWeights : sceneSourceWeights([{ scene, weight: 1 }]);
       for (const [sourceId, route] of bus.routes) {
@@ -475,12 +501,18 @@ export class StudioCompositor {
       }
       for (const [sourceId, input] of this.bank.inputs) {
         let route = bus.routes.get(sourceId);
-        if (!route) { const gain = this.audio.createGain(); gain.gain.value = 0; input.gain.connect(gain); gain.connect(bus.master); route = { gain, input: input.gain }; bus.routes.set(sourceId, route); }
+        if (!route) { const gain = this.audio.createGain(); gain.gain.value = 0; input.gain.connect(gain); gain.connect(bus.master); route = { gain, input: input.gain, target: 0 }; bus.routes.set(sourceId, route); }
         const weight = sourceAudioWeight(input.source, this.state.mainAudioSourceId, currentSources.has(sourceId), followsProgram, outgoingWeight, weights.get(sourceId) ?? 0);
-        route.gain.gain.setTargetAtTime(weight, this.audio.currentTime, 0.015);
+        if (weight !== route.target) {
+          route.gain.gain.setTargetAtTime(weight, this.audio.currentTime, 0.015);
+          route.target = weight;
+        }
       }
-      const audioEnabled = outputAudioEnabled(id, output?.audioEnabled);
-      bus.master.gain.setTargetAtTime(audioEnabled && !this.state.masterMuted ? this.state.masterVolume : 0, this.audio.currentTime, 0.015);
+      const masterTarget = !this.state.masterMuted ? this.state.masterVolume : 0;
+      if (bus.masterTarget !== masterTarget) {
+        bus.master.gain.setTargetAtTime(masterTarget, this.audio.currentTime, 0.015);
+        bus.masterTarget = masterTarget;
+      }
     }
     if (this.multiview && now - this.multiview.paintedAt >= 1000 / 7.5) {
       this.paintMultiview(this.multiview.canvas);

@@ -23,6 +23,8 @@ export interface MediaInput {
   streamAudioTracks?: MediaStreamTrack[];
   stopStreamEvents?: () => void;
   channelItemKey?: string;
+  audioTarget?: number;
+  channelAudioMuted?: boolean;
 }
 
 /** The painter needs pictures/content, never ownership of the audio graph. */
@@ -87,8 +89,14 @@ export class SourceBank {
       }
       const previous = input.source;
       input.source = source;
-      input.gain.gain.setTargetAtTime(source.audio.muted ? 0 : source.audio.volume, this.audio.currentTime, 0.015);
       if (source.kind === 'channel') this.applyChannelAudio(input, this.channelItem(input, false));
+      else {
+        const target = source.audio.muted ? 0 : source.audio.volume;
+        if (input.audioTarget !== target) {
+          input.gain.gain.setTargetAtTime(target, this.audio.currentTime, 0.015);
+          input.audioTarget = target;
+        }
+      }
       input.delay.delayTime.setTargetAtTime(source.audio.delayMs / 1000, this.audio.currentTime, 0.015);
       if (input.element instanceof HTMLMediaElement) {
         const element = input.element;
@@ -156,8 +164,10 @@ export class SourceBank {
     const background = item?.background?.kind === 'video' ? item.background : undefined;
     const muted = input.source.audio.muted || background?.muted === true;
     const level = muted ? 0 : input.source.audio.volume * (background?.volume ?? 1);
+    if (input.audioTarget === level && input.channelAudioMuted === muted) return;
     if (muted) input.gain.gain.setValueAtTime(0, this.audio.currentTime);
     else input.gain.gain.setTargetAtTime(level, this.audio.currentTime, 0.015);
+    input.audioTarget = level; input.channelAudioMuted = muted;
   }
   private clearElement(input: MediaInput) {
     clearInterval(input.preparationTimer); input.preparationTimer = undefined; input.preparingVideo = false;
@@ -325,6 +335,7 @@ export class SourceBank {
   }
   sampleLevels() {
     for (const [id, input] of this.inputs) {
+      if (!input.node) continue;
       input.analyser.getFloatTimeDomainData(input.samples);
       let peak = 0;
       for (const sample of input.samples) peak = Math.max(peak, Math.abs(sample));
@@ -332,7 +343,6 @@ export class SourceBank {
     }
   }
   status() {
-    this.sampleLevels();
     const sources: Record<string, 'ready' | 'missing' | 'loading' | 'error'> = {}, levels: Record<string, number> = {}, sourceErrors: Record<string, string> = {};
     for (const [id, input] of this.inputs) {
       const kind = input.source.kind;
