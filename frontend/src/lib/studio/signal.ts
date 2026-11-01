@@ -44,8 +44,19 @@ export class StudioPeer {
       if (e.candidate) signal.send({ t: 'signal', peerId, key, candidate: e.candidate.toJSON() });
     };
   }
-  async offer(stream: MediaStream) {
-    for (const track of stream.getTracks()) this.pc.addTrack(track, stream);
+  async offer(stream: MediaStream, maxVideoFrameRate?: number) {
+    for (const track of stream.getTracks()) {
+      const sender = this.pc.addTrack(track, stream);
+      if (track.kind === 'video' && maxVideoFrameRate) {
+        // The production canvas is 30 fps. Publishing a 50/60 fps capture
+        // card feed only spends extra encoding time on frames Program drops.
+        const parameters = sender.getParameters();
+        if (parameters.encodings?.length) {
+          parameters.encodings[0].maxFramerate = maxVideoFrameRate;
+          await sender.setParameters(parameters).catch(() => {});
+        }
+      }
+    }
     await this.pc.setLocalDescription(await this.pc.createOffer());
     this.signal.send({ t: 'signal', peerId: this.peerId, key: this.key, description: this.pc.localDescription!.toJSON() });
   }

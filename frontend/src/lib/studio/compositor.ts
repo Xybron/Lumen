@@ -259,6 +259,8 @@ export class StudioCompositor {
   private multiview: { canvas: HTMLCanvasElement; stream: MediaStream; paintedAt: number } | null = null;
   private programMonitor: { canvas: HTMLCanvasElement; stream: MediaStream; paintedAt: number } | null = null;
   private broadcastVideo: BroadcastVideoSource | null = null;
+  private broadcastOverload = 0;
+  private broadcastRecovery = 0;
   constructor(private state: ProductionState) {
     this.animationRuns = new AnimationRunTracker(state);
     this.programCanvas.width = this.sceneCanvas.width = 1920;
@@ -386,10 +388,12 @@ export class StudioCompositor {
   }
   broadcastStream(profile: BroadcastProfile) {
     this.broadcastVideo?.close();
+    this.broadcastOverload = 0; this.broadcastRecovery = 0;
     const video = new BroadcastVideoSource(this.programCanvas, this.bus('program').stream, profile);
     this.broadcastVideo = video;
     return { stream: video.stream, release: () => { video.close(); if (this.broadcastVideo === video) this.broadcastVideo = null; } };
   }
+  get broadcastFrameRate() { return this.broadcastVideo?.frameRate ?? null; }
   releaseProgramMonitor() {
     if (!this.programMonitor) return;
     this.programMonitor.stream.getVideoTracks().forEach(track => track.stop());
@@ -482,7 +486,7 @@ export class StudioCompositor {
       this.paintMultiview(this.multiview.canvas);
       this.multiview.paintedAt = now;
     }
-    this.broadcastVideo?.draw();
+    this.broadcastVideo?.draw(now);
     if (this.programMonitor && now - this.programMonitor.paintedAt >= 1000 / PROGRAM_MONITOR_FRAME_RATE) {
       this.programMonitor.canvas.getContext('2d', { alpha: false })!.drawImage(this.programCanvas, 0, 0, PROGRAM_MONITOR_WIDTH, PROGRAM_MONITOR_HEIGHT);
       this.programMonitor.paintedAt = now;
@@ -495,6 +499,23 @@ export class StudioCompositor {
   status() {
     const elapsed = performance.now() - this.measuredAt, fps = Math.min(60, Math.round(this.frames * 1000 / elapsed));
     this.frames = 0; this.measuredAt = performance.now();
+    // Only the optional 720p stream yields frames. Preview, Program, recording
+    // and projection keep their own 30 fps sources and never inherit this rate.
+    if (this.broadcastVideo?.settings.profile === '720p' && elapsed >= 150) {
+      if (fps < 26) {
+        this.broadcastOverload++; this.broadcastRecovery = 0;
+        if (this.broadcastOverload >= 4) {
+          this.broadcastVideo.setFrameRate(this.broadcastVideo.frameRate === 30 ? 20 : 15);
+          this.broadcastOverload = 0;
+        }
+      } else if (fps >= 29) {
+        this.broadcastRecovery++; this.broadcastOverload = 0;
+        if (this.broadcastRecovery >= 16) {
+          this.broadcastVideo.setFrameRate(this.broadcastVideo.frameRate === 15 ? 20 : 30);
+          this.broadcastRecovery = 0;
+        }
+      } else { this.broadcastOverload = 0; this.broadcastRecovery = 0; }
+    }
     const data = this.bank.status();
     const main = this.state.mainAudioSourceId ? this.bank.inputs.get(this.state.mainAudioSourceId) : undefined;
     if (main && ['camera', 'microphone', 'screen'].includes(main.source.kind) && main.stream

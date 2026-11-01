@@ -334,7 +334,7 @@ export async function createProduction(rendererOptions: Pick<RendererOriginOptio
       const inspect = (window as unknown as { __lumenDiagnostics?: () => Promise<unknown> }).__lumenDiagnostics;
       return inspect ? inspect() : null;
     }).catch(() => null) : null;
-    res.json({ status: snapshot(), renderer: details, startup });
+    res.json({ status: snapshot(), renderer: details, broadcast: broadcast?.diagnostics() ?? null, startup });
   }));
   router.put('/studio', operator, asyncRoute(async (req, res) => {
     const parsed = ProductionSchema.safeParse(req.body);

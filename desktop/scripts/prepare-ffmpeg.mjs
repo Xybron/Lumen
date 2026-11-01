@@ -54,6 +54,7 @@ async function verify(binary) {
   for (const encoder of ['libx264', 'libvpx-vp9', 'libopus', 'libmp3lame', 'aac', 'pcm_s16le', 'png']) {
     if (!new RegExp(`\\b${encoder}\\b`).test(encoders)) throw new Error(`Bundled FFmpeg is missing ${encoder}.`);
   }
+  if (process.platform === 'win32' && !/\bh264_mf\b/.test(encoders)) throw new Error('Bundled FFmpeg is missing Windows Media Foundation H.264 encoding.');
   const protocols = await run(binary, ['-hide_banner', '-protocols'], {}, true);
   if (!/\brtmps\b/.test(protocols)) throw new Error('Bundled FFmpeg must support RTMPS streaming.');
   return version;
@@ -80,7 +81,7 @@ export async function prepareFfmpeg(resources, cache) {
   const downloads = path.join(cache, 'ffmpeg-sources'); await fs.mkdir(downloads, { recursive: true });
   const archives = new Map();
   for (const source of sources) archives.set(source.id, await download(source, downloads));
-  const revision = windows ? 'static-v4' : 'static-v3';
+  const revision = windows ? 'static-v5' : 'static-v3';
   // Keep Windows compiler flags in a short MSYS path even when the checkout
   // lives in a Windows user directory containing spaces.
   const work = windows ? path.join(msys, 'var/tmp', `lumen-ffmpeg-${revision}-${process.arch}`) : path.join(cache, `ffmpeg-${revision}-${process.arch}`);
@@ -132,7 +133,7 @@ export async function prepareFfmpeg(resources, cache) {
     await build('ffmpeg', [
       '--enable-static', '--disable-shared', '--disable-autodetect', '--disable-doc', '--disable-debug', '--disable-ffplay', '--disable-ffprobe',
       '--enable-gpl', '--enable-libx264', '--enable-libvpx', '--enable-libopus', '--enable-libmp3lame', '--enable-zlib',
-      ...(windows ? ['--target-os=mingw32', '--arch=x86_64', '--enable-schannel'] : ['--enable-securetransport', '--enable-videotoolbox', '--enable-audiotoolbox']),
+      ...(windows ? ['--target-os=mingw32', '--arch=x86_64', '--enable-schannel', '--enable-mediafoundation'] : ['--enable-securetransport', '--enable-videotoolbox', '--enable-audiotoolbox']),
       '--pkg-config-flags=--static', `--pkg-config=${buildPrefix}/bin/pkgconf${windows ? '.exe' : ''}`,
       `--extra-cflags=-I${buildPrefix}/include`, `--extra-ldflags=-L${buildPrefix}/lib${windows ? ' -static-libgcc -static' : ''}`,
     ]);

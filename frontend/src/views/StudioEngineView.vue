@@ -141,7 +141,8 @@ onMounted(async () => {
     compositor = new StudioCompositor(state);
     (window as unknown as { __lumenDiagnostics: () => Promise<unknown> }).__lumenDiagnostics = async () => ({
       audioState: compositor?.audio.state, audioTime: compositor?.audio.currentTime,
-      broadcast: { id: broadcast.activeId, queuedBytes: broadcast.queuedBytes, capture: broadcast.settings },
+      broadcast: { id: broadcast.activeId, queuedBytes: broadcast.queuedBytes,
+        capture: broadcast.settings ? { ...broadcast.settings, effectiveFrameRate: compositor?.broadcastFrameRate } : null },
       inputs: [...(compositor?.bank.inputs.values() ?? [])].map(input => ({
         id: input.source.id, kind: input.source.kind, gain: input.gain.gain.value,
         tracks: input.stream?.getTracks().map(t => ({ kind: t.kind, enabled: t.enabled, muted: t.muted, state: t.readyState })),

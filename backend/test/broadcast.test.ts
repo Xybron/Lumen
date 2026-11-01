@@ -14,6 +14,8 @@ test('broadcast destinations keep fixed RTMPS authorities and bounded codec argu
   assert.equal(new URL(broadcastDestinationUrl('facebook', 'opaque?s=1&ds=1')).hostname, 'live-api-s.facebook.com');
   for (const key of ['rtmp://127.0.0.1/private', '//elsewhere/path', 'file:/etc/passwd', 'key\n-injected', ' ']) assert.throws(() => broadcastDestinationUrl('youtube', key), BroadcastError);
   const args = broadcastEncoderArguments('720p'); assert.ok(args.includes('libx264')); assert.ok(args.includes('aac')); assert.ok(args.includes('pipe:1')); assert.ok(args.includes('pipe:3'));
+  const windows = broadcastEncoderArguments('720p', 'mediafoundation');
+  assert.ok(windows.includes('h264_mf')); assert.ok(windows.includes('nv12')); assert.ok(windows.includes('1')); assert.ok(!windows.includes('libx264'));
   assert.match(args[args.indexOf('-vf') + 1], /1280:720/); assert.equal(args.filter(value => value === 'libx264').length, 1);
   assert.ok(broadcastHlsArguments('/private/generated').includes('6')); assert.ok(broadcastHlsArguments('/private/generated').includes('delete_segments+temp_file+independent_segments+discont_start'));
 });

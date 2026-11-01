@@ -62,29 +62,44 @@ test('native transport explicitly chooses VP8 and never silently falls back to V
 });
 
 function videoSurfaceFixture() {
-  let stopped = 0, fps = 0, draws = 0;
+  let stopped = 0, fps = -1, draws = 0, requested = 0;
   const audio = { kind: 'audio', stop() { throw new Error('The mixed audio track is never owned by streaming.'); } } as unknown as MediaStreamTrack;
   const originalVideo = { kind: 'video', stop() { throw new Error('Program and recording video must stay live.'); } } as unknown as MediaStreamTrack;
-  const ownedVideo = { kind: 'video', stop() { stopped++; } } as unknown as MediaStreamTrack;
+  const ownedVideo = { kind: 'video', stop() { stopped++; }, requestFrame() { requested++; } } as unknown as MediaStreamTrack;
   const attached: MediaStreamTrack[] = [ownedVideo];
   const program = { getAudioTracks: () => [audio], getVideoTracks: () => [originalVideo], getTracks: () => [originalVideo, audio] } as unknown as MediaStream;
   const captured = { getAudioTracks: () => attached.filter(track => track.kind === 'audio'), getVideoTracks: () => [ownedVideo], addTrack(track: MediaStreamTrack) { attached.push(track); } } as unknown as MediaStream;
   const source = { width: 1920, height: 1080 } as HTMLCanvasElement;
   const context = { drawImage(actual: HTMLCanvasElement, x: number, y: number, width: number, height: number) { assert.equal(actual, source); assert.deepEqual([x, y, width, height], [0, 0, 1280, 720]); draws++; } };
   const canvas = { width: 0, height: 0, getContext: () => context, captureStream(rate: number) { fps = rate; return captured; } } as unknown as HTMLCanvasElement;
-  return { source, program, canvas, captured, audio, stopped: () => stopped, fps: () => fps, draws: () => draws };
+  return { source, program, canvas, captured, audio, stopped: () => stopped, fps: () => fps, draws: () => draws, requested: () => requested };
 }
 
 test('720p uses one owned surface and shares exact Main audio without changing the recording surface', () => {
   const f = videoSurfaceFixture(), surface = new BroadcastVideoSource(f.source, f.program, '720p', () => f.canvas);
-  assert.equal(surface.stream, f.captured); assert.equal(f.fps(), 30);
+  assert.equal(surface.stream, f.captured); assert.equal(f.fps(), 0);
   assert.deepEqual([f.canvas.width, f.canvas.height], [1280, 720]);
   assert.deepEqual(surface.stream.getAudioTracks(), [f.audio]);
-  assert.equal(f.draws(), 1); surface.draw(); assert.equal(f.draws(), 2);
+  assert.equal(f.draws(), 1); assert.equal(f.requested(), 1);
+  const later = performance.now() + 100;
+  surface.draw(later); assert.equal(f.draws(), 2);
+  surface.setFrameRate(15); surface.draw(later + 30); assert.equal(f.draws(), 2, 'stream frame is skipped while Program continues drawing');
+  surface.draw(later + 80); assert.equal(f.draws(), 3); assert.equal(f.requested(), 3);
   surface.close(); surface.close(); surface.draw();
-  assert.equal(f.stopped(), 1); assert.equal(f.draws(), 2);
+  assert.equal(f.stopped(), 1); assert.equal(f.draws(), 3);
   assert.deepEqual([f.canvas.width, f.canvas.height], [0, 0]);
   assert.deepEqual([f.source.width, f.source.height], [1920, 1080]);
+});
+
+test('720p falls back to ordinary canvas capture when manual frames are unavailable', () => {
+  const f = videoSurfaceFixture();
+  let rates: number[] = [], stopped = 0;
+  const track = { kind: 'video', stop() { stopped++; } } as unknown as MediaStreamTrack;
+  const stream = { getVideoTracks: () => [track], addTrack() {} } as unknown as MediaStream;
+  const canvas = { width: 0, height: 0, getContext: () => ({ drawImage() {} }), captureStream(rate: number) { rates.push(rate); return stream; } } as unknown as HTMLCanvasElement;
+  const surface = new BroadcastVideoSource(f.source, f.program, '720p', () => canvas);
+  assert.deepEqual(rates, [0, 30]); assert.equal(stopped, 1);
+  surface.close(); assert.equal(stopped, 2);
 });
 
 test('1080p directly reuses Program, allocates no extra surface and stops no shared tracks', () => {

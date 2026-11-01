@@ -97,9 +97,10 @@ async function processProfile() {
   const processes = [...stats.spawned.filter(value => value.running && value.kind !== 'probe'), ...stats.receivers.filter(value => !value.closed).map(value => ({ kind: `receiver-${value.name}`, pid: value.pid }))];
   let cpu = 'Unavailable on this host';
   if (process.platform !== 'win32' && processes.length) cpu = await new Promise(resolve => { const child = spawn('ps', ['-p', processes.map(value => value.pid).join(','), '-o', 'pid=,pcpu='], { stdio: ['ignore', 'pipe', 'ignore'] }), chunks = []; const timer = setTimeout(() => { child.kill('SIGKILL'); resolve('CPU sample timed out'); }, 1500); child.stdout.on('data', chunk => chunks.push(chunk)); child.once('error', () => { clearTimeout(timer); resolve('CPU sampling unavailable'); }); child.once('close', code => { clearTimeout(timer); const value = Buffer.concat(chunks).toString().trim(); resolve(code === 0 && value ? value : 'CPU sampling unavailable'); }); });
-  const profile = { note: 'Diagnostic process lifetime CPU percentages, not a cross-machine benchmark. Receiver processes exist only in this local test.', capture: diagnostics.renderer?.broadcast?.capture, processes, cpu };
+  const profile = { note: 'Diagnostic process lifetime CPU percentages, not a cross-machine benchmark. Receiver processes exist only in this local test.', capture: diagnostics.renderer?.broadcast?.capture, encoder: diagnostics.broadcast?.encoder, processes, cpu };
   await fs.writeFile(path.join(directory, 'broadcast-process-profile.json'), JSON.stringify(profile, null, 2));
   assert.deepEqual(profile.capture && { profile: profile.capture.profile, width: profile.capture.width, height: profile.capture.height, frameRate: profile.capture.frameRate, videoBitsPerSecond: profile.capture.videoBitsPerSecond, audioBitsPerSecond: profile.capture.audioBitsPerSecond }, { profile: '720p', width: 1280, height: 720, frameRate: 30, videoBitsPerSecond: 3000000, audioBitsPerSecond: 192000 }, '720p streaming input avoids a redundant 1080p/6Mbps software capture');
+  assert.ok(['videotoolbox', 'mediafoundation', 'software'].includes(profile.encoder));
   assert.equal(stats.spawned.filter(value => value.kind === 'encoder').length, 1, 'YouTube, Facebook and Watch share exactly one actual encoder, excluding capability probes');
   return profile;
 }

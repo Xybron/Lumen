@@ -21,6 +21,11 @@ export class BroadcastVideoSource {
   private canvas: HTMLCanvasElement | null = null;
   private context: CanvasRenderingContext2D | null = null;
   private closed = false;
+  private manualFrames = false;
+  private lastFrameAt = -Infinity;
+  private cadence = 30;
+  get frameRate() { return this.cadence; }
+  setFrameRate(rate: 15 | 20 | 30) { this.cadence = rate; }
   constructor(private source: HTMLCanvasElement, program: MediaStream, profile: BroadcastProfile,
     createCanvas: () => HTMLCanvasElement = () => document.createElement('canvas')) {
     this.settings = broadcastCaptureSettings(profile);
@@ -30,16 +35,29 @@ export class BroadcastVideoSource {
     const context = canvas.getContext('2d', { alpha: false });
     if (!context) throw new Error('The streaming canvas is unavailable.');
     this.canvas = canvas; this.context = context;
-    this.stream = canvas.captureStream(this.settings.frameRate);
+    // Manual frames let the renderer shed stream work if Program becomes busy.
+    // Program's own 30 fps canvas and audio route remain untouched.
+    try {
+      const manual = canvas.captureStream(0);
+      if (typeof (manual.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined)?.requestFrame === 'function') {
+        this.stream = manual; this.manualFrames = true;
+      } else {
+        manual.getVideoTracks().forEach(track => track.stop());
+        this.stream = canvas.captureStream(30);
+      }
+    } catch { this.stream = canvas.captureStream(30); }
     // The existing Program mix is shared, not cloned, reconfigured or owned.
     try {
       for (const track of program.getAudioTracks()) this.stream.addTrack(track);
       this.draw();
     } catch (error) { this.close(); throw error; }
   }
-  draw() {
+  draw(now = performance.now()) {
     if (this.closed || !this.canvas || !this.context) return;
+    if (now - this.lastFrameAt < 1000 / this.cadence - 1) return;
     this.context.drawImage(this.source, 0, 0, this.settings.width, this.settings.height);
+    if (this.manualFrames) (this.stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack).requestFrame();
+    this.lastFrameAt = now;
   }
   close() {
     if (this.closed) return;

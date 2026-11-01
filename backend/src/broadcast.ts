@@ -369,8 +369,8 @@ export async function createBroadcast(options: {
         });
         void encoder.done.then(() => {
           if (!isRunning(run)) return;
-          if (run.encoderKind === 'videotoolbox') disableBroadcastHardware(run.session.profile);
-          fatal(run, run.encoderKind === 'videotoolbox' ? 'The hardware encoder became unavailable. Restart only the stream to use compatible software; local recording and Studio are unchanged.' : 'The stream encoder stopped. Local recording and Studio remain independent.');
+          if (run.encoderKind !== 'software') disableBroadcastHardware(run.session.profile);
+          fatal(run, run.encoderKind !== 'software' ? 'The hardware encoder became unavailable. Restart only the stream to use compatible software; local recording and Studio are unchanged.' : 'The stream encoder stopped. Local recording and Studio remain independent.');
         });
         notify(true); return structuredClone(session);
       } catch {
@@ -395,8 +395,8 @@ export async function createBroadcast(options: {
       try {
         await timeout(new Promise<void>((resolve, reject) => { run.encoder.input.write(bytes, error => error ? reject(error) : resolve()); }), 8000);
       } catch {
-        if (run.encoderKind === 'videotoolbox' && isRunning(run)) disableBroadcastHardware(run.session.profile);
-        fatal(run, run.encoderKind === 'videotoolbox' ? 'The hardware encoder stopped accepting media. Restart only the stream to use compatible software; local recording is unchanged.' : 'The stream encoder could not keep up with its input. Local recording continues independently.');
+        if (run.encoderKind !== 'software' && isRunning(run)) disableBroadcastHardware(run.session.profile);
+        fatal(run, run.encoderKind !== 'software' ? 'The hardware encoder stopped accepting media. Restart only the stream to use compatible software; local recording is unchanged.' : 'The stream encoder could not keep up with its input. Local recording continues independently.');
         throw new BroadcastError(503, 'Stream media could not be accepted.');
       }
       run.nextChunk++; run.session.chunks++; run.session.bytes += bytes.length; run.inputAt = Date.now(); run.session.lastChunkAt = new Date(run.inputAt).toISOString(); notify();
@@ -446,5 +446,6 @@ export async function createBroadcast(options: {
     if (run.config.watch.enabled) void publishWatch(run);
   }, 500); watchdog.unref();
   async function close() { closed = true; clearInterval(watchdog); await stop(); await lock; }
-  return { snapshot, preflight, configure, start, chunk, error, stop, retryDestination, stopDestination, close };
+  return { snapshot, preflight, configure, start, chunk, error, stop, retryDestination, stopDestination, close,
+    diagnostics: () => current ? { encoder: current.encoderKind, queuedBytes: current.queuedBytes } : null };
 }

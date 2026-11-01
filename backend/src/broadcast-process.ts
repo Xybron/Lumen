@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import { setPriority, constants as osConstants } from 'node:os';
 import type { Writable, Readable } from 'node:stream';
 import ffmpeg from 'ffmpeg-static';
 import type { BroadcastProfile } from '../../shared/broadcast.js';
@@ -7,7 +8,7 @@ export const BROADCAST_INPUT_LIMIT = 16 * 1024 * 1024;
 export const BROADCAST_CHUNK_LIMIT = 8 * 1024 * 1024;
 export const BROADCAST_SINK_LIMIT = 2 * 1024 * 1024;
 export type BroadcastSpawn = (file: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
-export type BroadcastEncoder = 'videotoolbox' | 'software';
+export type BroadcastEncoder = 'videotoolbox' | 'mediafoundation' | 'software';
 export type BroadcastFailureCode = 'protocol' | 'certificate' | 'publish-rejected' | 'network' | 'encoder' | 'input' | 'storage' | 'backpressure' | 'unknown';
 /** Fixed-token streaming classifier: only integer match positions and a code
  * survive a callback. No diagnostic line, URL, key or query is retained. */
@@ -63,8 +64,10 @@ export function broadcastEncoderArguments(profile: BroadcastProfile, encoder: Br
     '-protocol_whitelist', 'pipe', '-format_whitelist', 'matroska,webm', '-probesize', '1048576', '-analyzeduration', '1000000', '-i', 'pipe:0',
     '-map', '0:v:0', '-map', '0:a:0', '-sn', '-dn', '-filter_threads', '1',
     '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1`,
-    ...(encoder === 'videotoolbox' ? ['-c:v', 'h264_videotoolbox', '-allow_sw', '0', '-realtime', '1', '-constant_bit_rate', '1', '-bf', '0'] : ['-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency', '-x264-params', 'nal-hrd=cbr:force-cfr=1']),
-    '-profile:v', 'high', '-pix_fmt', 'yuv420p', '-r', '30', '-b:v', `${bitrate}k`, '-minrate', `${bitrate}k`, '-maxrate', `${bitrate}k`, '-bufsize', `${bitrate * 2}k`, '-g', '60', '-keyint_min', '60', '-sc_threshold', '0',
+    ...(encoder === 'videotoolbox' ? ['-c:v', 'h264_videotoolbox', '-allow_sw', '0', '-realtime', '1', '-constant_bit_rate', '1', '-bf', '0']
+      : encoder === 'mediafoundation' ? ['-c:v', 'h264_mf', '-hw_encoding', '1', '-scenario', 'live_streaming', '-rate_control', 'cbr', '-bf', '0']
+        : ['-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency', '-x264-params', 'nal-hrd=cbr:force-cfr=1']),
+    '-profile:v', 'high', '-pix_fmt', encoder === 'mediafoundation' ? 'nv12' : 'yuv420p', '-r', '30', '-b:v', `${bitrate}k`, '-minrate', `${bitrate}k`, '-maxrate', `${bitrate}k`, '-bufsize', `${bitrate * 2}k`, '-g', '60', '-keyint_min', '60', '-sc_threshold', '0',
     '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-ac', '2', '-max_muxing_queue_size', '128', '-threads', '2',
     '-map_metadata', '-1', '-progress', 'pipe:3', '-stats_period', '0.5', '-nostats', '-mpegts_flags', '+resend_headers',
     '-muxdelay', '0', '-muxpreload', '0', '-flush_packets', '1', '-f', 'mpegts', 'pipe:1'];
@@ -101,6 +104,9 @@ export function spawnBroadcastProcess(args: string[], progress: (value: Record<s
   factory: BroadcastSpawn = spawn): BroadcastProcess {
   if (!ffmpeg) throw new Error('The stream encoder is unavailable.');
   const child = factory(ffmpeg, args, { stdio: ['pipe', 'pipe', 'pipe', 'pipe'], windowsHide: true });
+  // Let the production renderer and camera capture win CPU scheduling when a
+  // station is busy. FFmpeg's bounded input queue handles the stream side.
+  if (child.pid && args.includes('-c:v')) try { setPriority(child.pid, osConstants.priority.PRIORITY_BELOW_NORMAL); } catch { /* Best effort, including restricted Windows accounts. */ }
   const input = child.stdin!, output = child.stdout!;
   let finished = false, stopping: Promise<void> | null = null, tail = '', fields: Record<string, string> = {};
   const classifier = createBroadcastFailureClassifier();
@@ -137,18 +143,21 @@ const encoderProbes = new Map<BroadcastProfile, { at: number; result: Promise<Br
 /** Codec names alone do not prove hardware access (sandboxing/busy devices can
  * deny a session). Require real encoded packets with software fallback disabled. */
 export function selectBroadcastEncoder(profile: BroadcastProfile): Promise<BroadcastEncoder> {
-  if (process.platform !== 'darwin') return Promise.resolve('software');
+  if (process.platform !== 'darwin' && process.platform !== 'win32') return Promise.resolve('software');
   const cached = encoderProbes.get(profile); if (cached && Date.now() - cached.at < 300_000) return cached.result;
   const result = (async (): Promise<BroadcastEncoder> => {
     let probe: BroadcastProcess | undefined;
     try {
       const [size, bitrate] = profile === '1080p' ? ['1920x1080', '4500k'] : ['1280x720', '2500k'];
       let encodedBytes = 0;
+      const hardware = process.platform === 'win32' ? 'mediafoundation' : 'videotoolbox';
       probe = spawnBroadcastProcess(['-hide_banner', '-nostdin', '-loglevel', 'error', '-f', 'lavfi', '-i', `color=c=black:s=${size}:r=30`, '-frames:v', '8', '-an',
-        '-c:v', 'h264_videotoolbox', '-allow_sw', '0', '-realtime', '1', '-constant_bit_rate', '1', '-profile:v', 'high', '-pix_fmt', 'yuv420p', '-b:v', bitrate, '-g', '60', '-bf', '0',
+        ...(hardware === 'mediafoundation' ? ['-vf', 'format=nv12', '-c:v', 'h264_mf', '-hw_encoding', '1', '-scenario', 'live_streaming', '-rate_control', 'cbr']
+          : ['-c:v', 'h264_videotoolbox', '-allow_sw', '0', '-realtime', '1', '-constant_bit_rate', '1']),
+        '-profile:v', 'high', '-pix_fmt', hardware === 'mediafoundation' ? 'nv12' : 'yuv420p', '-b:v', bitrate, '-g', '60', '-bf', '0',
         '-progress', 'pipe:3', '-nostats', '-f', 'mpegts', 'pipe:1'], () => {});
       probe.output.on('data', bytes => { encodedBytes += bytes.length; }); probe.input.end();
-      return await timeout(probe.done, 4000) === 0 && encodedBytes > 188 ? 'videotoolbox' : 'software';
+      return await timeout(probe.done, 4000) === 0 && encodedBytes > 188 ? hardware : 'software';
     } catch { return 'software'; }
     finally { await probe?.terminate(); }
   })();
