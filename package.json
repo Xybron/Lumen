@@ -34,6 +34,7 @@
     "test:studio:editing": "npm run build && npm --prefix backend run test:studio:editing",
     "test:studio:properties": "npm run build && node backend/test/studio-properties-browser.mjs",
     "test:clips": "npm run build && node backend/test/nle-browser.mjs",
+    "test:clips:projects": "npm run build && node backend/test/clip-project-delete-browser.mjs",
     "test:clips:previews": "npm run build && node backend/test/timeline-previews-browser.mjs",
     "test:clips:transitions": "npm run build && node backend/test/nle-transitions-browser.mjs",
     "test:clips:delivery": "npm run build && node backend/test/clip-delivery-browser.mjs",

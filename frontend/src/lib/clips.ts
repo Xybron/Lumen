@@ -18,6 +18,7 @@ export const clipsApi = {
   workspace: () => request<ClipWorkspace>(),
   create: (recordingId: string, input: ClipDraftInput) => request<ClipDraft>('/drafts', 'POST', { recordingId, ...input }),
   save: (id: string, revision: number, input: ClipDraftInput) => request<ClipDraft>(`/drafts/${encodeURIComponent(id)}`, 'PUT', { revision, ...input }),
+  remove: (id: string, revision: number) => request<{ ok: true }>(`/drafts/${encodeURIComponent(id)}`, 'DELETE', { revision }),
   export: (id: string, revision: number, options?: ClipExportOptions, temporary = false) => request<ClipExport>(`/drafts/${encodeURIComponent(id)}/exports`, 'POST', { revision, ...(options ? { options } : {}), ...(temporary ? { temporary: true } : {}) }),
   cancel: (id: string) => request<ClipExport>(`/exports/${encodeURIComponent(id)}/cancel`, 'POST'),
   release: (id: string) => request<ClipExport>(`/exports/${encodeURIComponent(id)}/release`, 'POST'),

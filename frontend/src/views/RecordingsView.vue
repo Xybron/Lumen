@@ -25,7 +25,7 @@ type Collection = 'recordings' | 'mine' | 'team' | 'exports';
 const identity = useIdentityStore(), route = useRoute(), router = useRouter();
 const { confirmAction } = useConfirmation();
 const workspace = ref<ClipWorkspace | null>(null), loading = ref(false), error = ref('');
-const search = ref(''), filter = ref<'all' | 'ready'>('all'), recovering = ref(''), copying = ref(''), cancelling = ref(''), deleting = ref('');
+const search = ref(''), filter = ref<'all' | 'ready'>('all'), recovering = ref(''), copying = ref(''), cancelling = ref(''), deleting = ref(''), deletingProject = ref('');
 const storageOpen = ref(false), storageLoading = ref(false), storageError = ref(''), storagePath = ref(''), stationPath = ref(''), backupPath = ref('');
 const sidebarOpen = ref(true), view = ref<'grid' | 'list'>('grid'), order = ref<'recent' | 'name'>('recent'), searchField = ref<HTMLInputElement | null>(null);
 const newProjectOpen = ref(false), newProjectSearch = ref(''), newProjectField = ref<HTMLInputElement | null>(null);
@@ -87,6 +87,26 @@ async function copyProject(draft: ClipDraft) {
   } catch (cause) { toast.error((cause as Error).message); }
   finally { copying.value = ''; }
 }
+async function deleteProject(draft: ClipDraft) {
+  if (!draft.canEdit || deletingProject.value) return;
+  const confirmed = await confirmAction({
+    title: 'Delete project?',
+    description: `“${draft.name}” will be removed from Projects.`,
+    note: 'The original recording and existing exports will stay available.',
+    confirmLabel: 'Delete project', tone: 'danger',
+  });
+  if (!confirmed) return;
+  deletingProject.value = draft.id;
+  try {
+    await clipsApi.remove(draft.id, draft.revision);
+    if (workspace.value) workspace.value.drafts = workspace.value.drafts.filter(item => item.id !== draft.id);
+    await load(true);
+    toast.success('Project deleted. The original recording and exports remain.');
+  } catch (cause) {
+    toast.error((cause as Error).message);
+    await load(true);
+  } finally { deletingProject.value = ''; }
+}
 async function cancelExport(job: ClipExport) {
   if (cancelling.value) return; cancelling.value = job.id;
   try { await clipsApi.cancel(job.id); await load(true); toast.success('Export cancelled. The saved project is unchanged.'); }
@@ -141,6 +161,7 @@ function projectActions(draft: ClipDraft): LibraryAction[] { return [
   { label: draft.canEdit ? 'Open project' : 'View project', icon: Scissors, run: () => { void router.push(editorUrl(draft.recordingId, draft.id)); } },
   { label: 'Make your own copy', icon: Copy, disabled: !!copying.value, run: () => { void copyProject(draft); } },
   { label: 'Copy project link', icon: Link2, run: () => { void copyLink(editorUrl(draft.recordingId, draft.id)); } },
+  ...(draft.canEdit ? [{ label: 'Delete project', icon: Trash2, disabled: !!deletingProject.value, run: () => { void deleteProject(draft); } }] : []),
 ]; }
 function keyboard(event: KeyboardEvent) { if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'k' && !newProjectOpen.value && !document.querySelector('[role="dialog"][data-state="open"]')) { event.preventDefault(); searchField.value?.focus(); searchField.value?.select(); } }
 function libraryChanged() { if (identity.isAuthenticated) void load(true); }
@@ -191,7 +212,7 @@ onBeforeUnmount(() => { sequence++; if (timer) clearInterval(timer); window.remo
           <div v-else class="library-cards" :class="`library-view-${view}`"><article v-for="job in exports" :key="job.id" class="library-card library-export" data-testid="export-card" :data-export-id="job.id">
             <a v-if="job.status === 'complete'" :href="clipsApi.download(job.id)" class="library-card-preview clips-recording-open" :aria-label="`Download ${exportLabel(job)} ${job.name}`"><span v-if="audioExport(exportOptions(job).container)" class="library-no-preview"><Music2 :size="32" :stroke-width="1.2" /></span><RecordingThumbnail v-else-if="recordingFor(job.recordingId)" :recording="recordingFor(job.recordingId)!" /><span v-else class="library-no-preview"><Film :size="27" /></span><span class="library-export-file">{{ exportLabel(job) }} <Download :size="12" /></span><span class="clip-thumbnail-duration library-output-duration">{{ projectDuration(job.settings) }}</span></a>
             <div v-else class="library-card-preview"><span v-if="audioExport(exportOptions(job).container)" class="library-no-preview"><Music2 :size="32" :stroke-width="1.2" /></span><RecordingThumbnail v-else-if="recordingFor(job.recordingId)" :recording="recordingFor(job.recordingId)!" /><span v-else class="library-no-preview"><Film :size="27" /></span><span class="library-export-file">{{ exportLabel(job) }}</span><span class="clip-thumbnail-duration library-output-duration">{{ projectDuration(job.settings) }}</span></div>
-            <div class="library-card-details"><div class="library-card-title"><h2>{{ job.name }}</h2><a v-if="job.status === 'complete'" :href="clipsApi.download(job.id)" class="clip-icon-button" :aria-label="`Download export ${job.name}`" :title="`Download ${exportLabel(job)}`"><Download :size="16" /></a><button v-else-if="job.canCancel && isActive(job)" class="clip-icon-button" :disabled="!!cancelling" :aria-label="`Cancel export ${job.name}`" title="Cancel export" @click="cancelExport(job)"><X :size="15" /></button></div><div class="library-card-summary"><span>{{ exportLabel(job) }} · {{ audioExport(exportOptions(job).container) ? 'Audio' : exportOptions(job).resolution }}</span><i /><span>{{ date(job.createdAt) }}</span><i />{{ projectDuration(job.settings) }}<span v-if="job.status === 'complete'">· {{ size(job.bytes) }}</span></div><div v-if="isActive(job)" class="library-export-progress" role="progressbar" :aria-label="`Export progress ${job.name}`" :aria-valuenow="Math.round(job.progress * 100)" aria-valuemin="0" aria-valuemax="100"><span :style="{ width: `${Math.max(0, Math.min(100, job.progress * 100))}%` }" /></div><p v-if="job.error" class="library-card-error">{{ job.error }}</p><div class="library-card-footer"><span class="library-export-status" :class="`library-export-status-${job.status}`"><LoaderCircle v-if="isActive(job)" :size="12" :class="{ 'clip-spin': job.status === 'exporting' }" /><Check v-else-if="job.status === 'complete'" :size="12" />{{ exportStatus(job) }}</span><RouterLink :to="editorUrl(job.recordingId, job.draftId)" class="library-open-project" :aria-label="`Open project for ${job.name}`" title="Open source project"><ArrowUpRight :size="14" /></RouterLink></div></div>
+            <div class="library-card-details"><div class="library-card-title"><h2>{{ job.name }}</h2><a v-if="job.status === 'complete'" :href="clipsApi.download(job.id)" class="clip-icon-button" :aria-label="`Download export ${job.name}`" :title="`Download ${exportLabel(job)}`"><Download :size="16" /></a><button v-else-if="job.canCancel && isActive(job)" class="clip-icon-button" :disabled="!!cancelling" :aria-label="`Cancel export ${job.name}`" title="Cancel export" @click="cancelExport(job)"><X :size="15" /></button></div><div class="library-card-summary"><span>{{ exportLabel(job) }} · {{ audioExport(exportOptions(job).container) ? 'Audio' : exportOptions(job).resolution }}</span><i /><span>{{ date(job.createdAt) }}</span><i />{{ projectDuration(job.settings) }}<span v-if="job.status === 'complete'">· {{ size(job.bytes) }}</span></div><div v-if="isActive(job)" class="library-export-progress" role="progressbar" :aria-label="`Export progress ${job.name}`" :aria-valuenow="Math.round(job.progress * 100)" aria-valuemin="0" aria-valuemax="100"><span :style="{ width: `${Math.max(0, Math.min(100, job.progress * 100))}%` }" /></div><p v-if="job.error" class="library-card-error">{{ job.error }}</p><div class="library-card-footer"><span class="library-export-status" :class="`library-export-status-${job.status}`"><LoaderCircle v-if="isActive(job)" :size="12" :class="{ 'clip-spin': job.status === 'exporting' }" /><Check v-else-if="job.status === 'complete'" :size="12" />{{ exportStatus(job) }}</span><RouterLink v-if="workspace?.drafts.some(draft => draft.id === job.draftId)" :to="editorUrl(job.recordingId, job.draftId)" class="library-open-project" :aria-label="`Open project for ${job.name}`" title="Open source project"><ArrowUpRight :size="14" /></RouterLink></div></div>
           </article></div>
           <footer v-if="visibleCount" class="library-results-footer"><span>{{ visibleCount }} {{ collection === 'recordings' ? 'recordings' : collection === 'exports' ? 'exports' : 'projects' }}{{ visibleCount !== totalCount ? ` of ${totalCount}` : '' }}</span><span><ShieldCheck :size="12" />Edits leave originals unchanged</span></footer>
         </div>

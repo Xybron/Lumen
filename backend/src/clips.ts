@@ -565,6 +565,21 @@ export async function createClips(options: { dir: string; recordings: RecordingS
     });
     res.json(saved);
   }));
+  router.delete('/clips/drafts/:id', asyncRoute(async (req, res) => {
+    const user = userFor(req);
+    const id = idSchema.safeParse(req.params.id);
+    const body = z.object({ revision: z.number().int().nonnegative() }).strict().safeParse(req.body);
+    if (!id.success || !body.success) throw new ClipError(422, 'Choose a saved project to delete.');
+    await serial(async () => {
+      if (closed) throw new ClipError(503, 'Clips is shutting down. Please retry shortly.');
+      const draft = requireDraft(id.data); checkOwner(draft.ownerId, user);
+      if (draft.revision !== body.data.revision) throw new ClipError(409, 'This project changed in another window. Refresh and try deleting it again.');
+      const index = data.drafts.indexOf(draft);
+      data.drafts.splice(index, 1);
+      try { await persist(); } catch (error) { data.drafts.splice(index, 0, draft); throw error; }
+    });
+    res.json({ ok: true });
+  }));
   router.post('/clips/drafts/:id/exports', asyncRoute(async (req, res) => {
     const user = userFor(req);
     const parsed = z.object({ revision: z.number().int().nonnegative(), options: clipExportOptionsSchema.optional(), temporary: z.boolean().optional() }).strict().safeParse(req.body);
