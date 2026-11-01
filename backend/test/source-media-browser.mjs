@@ -35,11 +35,13 @@ const escaped = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 try {
   const blueImage = await picture('#2359b1'), greenImage = await picture('#258c52');
-  const uploadImage = path.join(dir, 'service-green.png'), videoFile = path.join(dir, 'welcome-motion.mp4'), audioFile = path.join(dir, 'service-tone.wav');
+  const uploadImage = path.join(dir, 'service-green.png'), videoFile = path.join(dir, 'welcome-motion.mp4'), movFile = path.join(dir, 'camera-clip.mov'), audioFile = path.join(dir, 'service-tone.wav');
   await fs.writeFile(uploadImage, greenImage);
   execFileSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=12',
     '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000', '-t', '2', '-c:v', 'libx264', '-preset', 'ultrafast',
     '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-movflags', '+faststart', videoFile]);
+  execFileSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=1280x720:rate=30',
+    '-t', '5', '-c:v', 'libx265', '-preset', 'ultrafast', '-tag:v', 'hvc1', '-an', movFile]);
   execFileSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=330:sample_rate=48000',
     '-t', '2', '-c:a', 'pcm_s16le', audioFile]);
   server = spawn(process.execPath, ['backend/dist/server.js'], { cwd: root,
@@ -159,6 +161,27 @@ try {
   await page.screenshot({ path: path.join(dir, 'source-video-preview.png'), fullPage: true });
   await save('Welcome motion', 'video', motion.path);
 
+  await open('Video');
+  const movUploadResponse = page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes('/api/media/backgrounds?source=video'));
+  await uploadInput().setInputFiles(movFile);
+  assert.equal((await (await movUploadResponse).json()).preparing, true, 'upload responds while MOV preparation runs separately');
+  await until(async () => await add().isEnabled(), 'MOV source can be added after upload without waiting for conversion');
+  const uploadedMov = await until(async () => (await (await request.get(`${base}/api/media/backgrounds`)).json()).find(file => file.name.endsWith('camera-clip.mov')), 'MOV stored in source library');
+  await save('Camera clip', 'video', uploadedMov.path);
+  const prepared = await until(async () => {
+    const response = await request.get(`${base}/api/media/backgrounds/${encodeURIComponent(uploadedMov.name)}/preparation`);
+    const result = await response.json();
+    return result.status === 'ready' && result;
+  }, 'MOV becomes playable MP4 after background preparation', 30000);
+  assert.equal((await request.get(`${base}/${prepared.path}`)).status(), 200);
+  assert.equal(await page.evaluate(async path => {
+    const video = document.createElement('video'); video.preload = 'metadata'; video.src = `/${path}`;
+    await new Promise((resolve, reject) => { video.onloadedmetadata = resolve; video.onerror = () => reject(new Error('Prepared video did not decode.')); });
+    return video.videoWidth > 0 && video.duration > 4;
+  }, prepared.path), true, 'prepared MP4 has decoded video frames and duration');
+  assert.equal((await (await request.get(`${base}/api/media/backgrounds`)).json()).filter(file => file.name.includes('camera-clip')).length, 1, 'converted file is not a duplicate library tile');
+  checks.push('MOV source is addable as soon as upload completes; conversion finishes separately and keeps one library entry');
+
   await open('Audio file'); await asset('service-tone.wav').click();
   const audio = preview().locator('audio');
   await until(async () => audio.evaluate(element => element.readyState >= 1 && element.duration > 1.9), 'real audio metadata and controls');
@@ -196,7 +219,7 @@ try {
     : route.continue();
   await page.route('**/api/media/backgrounds', rejectUpload);
   await uploadInput().setInputFiles(uploadImage);
-  await until(async () => (await dialog.getByRole('alert').allTextContents()).some(text => /Upload failed/i.test(text)), 'accessible upload failure');
+  await until(async () => (await dialog.getByRole('alert').allTextContents()).some(text => /Upload interrupted/i.test(text)), 'accessible upload failure');
   assert.equal(await add().isEnabled(), false, 'An unsuccessful local upload cannot be saved as a source');
   await page.unroute('**/api/media/backgrounds', rejectUpload);
   await uploadInput().setInputFiles(uploadImage);

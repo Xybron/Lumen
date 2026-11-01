@@ -70,6 +70,8 @@ const cameraConnecting = ref(false), cameraLive = ref(false), cameraWanted = ref
 const cameraCapture = new CameraPreviewCapture();
 let cameraRequest = 0;
 const uploading = ref(false), progress = ref(0), pendingFile = ref<File | null>(null), localPreview = ref(''), justUploaded = ref('');
+const preparingVideo = ref(false), preparationError = ref(''), preparedUrl = ref('');
+let preparationTimer: number | undefined, preparationRequest = 0;
 const uploadInput = ref<HTMLInputElement>(), dragDepth = ref(0), brokenThumbs = ref(new Set<string>());
 const previewDetail = ref<HTMLElement>();
 let epoch = 0, uploadSequence = 0, listSequence = 0;
@@ -95,13 +97,13 @@ const matchingFiles = computed(() => mediaKind.value ? mediaFilesForKind(files.v
 const totalFiles = computed(() => mediaKind.value ? mediaFilesForKind(files.value, mediaKind.value).length : 0);
 const selected = computed(() => files.value.find(file => file.path === url.value));
 const selectedName = computed(() => pendingFile.value?.name ?? (selected.value ? mediaDisplayName(selected.value.name) : url.value ? mediaDisplayName(url.value.split('/').pop() || name.value) : ''));
-const previewSrc = computed(() => localPreview.value || (url.value ? mediaAssetUrl(url.value) : ''));
+const previewSrc = computed(() => localPreview.value || (preparedUrl.value ? mediaAssetUrl(preparedUrl.value) : url.value ? mediaAssetUrl(url.value) : ''));
 const previewPoster = computed(() => selected.value?.thumbnail ? mediaAssetUrl(selected.value.thumbnail) : undefined);
 const selectedBytes = computed(() => mediaFileSize(pendingFile.value?.size ?? selected.value?.bytes));
 const selectionChanged = computed(() => (kind.value === 'camera' && (videoDevice.value !== (initialInput.value.videoDeviceId || '') || withAudio.value !== !!initialInput.value.includeAudio ||
   selectedInput().width !== initialInput.value.width || selectedInput().height !== initialInput.value.height || selectedInput().frameRate !== initialInput.value.frameRate)) ||
   ((kind.value === 'microphone' || (kind.value === 'camera' && withAudio.value)) && audioDevice.value !== (initialInput.value.audioDeviceId || '')));
-const canAdd = computed(() => !!name.value.trim() && !adding.value && !uploading.value && !accessingDevices.value && !screenChoosing.value && !initializing.value &&
+const canAdd = computed(() => !!name.value.trim() && !adding.value && !uploading.value && !preparationError.value && !accessingDevices.value && !screenChoosing.value && !initializing.value &&
   (!editing.value || !!editingSource.value) &&
   ((editing.value && !selectionChanged.value) || (!videoMissing.value && !audioMissing.value)) &&
   (!mediaKind.value || !!url.value) &&
@@ -174,7 +176,34 @@ function clearLocalPreview() {
   if (localPreview.value) URL.revokeObjectURL(localPreview.value);
   localPreview.value = '';
 }
+function stopVideoPreparation() {
+  preparationRequest++;
+  clearInterval(preparationTimer); preparationTimer = undefined;
+  preparingVideo.value = false; preparationError.value = ''; preparedUrl.value = '';
+}
+function watchVideoPreparation(relative: string) {
+  stopVideoPreparation();
+  if (!/\.mov$/i.test(relative)) return;
+  preparingVideo.value = true;
+  const request = preparationRequest, context = epoch;
+  const check = async () => {
+    try {
+      const result = await api.sourceVideoStatus(relative);
+      if (context !== epoch || request !== preparationRequest || url.value !== relative || !open.value) return;
+      if (result.status === 'processing') return;
+      clearInterval(preparationTimer); preparationTimer = undefined;
+      preparingVideo.value = false;
+      if (result.status === 'ready' && result.path) { preparedUrl.value = result.path; clearLocalPreview(); }
+      else preparationError.value = result.status === 'failed'
+        ? 'This MOV could not be prepared for Windows playback. Export it as MP4 (H.264) and upload it again.'
+        : 'This video is no longer on the station. Upload it again.';
+    } catch { /* Keep the local preview; retry while the dialog is open. */ }
+  };
+  void check();
+  preparationTimer = window.setInterval(() => void check(), 2000);
+}
 function stopUpload() {
+  stopVideoPreparation();
   uploadSequence++;
   uploadController?.abort(); uploadController = undefined;
   uploading.value = false; pendingFile.value = null; progress.value = 0;
@@ -285,6 +314,7 @@ watch([open, () => props.sourceId], ([value]) => {
     if (initialInput.value.width && initialInput.value.height) resolution.value = `${initialInput.value.width}x${initialInput.value.height}`;
     frameRate.value = initialInput.value.frameRate ? String(initialInput.value.frameRate) : '';
   }
+  if (source?.kind === 'video' && source.url) watchVideoPreparation(source.url);
   const context = epoch;
   void content.load().catch(() => { if (open.value && context === epoch && kind.value === 'channel') error.value = 'Channels could not be loaded. Close this window and try again.'; });
   // New sources remain passive; editing a connected camera borrows its feed.
@@ -316,6 +346,7 @@ onBeforeUnmount(() => {
 function choose(file: MediaLibraryFile) {
   if (adding.value) return;
   stopUpload(); error.value = ''; url.value = file.path;
+  if (kind.value === 'video') watchVideoPreparation(file.path);
   if (!nameEdited.value) name.value = mediaSourceName(file.name);
   if (editing.value) choosingMedia.value = false;
   revealPreview();
@@ -353,6 +384,7 @@ async function uploadFile(file: File) {
   try {
     const result = await api.uploadMedia(assetKind === 'audio' ? 'music' : 'backgrounds', file, {
       signal: controller.signal,
+      sourceVideo: assetKind === 'video',
       onProgress: value => { if (context === epoch && sequence === uploadSequence) progress.value = value; },
     });
     if (!open.value || context !== epoch || sequence !== uploadSequence) return;
@@ -361,7 +393,9 @@ async function uploadFile(file: File) {
     url.value = result.path; justUploaded.value = result.path;
     uploadFallback = null;
     if (editing.value) choosingMedia.value = false;
-    pendingFile.value = null; clearLocalPreview();
+    pendingFile.value = null;
+    if (result.preparing) watchVideoPreparation(result.path);
+    else clearLocalPreview();
     void loadFiles();
   } catch (cause) {
     if (controller.signal.aborted || !open.value || context !== epoch || sequence !== uploadSequence) return;
@@ -521,12 +555,14 @@ async function saveProperties() {
 
             <aside ref="previewDetail" class="source-detail" aria-label="Selected media">
               <div data-testid="source-media-preview">
-                <MediaAssetPreview :kind="mediaKind" :src="previewSrc" :name="selectedName" :poster="previewPoster" />
+                <MediaAssetPreview :kind="mediaKind" :src="previewSrc" :name="selectedName" :poster="previewPoster" :loading="uploading || preparingVideo" />
               </div>
               <div class="source-media-settings">
               <div v-if="selectedName" class="source-file-detail"><b :title="selectedName">{{ selectedName }}</b><span>{{ selectedBytes }}<template v-if="selectedBytes && selected?.modifiedAt"> · </template>{{ dateLabel(selected?.modifiedAt) }}</span><small v-if="url && url === justUploaded && !uploading"><Check :size="11" />Uploaded to library</small></div>
               <button v-if="editing" type="button" class="s-button source-change-file" :disabled="adding" @click="choosingMedia = !choosingMedia"><FolderOpen :size="13" />{{ choosingMedia ? 'Done choosing' : 'Change file' }}</button>
-              <div v-if="uploading" class="source-upload-progress" role="status" aria-live="polite"><div><span>{{ progress >= 100 ? 'Finishing upload…' : 'Uploading… ' + progress + '%' }}</span><button type="button" @click="stopUpload" aria-label="Cancel upload"><X :size="13" /></button></div><progress :value="progress" max="100" aria-label="Upload progress" /><small>Your preview is ready. Add once the file is saved.</small></div>
+              <div v-if="uploading" class="source-upload-progress" role="status" aria-live="polite"><div><span>{{ progress >= 100 ? 'Saving to library…' : 'Uploading… ' + progress + '%' }}</span><button type="button" @click="stopUpload" aria-label="Cancel upload"><X :size="13" /></button></div><progress :value="progress" max="100" aria-label="Upload progress" /><small>Your preview is ready. Add once the file is saved.</small></div>
+              <p v-if="preparingVideo" class="source-preparation-note" role="status">Video saved. Preparing Windows playback in the background. You can {{ editing ? 'save changes' : 'add it' }} now.</p>
+              <p v-if="preparationError" class="source-form-error" role="alert">{{ preparationError }}</p>
               <label class="studio-field source-name-field">Name<input v-model="name" placeholder="Name this source" maxlength="100" required :disabled="adding" @input="nameEdited = true" /></label>
               <fieldset v-if="['video', 'audio'].includes(kind)" class="source-playback-settings" :disabled="adding">
                 <legend>Playback</legend>
@@ -634,7 +670,7 @@ async function saveProperties() {
 .source-library-empty{display:flex;align-items:center;justify-content:center;flex-direction:column;flex:1;text-align:center;padding:30px 12px;color:var(--text-subtle);min-height:180px}.source-library-empty h4{font-size:13px;font-weight:500;color:var(--text-primary);margin-top:14px}.source-library-empty p{font-size:11px;line-height:1.6;margin:6px 0 16px;max-width:220px}.source-library-empty .s-button{font-size:11px}
 .source-library-footnote{display:flex;flex-wrap:wrap;justify-content:space-between;gap:5px;color:var(--text-subtle);font-size:9px;line-height:1.5;padding:13px 0;margin-top:auto;border-top:1px solid var(--border-hair);flex-shrink:0}
 .source-detail{border-left:1px solid var(--border-hair);background:#10111348;padding:19px 17px;overflow-y:auto;min-width:0}.source-file-detail{padding:14px 0 17px;min-width:0}.source-file-detail>b{display:block;overflow-wrap:anywhere;font-weight:500;font-size:12px;line-height:1.5;color:var(--text-primary)}.source-file-detail>span{display:block;font-size:10px;color:var(--text-subtle);line-height:1.6;margin-top:4px}.source-file-detail>small{display:flex;align-items:center;gap:4px;font-size:9px;color:var(--status-ready);margin-top:8px}.source-detail .source-name-field{margin-top:18px;font-size:10px;gap:7px}.source-detail .source-name-field input,.source-input-properties .studio-field input,.source-input-properties .studio-field select{background:var(--surface-2);border:1px solid var(--border-hair);border-radius:6px;height:34px;font-size:12px;padding:7px 9px}.source-detail-help{font-size:10px;color:var(--text-subtle);line-height:1.65;margin-top:8px}.source-preview-note{display:flex;gap:6px;align-items:center;font-size:9px;color:var(--text-subtle);margin-top:23px}
-.source-upload-progress{margin:8px 0 16px}.source-upload-progress>div{display:flex;align-items:center;justify-content:space-between;font-size:10px;color:var(--accent)}.source-upload-progress>div>button{color:var(--text-muted);padding:3px}.source-upload-progress progress{appearance:none;width:100%;height:3px;display:block;margin:9px 0;background:var(--surface-3);border:0;border-radius:3px;overflow:hidden;accent-color:var(--accent)}.source-upload-progress progress::-webkit-progress-bar{background:var(--surface-3)}.source-upload-progress progress::-webkit-progress-value{background:var(--accent)}.source-upload-progress progress::-moz-progress-bar{background:var(--accent)}.source-upload-progress>small{font-size:9px;color:var(--text-subtle);line-height:1.5}
+.source-upload-progress{margin:8px 0 16px}.source-upload-progress>div{display:flex;align-items:center;justify-content:space-between;font-size:10px;color:var(--accent)}.source-upload-progress>div>button{color:var(--text-muted);padding:3px}.source-upload-progress progress{appearance:none;width:100%;height:3px;display:block;margin:9px 0;background:var(--surface-3);border:0;border-radius:3px;overflow:hidden;accent-color:var(--accent)}.source-upload-progress progress::-webkit-progress-bar{background:var(--surface-3)}.source-upload-progress progress::-webkit-progress-value{background:var(--accent)}.source-upload-progress progress::-moz-progress-bar{background:var(--accent)}.source-upload-progress>small{font-size:9px;color:var(--text-subtle);line-height:1.5}.source-preparation-note{font-size:10px;line-height:1.5;color:var(--accent);margin:8px 0 12px}
 .source-drop-overlay{position:absolute;inset:8px;background:#17181bf2;border:1px dashed var(--accent);border-radius:8px;z-index:3;pointer-events:none;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:var(--accent)}.source-drop-overlay>b{font-weight:500;font-size:16px;color:var(--text-primary)}.source-drop-overlay>span{font-size:11px;color:var(--text-muted)}
 .source-input-workspace{padding:30px 35px;overflow-y:auto;min-width:0;display:flex;flex-direction:column}.source-input-intro{display:flex;align-items:center;gap:14px;padding-bottom:25px;border-bottom:1px solid var(--border-hair)}.source-input-icon{width:56px;height:56px;display:grid;place-items:center;background:var(--surface-2);border:1px solid var(--border-hair);border-radius:10px;color:var(--accent)}.source-input-intro h3{font-size:17px;font-weight:500;letter-spacing:-.3px}.source-input-intro p{color:var(--text-muted);font-size:12px;margin-top:5px}.source-input-properties{display:grid;gap:19px;max-width:430px;padding-top:25px;width:100%}.source-input-properties .studio-check{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-muted)}.studio-check input{accent-color:var(--accent)}.source-input-note{display:flex;align-items:flex-start;gap:10px;margin-top:auto;padding-top:30px;max-width:500px;color:var(--text-subtle)}.source-input-note>svg{flex-shrink:0;margin-top:2px}.source-input-note p{font-size:11px;line-height:1.7}.source-input-note p>span{display:block;margin-top:7px}
 .source-footer{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:14px 20px;border-top:1px solid var(--border-hair);background:var(--surface-1);flex-shrink:0;min-width:0}.source-target-note{display:flex;gap:6px;align-items:flex-start;font-size:10px;color:var(--text-subtle);line-height:1.6;flex:1;min-width:170px}.source-target-note>span{width:4px;height:4px;flex-shrink:0;margin-top:6px;background:var(--text-subtle);border-radius:50%}.source-footer .dialog-actions{margin:0;gap:8px;flex-shrink:0}.source-footer .s-button{min-height:33px;font-size:11px;padding:7px 12px}.source-form-error{width:100%;font-size:11px;line-height:1.5;color:#efb6aa}.source-library-error{font-size:11px;color:#efb6aa;line-height:1.6;padding:10px 0}.source-library-error button{display:block;color:var(--accent);padding-top:6px}

@@ -75,6 +75,12 @@ function mediaLoaded(event: Event) {
 function failed(event: Event) {
   if (!current(event)) return;
   pauseMedia();
+  if (props.kind === 'video' && props.loading) {
+    // The local MOV may not decode on Windows while its MP4 is being prepared.
+    // A later src change retries with the browser-ready version.
+    pending.value = true;
+    return;
+  }
   pending.value = false;
   const element = event.currentTarget;
   const mediaError = element instanceof HTMLMediaElement ? element.error : null;
@@ -109,7 +115,7 @@ function failed(event: Event) {
             Your browser does not support audio previews.
           </audio>
         </div>
-        <div v-if="pending" class="preview-loading" role="status"><LoaderCircle :size="19" aria-hidden="true" /><span>Loading preview…</span></div>
+        <div v-if="pending" class="preview-loading" role="status"><LoaderCircle :size="19" aria-hidden="true" /><span>{{ loading && kind === 'video' ? 'Preparing preview…' : 'Loading preview…' }}</span></div>
       </template>
 
       <div v-else-if="failure" class="preview-message" role="alert">

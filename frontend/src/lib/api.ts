@@ -41,6 +41,7 @@ export interface MediaLibraryFile {
 interface MediaUploadOptions {
   signal?: AbortSignal;
   onProgress?: (percent: number) => void;
+  sourceVideo?: boolean;
 }
 
 export const api = {
@@ -140,10 +141,11 @@ export const api = {
     kind: 'backgrounds' | 'music',
     file: File,
     options?: MediaUploadOptions,
-  ): Promise<{ path: string; thumbnail: string | null }> {
+  ): Promise<{ path: string; thumbnail: string | null; preparing?: boolean }> {
     const fd = new FormData();
     fd.append('file', file);
-    if (!options?.onProgress) return json(await fetch(`${BASE}/media/${kind}`, { method: 'POST', body: fd, signal: options?.signal }));
+    const endpoint = `${BASE}/media/${kind}${options?.sourceVideo ? '?source=video' : ''}`;
+    if (!options?.onProgress) return json(await fetch(endpoint, { method: 'POST', body: fd, signal: options?.signal }));
     // Upload progress is separate from thumbnail processing on the station.
     // Existing callers retain fetch; the media browser opts into progress and
     // can cancel when the dialog closes or its source type changes.
@@ -152,19 +154,23 @@ export const api = {
       const abort = () => xhr.abort();
       const cleanup = () => options.signal?.removeEventListener('abort', abort);
       if (options.signal?.aborted) { reject(new DOMException('Upload cancelled.', 'AbortError')); return; }
-      xhr.open('POST', `${BASE}/media/${kind}`);
+      xhr.open('POST', endpoint);
       xhr.withCredentials = true;
       xhr.upload.onprogress = event => { if (event.lengthComputable) options.onProgress?.(Math.round(event.loaded / event.total * 100)); };
       xhr.onload = () => {
         cleanup();
         if (!xhr.status) { reject(new Error('Could not upload this file. Check your connection and try again.')); return; }
-        void json<{ path: string; thumbnail: string | null }>(new Response(xhr.responseText, { status: xhr.status, statusText: xhr.statusText })).then(resolve, reject);
+        void json<{ path: string; thumbnail: string | null; preparing?: boolean }>(new Response(xhr.responseText, { status: xhr.status, statusText: xhr.statusText })).then(resolve, reject);
       };
       xhr.onerror = () => { cleanup(); reject(new Error('Could not upload this file. Check your connection and try again.')); };
       xhr.onabort = () => { cleanup(); reject(new DOMException('Upload cancelled.', 'AbortError')); };
       options.signal?.addEventListener('abort', abort, { once: true });
       try { xhr.send(fd); } catch (error) { cleanup(); reject(error); }
     });
+  },
+  async sourceVideoStatus(relative: string): Promise<{ status: 'processing' | 'ready' | 'failed' | 'missing'; path?: string }> {
+    const filename = relative.split('/').pop() || '';
+    return json(await fetch(`${BASE}/media/backgrounds/${encodeURIComponent(filename)}/preparation`));
   },
   async deleteMedia(kind: 'backgrounds' | 'music', filename: string): Promise<void> {
     await json(

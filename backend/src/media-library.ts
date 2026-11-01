@@ -33,6 +33,13 @@ export async function listMediaLibrary(kind: MediaKind, mediaDir = MEDIA_DIR): P
     throw error;
   }
 
+  // Source MOVs retain their original path while the prepared MP4 is used
+  // transparently for playback. Show one asset, not two copies of the upload.
+  if (kind === 'backgrounds') {
+    const names = new Set(files.map(file => file.name));
+    files = files.filter(file => !/\.mp4$/i.test(file.name) || !names.has(file.name.replace(/\.mp4$/i, '.mov')));
+  }
+
   // The old generator uses stems rather than full filenames. If two originals
   // share a stem, neither can safely claim its thumbnail.
   const stems = new Map<string, number>();

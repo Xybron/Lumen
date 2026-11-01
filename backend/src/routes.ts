@@ -18,7 +18,7 @@ import {
 } from './paths.js';
 import { makeImageThumb, makeVideoThumb } from './thumbs.js';
 import { listMediaLibrary } from './media-library.js';
-import { preparePresentationVideo } from './media-video.js';
+import { preparePresentationVideo, queueSourceVideo, sourceVideoStatus } from './media-video.js';
 
 export const OPERATOR_MEDIA_LIMIT_BYTES = 512 * 1024 * 1024;
 
@@ -107,6 +107,13 @@ router.get('/media/:kind', async (req, res) => {
   }
 });
 
+router.get('/media/backgrounds/:filename/preparation', async (req, res) => {
+  const source = safeMediaPath('backgrounds', String(req.params.filename));
+  if (!source || !/\.mov$/i.test(source)) return res.status(400).json({ error: 'Choose a MOV video.' });
+  const result = await sourceVideoStatus(source);
+  res.json({ status: result.status, path: result.path ? `media/backgrounds/${path.basename(result.path)}` : undefined });
+});
+
 router.post('/media/:kind', requireSession, (req, res, next) => {
   if (!MEDIA_KINDS.includes(req.params.kind as MediaKind)) return res.status(400).json({ error: 'Choose a supported media library.' });
   upload.single('file')(req, res, error => {
@@ -119,6 +126,12 @@ router.post('/media/:kind', requireSession, (req, res, next) => {
   const kind = req.params.kind as MediaKind;
   const file = req.file;
   if (!file) return res.status(400).json({ error: 'Choose a file to upload.' });
+  const fastVideo = req.query.source === 'video' && kind === 'backgrounds' && /\.(mp4|webm|mov|m4v)$/i.test(file.originalname);
+  if (fastVideo) {
+    if (/\.mov$/i.test(file.originalname)) queueSourceVideo(file.path);
+    else void makeVideoThumb(file.path, file.filename);
+    return res.json({ path: `media/${kind}/${file.filename}`, thumbnail: null, preparing: /\.mov$/i.test(file.originalname) });
+  }
   let savedPath = file.path;
   try {
     if (kind === 'backgrounds') savedPath = await preparePresentationVideo(file.path, file.originalname);
@@ -147,6 +160,12 @@ router.delete('/media/:kind/:filename', requireSession, async (req, res) => {
   if (!target) return res.status(400).json({ error: 'bad path' });
   try {
     await fs.unlink(target);
+    if (kind === 'backgrounds' && /\.mov$/i.test(target)) {
+      await Promise.allSettled([
+        fs.unlink(target.replace(/\.mov$/i, '.mp4')),
+        fs.unlink(path.join(MEDIA_DIR, 'thumbnails', path.basename(target).replace(/\.mov$/i, '.jpg'))),
+      ]);
+    }
     res.json({ ok: true });
   } catch {
     res.status(404).json({ error: 'not found' });

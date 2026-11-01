@@ -5,6 +5,7 @@ import type { ProductionState, StudioSource } from '../../../../shared/productio
 import { acceptChannelProjection, programCueReady, programCuesReady } from './program-cue-gate';
 import { MediaPlayback, playbackError } from './media-playback';
 import { liveInputStatus } from './device-capture';
+import { api } from '@/lib/api';
 
 export interface MediaInput {
   source: StudioSource;
@@ -16,6 +17,8 @@ export interface MediaInput {
   analyser: AnalyserNode;
   samples: Float32Array<ArrayBuffer>;
   error: string;
+  preparationTimer?: number;
+  preparingVideo?: boolean;
   playback: MediaPlayback;
   streamAudioTracks?: MediaStreamTrack[];
   stopStreamEvents?: () => void;
@@ -120,6 +123,30 @@ export class SourceBank {
     element.onerror = () => { if (input.playback.isCurrent(element)) input.error = playbackError({ name: 'NotSupportedError' }, false); };
     input.node = this.audio.createMediaElementSource(element); input.node.connect(input.delay);
     if (!input.source.playback?.paused) this.play(input, false);
+    if (!audioOnly && /\.mov$/i.test(url)) {
+      input.preparingVideo = true;
+      const check = async () => {
+        try {
+          const result = await api.sourceVideoStatus(url);
+          if (!input.playback.isCurrent(element)) return;
+          if (result.status === 'processing') { if (element.readyState < 2) input.error = ''; return; }
+          clearInterval(input.preparationTimer); input.preparationTimer = undefined; input.preparingVideo = false;
+          if (result.status === 'ready' && result.path) {
+            // A Mac may already be playing the original MOV. Keep its position
+            // and switch only if this browser could not decode it.
+            if (element.readyState >= 2) return;
+            input.error = '';
+            element.src = `/${result.path.replace(/^\//, '')}`;
+            element.load();
+            if (!input.source.playback?.paused) this.play(input, false);
+          } else input.error = result.status === 'failed'
+            ? 'Video could not be prepared. Upload an MP4 (H.264) version.'
+            : 'Video file is missing from this station.';
+        } catch { /* Retry when the station is reachable again. */ }
+      };
+      void check();
+      input.preparationTimer = window.setInterval(() => void check(), 2000);
+    }
   }
   private play(input: MediaInput, live: boolean) {
     input.error = '';
@@ -133,6 +160,7 @@ export class SourceBank {
     else input.gain.gain.setTargetAtTime(level, this.audio.currentTime, 0.015);
   }
   private clearElement(input: MediaInput) {
+    clearInterval(input.preparationTimer); input.preparationTimer = undefined; input.preparingVideo = false;
     // Invalidate callbacks before pause/load reject any in-flight play request.
     input.playback.bind(null);
     if (input.element instanceof HTMLMediaElement) {
@@ -309,7 +337,7 @@ export class SourceBank {
     for (const [id, input] of this.inputs) {
       const kind = input.source.kind;
       const live = kind === 'camera' || kind === 'microphone' || kind === 'screen';
-      sources[id] = input.error ? 'error' : live ? liveInputStatus(kind, input.stream, input.element instanceof HTMLVideoElement ? input.element : null) :
+      sources[id] = input.preparingVideo && input.element instanceof HTMLMediaElement && input.element.readyState < 2 ? 'loading' : input.error ? 'error' : live ? liveInputStatus(kind, input.stream, input.element instanceof HTMLVideoElement ? input.element : null) :
         input.element instanceof HTMLMediaElement ? input.element.readyState >= 2 ? 'ready' : 'loading' :
         input.element instanceof HTMLImageElement ? input.element.complete && input.element.naturalWidth > 0 ? 'ready' : 'loading' : 'ready';
       if (input.element instanceof HTMLImageElement && input.element.complete && !input.element.naturalWidth) sources[id] = 'error';
