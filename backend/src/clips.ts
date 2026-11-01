@@ -109,6 +109,7 @@ export async function createClips(options: { dir: string; recordings: RecordingS
   // A process cannot survive its station. Never misrepresent unfinished work as
   // complete, and never silently start old exports after a station restart.
   const exportPosterReady = new Set<string>(), retainedTemporary = new Set<string>(), downloads = new Map<string, number>();
+  const deletingExports = new Set<string>();
   const previousFiles = new Map(await Promise.all([exportsDir, scratchDir].map(async directory => [directory, await fs.readdir(directory, { withFileTypes: true })] as const)));
   for (const job of data.exports) {
     if (unsettled(job)) {
@@ -615,6 +616,50 @@ export async function createClips(options: { dir: string; recordings: RecordingS
     if (work) await work.done;
     res.json(exportFor(requireExport(id), user));
   }));
+  router.delete('/clips/exports', asyncRoute(async (req, res) => {
+    const parsed = z.object({ ids: z.array(idSchema).min(1).max(10_000) }).strict().safeParse(req.body);
+    if (!parsed.success) throw new ClipError(422, 'Choose one or more saved exports to delete.');
+    const ids = [...new Set(parsed.data.ids)], selected = new Set(ids), user = userFor(req);
+    let marked = false;
+    transferHolds++;
+    try {
+      const targets = await serial(async () => {
+        if (closed) throw new ClipError(503, 'Clips is shutting down. Please retry shortly.');
+        const jobs = ids.map(id => requireExport(id));
+        for (const job of jobs) {
+          checkOwner(job.ownerId, user);
+          if (job.temporary) throw new ClipError(409, 'Temporary exports are managed in Export progress. Choose saved exports from the library.');
+          if (downloads.get(job.id)) throw new ClipError(409, 'An export is still downloading. Wait for it to finish, then delete it.');
+          if (deletingExports.has(job.id)) throw new ClipError(409, 'This export is already being deleted. Refresh the library.');
+        }
+        for (const job of jobs) deletingExports.add(job.id);
+        marked = true;
+        const work = active?.kind === 'export' && jobs.some(job => job.id === active?.id) ? active : null;
+        if (work && !work.reason) { work.reason = 'cancel'; work.process?.stop('Export deleted.'); }
+        return { jobs, work };
+      });
+      if (targets.work) await targets.work.done;
+      await serial(async () => {
+        if (ids.some(id => downloads.get(id))) throw new ClipError(409, 'An export is still downloading. Wait for it to finish, then delete it.');
+        const before = data.exports;
+        data.exports = data.exports.filter(job => !selected.has(job.id));
+        try { await persist(); } catch (error) { data.exports = before; throw error; }
+      });
+      let filesRemoved = true;
+      for (const job of targets.jobs) {
+        for (const filename of [artifactPath(job), exportPosterPath(job)]) {
+          try { await fs.unlink(filename); }
+          catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { filesRemoved = false; console.warn('[clips] Export file cleanup failed:', job.id, (error as Error).message); } }
+        }
+        retainedTemporary.delete(job.id); exportPosterReady.delete(job.id);
+      }
+      res.json({ deleted: targets.jobs.length, filesRemoved });
+    } finally {
+      if (marked) for (const id of ids) deletingExports.delete(id);
+      transferHolds--;
+      void tick().catch(() => {});
+    }
+  }));
   router.post('/clips/exports/:id/release', asyncRoute(async (req, res) => {
     if (!z.object({}).strict().safeParse(req.body ?? {}).success) throw new ClipError(422, 'Release accepts no file paths or export changes.');
     const user = userFor(req);
@@ -647,6 +692,7 @@ export async function createClips(options: { dir: string; recordings: RecordingS
     } catch (error) { next(error); }
   });
   function checkExportDownload(job: SavedExport) {
+    if (deletingExports.has(job.id)) throw new ClipError(409, 'This export is being deleted.');
     if (job.temporary && (unavailableExport(job) || job.expiresAt && Date.parse(job.expiresAt) <= Date.now())) {
       void cleanTemporaryExports().catch(() => {});
       throw new ClipError(410, job.deliveredAt ? 'This temporary export was delivered and removed from the station.' : 'This temporary export has expired. Export the saved project again.');

@@ -21,6 +21,7 @@ export const clipsApi = {
   remove: (id: string, revision: number) => request<{ ok: true }>(`/drafts/${encodeURIComponent(id)}`, 'DELETE', { revision }),
   export: (id: string, revision: number, options?: ClipExportOptions, temporary = false) => request<ClipExport>(`/drafts/${encodeURIComponent(id)}/exports`, 'POST', { revision, ...(options ? { options } : {}), ...(temporary ? { temporary: true } : {}) }),
   cancel: (id: string) => request<ClipExport>(`/exports/${encodeURIComponent(id)}/cancel`, 'POST'),
+  removeExports: (ids: string[]) => request<{ deleted: number; filesRemoved: boolean }>('/exports', 'DELETE', { ids }),
   release: (id: string) => request<ClipExport>(`/exports/${encodeURIComponent(id)}/release`, 'POST'),
   exportPoster: (id: string) => `/api/clips/exports/${encodeURIComponent(id)}/thumbnail`,
   media: (id: string) => `/api/clips/recordings/${encodeURIComponent(id)}/media`,
