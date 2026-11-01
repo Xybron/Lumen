@@ -81,7 +81,7 @@ try {
   await page.goto(`${base}/studio`); await page.getByTestId('output-audio-control').waitFor();
   const sourceRow = id => page.locator(`.source-list .source-row[data-source-id="${id}"]`);
   async function checkSourcesMain(sourceId, { state = 'ready', returnToMixer = true } = {}) {
-    await page.getByRole('button', { name: /^Sources/ }).click();
+    await page.locator('.source-panel').scrollIntoViewIfNeeded();
     await until(async () => await page.getByTestId('source-main-audio-badge').count() === (sourceId ? 1 : 0), 'Sources show exactly the selected Main badge');
     if (sourceId) {
       const badge = sourceRow(sourceId).getByTestId('source-main-audio-badge');
@@ -89,20 +89,20 @@ try {
       await until(async () => await badge.getAttribute('data-state') === state && (await badge.textContent()).trim() === labels[state], `Sources Main badge shows ${state}`);
       assert.equal(await badge.evaluate(element => element.tagName), 'SPAN', 'Main status is a read-only badge, not a button');
     }
-    assert.equal(await page.getByRole('button', { name: /^Set .+ as Main audio$/ }).count(), 0, 'Source rows never contain Main selection controls');
-    assert.equal(await page.getByRole('button', { name: 'Clear Main audio', exact: true }).count(), 0, 'Sources badge is read-only, not a duplicate clear control');
-    if (returnToMixer) await page.getByRole('button', { name: 'Audio mixer', exact: true }).click();
+    assert.equal(await page.locator('.source-panel').getByRole('button', { name: /^Set .+ as Main audio$/ }).count(), 0, 'Source rows never contain Main selection controls');
+    assert.equal(await page.locator('.source-panel').getByRole('button', { name: 'Clear Main audio', exact: true }).count(), 0, 'Sources badge is read-only, not a duplicate clear control');
+    if (returnToMixer) await page.locator('.audio-panel').scrollIntoViewIfNeeded();
   }
   assert.equal(await page.getByLabel('Main audio source', { exact: true }).count(), 0, 'The bulky Main audio selector is removed');
   assert.equal(await page.getByTestId('main-audio-control').count(), 0, 'Sources do not lose space to a Main audio block');
-  assert.equal(await page.getByRole('button', { name: /^Set .+ as Main audio$/ }).count(), 0, 'Main selection belongs only to the mixer');
+  assert.equal(await page.locator('.source-panel').getByRole('button', { name: /^Set .+ as Main audio$/ }).count(), 0, 'Main selection belongs only to the mixer');
   const footerHeight = (await page.getByTestId('output-audio-control').boundingBox()).height;
   assert.ok(footerHeight < 64, `Output footer stays compact (${footerHeight}px)`);
-  const sourceListHeight = (await page.locator('.source-audio-panel .source-list').boundingBox()).height;
+  const sourceListHeight = (await page.locator('.source-panel .source-list').boundingBox()).height;
   assert.ok(sourceListHeight >= 165, `Sources reclaim the removed selector's space (${sourceListHeight}px)`);
-  await page.locator('.source-audio-panel').scrollIntoViewIfNeeded();
+  await page.locator('.source-panel').scrollIntoViewIfNeeded();
   await checkSourcesMain('source_scripture', { state: 'no-audio' });
-  await page.getByRole('button', { name: 'Audio mixer', exact: true }).click();
+  await page.locator('.audio-panel').scrollIntoViewIfNeeded();
   await page.getByTestId('main-audio-status').getByText('scripture channel is text-only. Choose an audio input as Main.', { exact: true }).waitFor();
   assert.equal((await get()).mainAudioSourceId, 'source_scripture');
   assert.equal(await page.getByRole('button', { name: 'Set scripture channel as Main audio', exact: true }).count(), 0, 'Scripture cannot be chosen as audio');
@@ -118,13 +118,13 @@ try {
   await until(async () => (await get()).mainAudioSourceId === 'main' && (await status()).levels.master > .02, 'selecting main routes follow-scene audio outside the picture');
   const mixerRow = id => page.locator(`[data-testid="audio-mixer-source"][data-source-id="${id}"]`);
   await mixerRow('main').getByTestId('main-audio-badge').waitFor();
-  await page.getByRole('button', { name: /^Sources/ }).click();
-  assert.equal(await page.getByRole('button', { name: /^Set .+ as Main audio$/ }).count(), 0, 'Source rows stay free of duplicate main selectors');
-  assert.equal(await page.getByTestId('output-audio-control').isVisible(), true, 'Output volume and mute remain available in Sources');
+  await page.locator('.source-panel').scrollIntoViewIfNeeded();
+  assert.equal(await page.locator('.source-panel').getByRole('button', { name: /^Set .+ as Main audio$/ }).count(), 0, 'Source rows stay free of duplicate main selectors');
+  assert.equal(await page.locator('.audio-panel').getByTestId('output-audio-control').isVisible(), true, 'Output volume and mute remain available in Audio');
   assert.equal((await get()).mainAudioSourceId, 'main', 'Selection survives tab switching');
   await checkSourcesMain('main', { returnToMixer: false });
   await page.screenshot({ path: path.join(dir, 'main-audio-sources.png'), fullPage: true });
-  await page.getByRole('button', { name: 'Audio mixer', exact: true }).click();
+  await page.locator('.audio-panel').scrollIntoViewIfNeeded();
   await mixerRow('main').getByTestId('main-audio-badge').waitFor();
   const baseline = (await status()).levels.master;
   // Hold the replacement command while the old feed is muted. The old
@@ -133,7 +133,7 @@ try {
   await until(async () => (await get()).sources.find(source => source.id === 'main').audio.muted && await page.getByRole('button', { name: 'Unmute Service mixer', exact: true }).isEnabled(), 'main input muted before handoff');
   await checkSourcesMain('main', { state: 'muted', returnToMixer: false });
   await page.screenshot({ path: path.join(dir, 'main-audio-sources-muted.png'), fullPage: true });
-  await page.getByRole('button', { name: 'Audio mixer', exact: true }).click();
+  await page.locator('.audio-panel').scrollIntoViewIfNeeded();
   await page.getByRole('button', { name: 'Unmute Service mixer', exact: true }).click();
   await until(async () => !(await get()).sources.find(source => source.id === 'main').audio.muted && (await status()).levels.master > .02, 'Main recovers after source unmute');
   await checkSourcesMain('main');
@@ -210,7 +210,7 @@ try {
   const added = await until(async () => (await get()).sources.find(source => source.name === 'Added while preaching'), 'new audio saved');
   assert.equal(added.audio.muted, true);
   assert.ok(Math.abs((await status()).levels.master - baseline) < .006, 'Uploading media does not disrupt service audio');
-  await page.getByRole('button', { name: 'Audio mixer', exact: true }).click();
+  await page.locator('.audio-panel').scrollIntoViewIfNeeded();
   // Master mute is independent, and is retained while the main feed switches.
   await page.getByRole('button', { name: 'Toggle master mute', exact: true }).click();
   await until(async () => (await status()).levels.master === 0, 'final output mute');
@@ -244,7 +244,7 @@ try {
   const pcm = execFileSync(ffmpeg, ['-v', 'error', '-i', path.join(dir, 'recordings', recording.id, 'recording.webm'), '-vn', '-ac', '1', '-ar', '16000', '-f', 'f32le', 'pipe:1']);
   let peak = 0; for (let offset = 0; offset + 4 <= pcm.length; offset += 4) peak = Math.max(peak, Math.abs(pcm.readFloatLE(offset)));
   assert.ok(peak > .02, `Recording must include real main audio (peak ${peak})`);
-  await page.getByRole('button', { name: 'Audio mixer', exact: true }).click();
+  await page.locator('.audio-panel').scrollIntoViewIfNeeded();
   await mixerRow('main').scrollIntoViewIfNeeded();
   await mixerRow('main').getByTestId('main-audio-badge').waitFor();
   await page.screenshot({ path: path.join(dir, 'main-audio-desktop.png'), fullPage: true });
@@ -271,7 +271,7 @@ try {
   assert.ok(badgeBounds.width > 15 && badgeBounds.x >= sourceBounds.x && badgeBounds.x + badgeBounds.width <= sourceBounds.x + sourceBounds.width, 'Main badge remains visible beside a truncated long name');
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'Long source names and badges never introduce horizontal page overflow');
   await page.screenshot({ path: path.join(dir, 'main-audio-sources-mobile.png'), fullPage: true });
-  await page.getByRole('button', { name: 'Audio mixer', exact: true }).click();
+  await page.locator('.audio-panel').scrollIntoViewIfNeeded();
   await mixerRow('main').getByRole('button', { name: /^Mute / }).click();
   await until(async () => (await get()).sources.find(source => source.id === 'main').audio.muted, 'Long-named Main input muted on mobile');
   await checkSourcesMain('main', { state: 'muted', returnToMixer: false });
@@ -293,7 +293,7 @@ try {
   await until(() => program.locator('video').evaluate(video => video.srcObject === null), 'open output clears its stopped renderer');
   await page.reload(); await page.getByTestId('output-audio-control').waitFor();
   await checkSourcesMain('main', { state: 'offline' });
-  await page.getByRole('button', { name: 'Audio mixer', exact: true }).click();
+  await page.locator('.audio-panel').scrollIntoViewIfNeeded();
   await mixerRow('main').getByTestId('main-audio-badge').waitFor();
   assert.equal((await get()).mainAudioSourceId, 'main', 'Main selection persists across controller reload and engine stop');
   assert.equal((await request.post(`${base}/api/studio/engine/start`)).status(), 200);
@@ -311,7 +311,7 @@ try {
   for (const output of [program, pinned, projector, preview]) await output.close();
   assert.equal((await request.post(`${base}/api/studio/engine/stop`)).status(), 200);
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ result: 'PASS', artifacts: dir, baseline, recordingPeak: peak, checks: ['compact Output footer on both tabs', 'per-source mixer Main actions with tab and scene persistence', 'read-only Sources Main badge follows replacement and clear', 'Main badge states: ready, muted, disconnected, offline and text-only', 'input status independent of final output mute', 'badge recovers after unmute and healthy input selection', 'disconnected badge takes priority over saved input mute', 'single persistent route through Cut/Fade', 'Program, pinned output and recording audio', 'all outputs succeed ICE and receive actual RTP without capture permissions or mDNS resolution', 'silent Preview and projector', 'muted new uploads', 'replacement and master mute', 'in-flight switch/mute safety', 'text-only channels excluded with legacy warning', 'no fallback on disconnect', '390px mixer and long-named source status badges without overflow', 'selection persists after reload and engine stop', 'all open outputs automatically reconnect and recover correct audio after engine restart'] }, null, 2));
+  console.log(JSON.stringify({ result: 'PASS', artifacts: dir, baseline, recordingPeak: peak, checks: ['compact Output footer in dedicated Audio panel', 'per-source mixer Main actions with scene persistence', 'read-only Sources Main badge follows replacement and clear', 'Main badge states: ready, muted, disconnected, offline and text-only', 'input status independent of final output mute', 'badge recovers after unmute and healthy input selection', 'disconnected badge takes priority over saved input mute', 'single persistent route through Cut/Fade', 'Program, pinned output and recording audio', 'all outputs succeed ICE and receive actual RTP without capture permissions or mDNS resolution', 'silent Preview and projector', 'muted new uploads', 'replacement and master mute', 'in-flight switch/mute safety', 'text-only channels excluded with legacy warning', 'no fallback on disconnect', 'three desktop columns and 390px stacked panels without overflow', 'selection persists after reload and engine stop', 'all open outputs automatically reconnect and recover correct audio after engine restart'] }, null, 2));
 } catch (error) {
   await page?.screenshot({ path: path.join(dir, 'failure.png'), fullPage: true }).catch(() => {});
   const diagnostics = {

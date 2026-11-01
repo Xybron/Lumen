@@ -34,6 +34,7 @@ interface MultiviewVideo { url: string; element: HTMLVideoElement; paused: boole
 
 export class SourceBank {
   readonly inputs = new Map<string, MediaInput>();
+  private heldLevels = new Map<string, number>();
   private content: Content | null = null;
   private channelStates = new Map<string, ProjectionState>();
   private subscribed = new Set<string>();
@@ -67,16 +68,16 @@ export class SourceBank {
     for (const [id, input] of this.inputs) {
       const next = sources.find(s => s.id === id);
       if (!next || next.kind !== input.source.kind || next.url !== input.source.url || next.channelId !== input.source.channelId) {
-        this.dispose(input); this.inputs.delete(id);
+        this.dispose(input); this.inputs.delete(id); this.heldLevels.delete(id);
       }
     }
     for (const source of sources) {
       let input = this.inputs.get(source.id);
       if (!input) {
         const gain = this.audio.createGain(), delay = this.audio.createDelay(2), analyser = this.audio.createAnalyser();
-        analyser.fftSize = 256;
+        analyser.fftSize = 2048;
         delay.connect(gain); gain.connect(analyser);
-        input = { source, element: null, stream: null, node: null, gain, delay, analyser, samples: new Float32Array(256), error: '', playback: new MediaPlayback() };
+        input = { source, element: null, stream: null, node: null, gain, delay, analyser, samples: new Float32Array(2048), error: '', playback: new MediaPlayback() };
         this.inputs.set(source.id, input);
         if (source.kind === 'image') input.element = this.image(source.url!);
         else if (source.kind === 'video' || source.kind === 'audio') this.setMedia(input, source.url!, source.kind === 'audio');
@@ -294,7 +295,16 @@ export class SourceBank {
   programCuesReady(gates: ProductionState['programCueGates']) {
     return programCuesReady(gates, id => this.channelStates.get(id));
   }
+  sampleLevels() {
+    for (const [id, input] of this.inputs) {
+      input.analyser.getFloatTimeDomainData(input.samples);
+      let peak = 0;
+      for (const sample of input.samples) peak = Math.max(peak, Math.abs(sample));
+      this.heldLevels.set(id, Math.max(this.heldLevels.get(id) ?? 0, Math.min(1, peak)));
+    }
+  }
   status() {
+    this.sampleLevels();
     const sources: Record<string, 'ready' | 'missing' | 'loading' | 'error'> = {}, levels: Record<string, number> = {}, sourceErrors: Record<string, string> = {};
     for (const [id, input] of this.inputs) {
       const kind = input.source.kind;
@@ -304,10 +314,9 @@ export class SourceBank {
         input.element instanceof HTMLImageElement ? input.element.complete && input.element.naturalWidth > 0 ? 'ready' : 'loading' : 'ready';
       if (input.element instanceof HTMLImageElement && input.element.complete && !input.element.naturalWidth) sources[id] = 'error';
       if (input.error) sourceErrors[id] = input.error;
-      input.analyser.getFloatTimeDomainData(input.samples);
-      let peak = 0; for (const sample of input.samples) peak = Math.max(peak, Math.abs(sample));
-      levels[id] = Math.min(1, peak);
+      levels[id] = this.heldLevels.get(id) ?? 0;
     }
+    this.heldLevels.clear();
     return { sources, levels, sourceErrors };
   }
   private dispose(input: MediaInput) {

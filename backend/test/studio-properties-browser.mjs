@@ -127,7 +127,7 @@ try {
   // no live gain changes while an operator is still dragging or typing.
   const audioBaseline = await get();
   const savedMainAudio = structuredClone(audioBaseline.sources.find(source => source.id === 'properties_main_mic').audio);
-  await page.getByRole('button', { name: 'Audio mixer', exact: true }).click();
+  await page.locator('.audio-panel').scrollIntoViewIfNeeded();
   const delay = page.getByLabel('Persistent microphone delay', { exact: true });
   await delay.fill('175');
   await page.waitForTimeout(1200);
@@ -161,7 +161,7 @@ try {
     document.masterVolume = audioBaseline.masterVolume; document.masterMuted = audioBaseline.masterMuted;
   });
   await until(async () => Number(await page.getByLabel('Master volume', { exact: true }).inputValue()) === audioBaseline.masterVolume && Number(await delay.inputValue()) === savedMainAudio.delayMs, 'audio values restore from their acknowledged baseline');
-  await page.locator('.source-audio-panel .tool-tabs button').first().click();
+  await page.locator('.source-panel').scrollIntoViewIfNeeded();
   await unchangedLive('Restored audio controls');
   assert.equal((await get()).masterVolume, audioBaseline.masterVolume, 'Master volume is explicitly restored after the isolated audio edit rehearsal');
   assert.equal((await get()).masterMuted, audioBaseline.masterMuted, 'Master mute stays unchanged throughout audio editing');

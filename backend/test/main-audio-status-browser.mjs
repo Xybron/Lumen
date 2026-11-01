@@ -53,23 +53,28 @@ try {
     for (const socket of sockets) socket.send(JSON.stringify({ t: 'status', status: telemetry }));
   }
   await page.goto(`${base}/studio`); await page.getByTestId('output-audio-control').waitFor();
+  const dock = await Promise.all(['.source-panel', '.layers-panel', '.audio-panel'].map(selector => page.locator(selector).boundingBox()));
+  assert.ok(dock.every(Boolean) && dock[0].x < dock[1].x && dock[1].x < dock[2].x, 'Sources, Scene layers, and Audio are three visible columns');
   const sourceRow = id => page.locator(`.source-list .source-row[data-source-id="${id}"]`);
   const labels = { ready: 'Main', muted: 'Main · Muted', disconnected: 'Main · Disconnected', error: 'Main · Error', offline: 'Main · Offline', loading: 'Main · Connecting' };
   async function badge(state, id = 'main') {
-    await page.getByRole('button', { name: /^Sources/ }).click();
+    await page.locator('.source-panel').scrollIntoViewIfNeeded();
     const element = sourceRow(id).getByTestId('source-main-audio-badge');
     await until(async () => await element.getAttribute('data-state') === state && (await element.textContent()).trim() === labels[state], `Main badge ${state}`);
     assert.equal(await page.getByTestId('source-main-audio-badge').count(), 1);
     assert.equal(await element.evaluate(node => node.tagName), 'SPAN');
-    assert.equal(await page.getByRole('button', { name: /^Set .+ as Main audio$/ }).count(), 0);
-    assert.equal(await page.getByRole('button', { name: 'Clear Main audio', exact: true }).count(), 0);
+    assert.equal(await page.locator('.source-panel').getByRole('button', { name: /^Set .+ as Main audio$/ }).count(), 0);
+    assert.equal(await page.locator('.source-panel').getByRole('button', { name: 'Clear Main audio', exact: true }).count(), 0);
     await sourceRow(id).scrollIntoViewIfNeeded();
     return element;
   }
-  async function mixer() { await page.getByRole('button', { name: 'Audio mixer', exact: true }).click(); }
+  async function mixer() { await page.locator('.audio-panel').scrollIntoViewIfNeeded(); }
   async function screenshot(name) { await page.screenshot({ path: path.join(dir, name), fullPage: true }); }
   await mixer(); await page.getByRole('button', { name: `Set ${mainName} as Main audio`, exact: true }).click();
   await until(async () => (await get()).mainAudioSourceId === 'main', 'real Main selection saved');
+  health({ levels: { main: .05, master: .05 } });
+  await until(async () => Number(await page.getByRole('meter', { name: `${mainName} input level` }).getAttribute('aria-valuenow')) > 50, 'audible speech fills the decibel meter');
+  assert.ok(Number(await page.getByRole('meter', { name: 'Final output audio level' }).getAttribute('aria-valuenow')) > 50);
   await badge('ready');
   await mixer(); await page.getByRole('button', { name: `Mute ${mainName}`, exact: true }).click();
   await badge('muted'); await screenshot('main-audio-sources-muted.png');
@@ -108,10 +113,10 @@ try {
   assert.equal(await sourceRow('main').getByTestId('source-main-audio-badge').count(), 0);
   await mixer(); await page.getByRole('button', { name: 'Clear Main audio', exact: true }).click();
   await until(async () => (await get()).mainAudioSourceId === null, 'real clear persisted');
-  await page.getByRole('button', { name: /^Sources/ }).click();
+  await page.locator('.source-panel').scrollIntoViewIfNeeded();
   assert.equal(await page.getByTestId('source-main-audio-badge').count(), 0);
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ result: 'PASS', artifacts: dir, telemetry: 'Simulated read-only operator telemetry; real isolated station commands', checks: ['ready, muted, disconnected, error, connecting and offline states', 'disconnection priority over mute with tooltip context', 'real source diagnostics preserved', 'unmute and healthy-input recovery', 'final output mute independent of input status', 'read-only source badge; selection remains mixer-only', 'badge follows real selection and clear', 'long-name muted/disconnected labels fit 390px'] }, null, 2));
+  console.log(JSON.stringify({ result: 'PASS', artifacts: dir, telemetry: 'Simulated read-only operator telemetry; real isolated station commands', checks: ['three visible dock columns and readable decibel meters', 'ready, muted, disconnected, error, connecting and offline states', 'disconnection priority over mute with tooltip context', 'real source diagnostics preserved', 'unmute and healthy-input recovery', 'final output mute independent of input status', 'read-only source badge; selection remains in Audio', 'badge follows real selection and clear', 'long-name muted/disconnected labels fit 390px'] }, null, 2));
 } catch (error) {
   await page?.screenshot({ path: path.join(dir, 'failure.png'), fullPage: true }).catch(() => {});
   console.error(error); console.error(logs); console.error(`Artifacts: ${dir}`); process.exitCode = 1;

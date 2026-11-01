@@ -249,7 +249,7 @@ try {
   await page.getByRole('button', { name: 'Add to Studio', exact: true }).click();
   const microphone = await until(async () => (await get()).sources.find(s => s.kind === 'microphone'), 'muted microphone saved');
   assert.equal(microphone.audio.muted, true, 'New microphone starts muted');
-  await page.getByRole('button', { name: 'Audio mixer', exact: true }).click();
+  await page.locator('.audio-panel').scrollIntoViewIfNeeded();
   await page.getByRole('button', { name: 'Set Sermon microphone as Main audio', exact: true }).click();
   await until(async () => (await get()).mainAudioSourceId === microphone.id && Object.values((await (await request.get(`${base}/api/studio/status`)).json()).levels).some(n => n > 0), 'real main audio meter');
   await page.locator(`[data-testid="audio-mixer-source"][data-source-id="${microphone.id}"]`).getByTestId('main-audio-badge').waitFor();
@@ -268,10 +268,10 @@ try {
   await page.getByRole('button', { name: 'Add to Studio', exact: true }).click();
   const music = await until(async () => (await get()).sources.find(s => s.name === 'Music bed'), 'audio source saved');
   assert.equal(music.audio.muted, true, 'Uploaded music must not interrupt the main feed');
-  await page.getByRole('button', { name: 'Audio mixer', exact: true }).click();
+  await page.locator('.audio-panel').scrollIntoViewIfNeeded();
   await page.getByRole('button', { name: 'Unmute Music bed', exact: true }).click();
   await until(async () => (await (await request.get(`${base}/api/studio/status`)).json()).levels[music.id] > 0, 'uploaded file audio');
-  await page.getByRole('button', { name: /^Sources/ }).click();
+  await page.locator('.source-panel').scrollIntoViewIfNeeded();
   await page.getByRole('button', { name: 'Pause Music bed' }).click();
   await until(async () => (await (await request.get(`${base}/api/studio/status`)).json()).levels[music.id] === 0, 'pause file audio');
   await page.getByRole('button', { name: 'Restart Music bed' }).click();
@@ -463,7 +463,7 @@ try {
     state.previewSceneId = beforeTransitions.previewSceneId;
   });
   await until(async () => (await get()).program?.id === beforeTransitions.program.id, 'original Program restored after transition fixtures');
-  await page.getByRole('button', { name: 'Audio mixer', exact: true }).click();
+  await page.locator('.audio-panel').scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(dir, 'studio-live.png'), fullPage: true });
   await page.getByRole('button', { name: 'Record', exact: true }).click();
   const active = await until(async () => { const s = await (await request.get(`${base}/api/studio/status`)).json(); return s.recording?.bytes > 10000 ? s.recording : null; }, 'recorded chunks', 30000);

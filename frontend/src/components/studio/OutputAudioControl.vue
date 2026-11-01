@@ -2,6 +2,7 @@
 import { Volume2, VolumeX } from 'lucide-vue-next';
 import { useStudioStore } from '@/stores/studio';
 import StudioPropertyInput from './StudioPropertyInput.vue';
+import { audioMeterPercent } from '@/lib/studio/audio-meter';
 
 const studio = useStudioStore();
 function run(promise: Promise<unknown>) { void promise.catch(() => {}); }
@@ -17,7 +18,7 @@ function toggleMute() {
 
 <template>
   <div v-if="studio.state" class="master-strip" aria-label="Output audio" data-testid="output-audio-control">
-    <Volume2 :size="13" aria-hidden="true" /><b>Output</b><div class="audio-meter" role="meter" aria-label="Final output audio level" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="Math.round((studio.status.levels.master ?? 0) * 100)"><span :style="{ width: (studio.status.levels.master ?? 0) * 100 + '%' }" /></div>
+    <Volume2 :size="13" aria-hidden="true" /><b>Output</b><div class="audio-meter" role="meter" aria-label="Final output audio level" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="audioMeterPercent(studio.status.levels.master)"><span :style="{ width: audioMeterPercent(studio.status.levels.master) + '%' }" /></div>
     <StudioPropertyInput type="range" identity="master-volume" aria-label="Master volume" min="0" max="1" step="0.01" :value="studio.state.masterVolume" :pending="!!studio.saving" :disabled="!!studio.saving" @commit="volume" />
     <button class="s-icon" :class="{ muted: studio.state.masterMuted }" aria-label="Toggle master mute" :aria-pressed="studio.state.masterMuted" :disabled="!!studio.saving" :title="studio.state.masterMuted ? 'Unmute final output' : 'Mute final output'" @click="toggleMute"><VolumeX v-if="studio.state.masterMuted" :size="14" /><Volume2 v-else :size="14" /></button>
   </div>

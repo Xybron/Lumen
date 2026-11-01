@@ -33,6 +33,7 @@ import { useStudioTransitions } from '@/composables/useStudioTransitions';
 import { useConfirmation } from '@/composables/useConfirmation';
 import { animationTotalMs } from '@/lib/studio/animation';
 import { describeMainAudioStatus } from '@/lib/studio/main-audio-status';
+import { audioMeterPercent } from '@/lib/studio/audio-meter';
 import type { StudioSource, StudioScene } from '../../../shared/production';
 import '@/styles/studio.css';
 import '@/styles/workspaces.css';
@@ -111,7 +112,7 @@ async function inspectLayer() {
   name?.focus({ preventScroll: true });
   name?.select();
 }
-const lowerTab = ref<'sources' | 'audio'>('sources'), monitorAudio = ref(false), programReady = ref(false);
+const monitorAudio = ref(false), programReady = ref(false);
 const now = ref(Date.now());
 const clock = window.setInterval(() => { now.value = Date.now(); }, 1000);
 const engineRunning = computed(() => studio.status.state === 'running');
@@ -134,6 +135,19 @@ const mainAudio = computed(() => studio.state?.sources.find(source => source.id 
 const textOnlyMain = computed(() => !!mainAudio.value && textOnly(mainAudio.value));
 const mainAudioBadge = computed(() => mainAudio.value ? describeMainAudioStatus(mainAudio.value, studio.status.state,
   studio.status.sources[mainAudio.value.id], studio.status.sourceErrors[mainAudio.value.id], textOnlyMain.value) : null);
+const cameraAudioOff = computed(() => !!mainAudio.value && mainAudio.value.kind === 'camera' &&
+  studio.connectedSources.includes(mainAudio.value.id) &&
+  !studio.sourceStream(mainAudio.value.id)?.getAudioTracks().some(track => track.readyState === 'live'));
+const audioSetupMessage = computed(() => {
+  if (!studio.state?.mainAudioSourceId) return 'For spoken audio in recordings and streams, set a microphone or audio-enabled camera as Main.';
+  if (textOnlyMain.value) return '';
+  if (cameraAudioOff.value) return 'This camera is connected without audio. Enable Include audio in Camera settings, or set a microphone as Main.';
+  if (!engineRunning.value) return 'Start the engine to check sound before recording or streaming.';
+  if (mainAudioBadge.value?.state === 'muted') return 'Main is muted. Unmute it to send sound to recordings and streams.';
+  if (mainAudioBadge.value?.state === 'disconnected' || mainAudioBadge.value?.state === 'error') return '';
+  if (studio.state.masterMuted || studio.state.masterVolume <= 0) return 'Output is muted. Unmute it to send sound to recordings and streams.';
+  return '';
+});
 function mainAudioUnavailable(source: StudioSource) {
   return source.id === studio.state?.mainAudioSourceId && engineRunning.value
     && ['missing', 'error'].includes(studio.status.sources[source.id] ?? 'missing');
@@ -328,9 +342,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keydown));
       <p class="preview-note"><Lock :size="11" />Edits stay in Preview until you Cut or Fade.</p>
 
       <div class="production-tools">
-        <StudioLayersPanel @add-source="addSourceDialog" @inspect="inspectLayer" />
-        <section class="tool-panel source-audio-panel"><div class="tool-heading"><div class="tool-tabs" role="group" aria-label="Source and audio panels"><button :class="{ active: lowerTab === 'sources' }" :aria-pressed="lowerTab === 'sources'" @click="lowerTab = 'sources'">Sources <span>{{ studio.state.sources.length }}</span></button><button :class="{ active: lowerTab === 'audio' }" :aria-pressed="lowerTab === 'audio'" @click="lowerTab = 'audio'">Audio mixer</button></div><button class="s-icon source-new-button" aria-label="Add production source" title="Create a reusable source" @click="addSourceDialog"><Plus :size="15" /><span>New source</span></button></div>
-          <div v-if="lowerTab === 'sources'" class="source-list">
+        <section class="tool-panel source-panel" aria-label="Sources"><div class="tool-heading"><h2>Sources <span class="panel-count">{{ studio.state.sources.length }}</span></h2><button class="s-icon source-new-button" aria-label="Add production source" title="Create a reusable source" @click="addSourceDialog"><Plus :size="15" /><span>New source</span></button></div>
+          <div class="source-list">
             <p v-if="studio.state.sources.length" class="source-list-hint">Reusable inputs for your scenes</p>
             <div v-if="!studio.state.sources.length" class="sources-empty"><div class="source-empty-icons"><Camera :size="20" /><Mic :size="20" /><Image :size="20" /></div><b>No sources added</b><p>Connect a camera or microphone,<br />or add media and presentation channels.</p><button class="s-button" @click="addSourceDialog"><Plus :size="13" /> Add source</button></div>
             <div v-for="source in studio.state.sources" :key="source.id" class="source-row" :data-source-id="source.id">
@@ -347,13 +360,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keydown));
               <button class="s-icon" title="Remove source" :aria-label="'Remove ' + source.name" @click="deleteSource(source)"><Trash2 :size="12" /></button>
             </div>
           </div>
-          <div v-else class="audio-list">
+        </section>
+        <StudioLayersPanel @add-source="addSourceDialog" @inspect="inspectLayer" />
+        <section class="tool-panel audio-panel" aria-label="Audio mixer"><div class="tool-heading"><h2><Volume2 :size="15" />Audio <span class="panel-count">{{ audioSources.length }}</span></h2></div>
+          <div class="audio-list">
+            <div v-if="audioSetupMessage" class="audio-setup-message" role="status"><AlertCircle :size="13" /><span>{{ audioSetupMessage }}</span><button v-if="mainAudio?.kind === 'camera' && (cameraAudioOff || ['disconnected', 'error'].includes(mainAudioBadge?.state ?? ''))" type="button" @click="editSourceDialog(mainAudio)">Camera settings</button></div>
             <div v-if="textOnlyMain && mainAudio" class="audio-main-warning legacy-main-warning" data-testid="main-audio-status" role="status"><AlertCircle :size="12" /><span><b>{{ mainAudio.name }}</b> is text-only. Choose an audio input as Main.</span><button class="s-icon" aria-label="Clear Main audio" title="Clear Main audio and mute this input" :disabled="!!studio.saving" @click="setMainAudio(null)"><X :size="12" /></button></div>
             <div v-if="!audioSources.length" class="panel-empty"><Mic :size="22" /><span>Add a microphone, video, or audio file<br />to start mixing.</span></div>
             <div v-for="source in audioSources" :key="source.id" class="audio-strip" :class="{ 'is-main-audio': source.id === studio.state.mainAudioSourceId }" data-testid="audio-mixer-source" :data-source-id="source.id">
               <div class="audio-strip-top"><b :title="source.name">{{ source.name }}</b><div class="main-audio-actions" data-testid="main-audio-actions"><template v-if="source.id === studio.state.mainAudioSourceId"><span class="main-audio-badge" data-testid="main-audio-badge" title="Main audio · persists across every scene">Main</span><button class="s-icon clear-main-audio" aria-label="Clear Main audio" title="Clear Main audio and mute this input" :disabled="!!studio.saving" @click="setMainAudio(null)"><X :size="11" /></button></template><button v-else class="set-main-audio" :aria-label="'Set ' + source.name + ' as Main audio'" title="Keep this audio input across every scene" :disabled="!!studio.saving" @click="setMainAudio(source.id)">Set as Main</button></div><span>{{ db(source.audio.volume) }} dB</span><button class="s-icon" :class="{ muted: source.audio.muted }" :aria-label="(source.audio.muted ? 'Unmute ' : 'Mute ') + source.name" :aria-pressed="source.audio.muted" :disabled="!!studio.saving" @click="updateAudio(source, { muted: !source.audio.muted })"><VolumeX v-if="source.audio.muted" :size="14" /><Volume2 v-else :size="14" /></button></div>
-              <div v-if="mainAudioUnavailable(source)" class="audio-main-warning" data-testid="main-audio-status" role="status"><AlertCircle :size="12" /><span :title="studio.status.sourceErrors[source.id]">{{ studio.status.sourceErrors[source.id] || 'Main input disconnected. No automatic fallback.' }}</span><button @click="lowerTab = 'sources'">Check Sources</button></div>
-              <div class="audio-meter"><span :style="{ width: (studio.status.levels[source.id] ?? 0) * 100 + '%' }" /></div>
+              <div v-if="mainAudioUnavailable(source)" class="audio-main-warning" data-testid="main-audio-status" role="status"><AlertCircle :size="12" /><span :title="studio.status.sourceErrors[source.id]">{{ studio.status.sourceErrors[source.id] || 'Main input disconnected. No automatic fallback.' }}</span><button @click="editSourceDialog(source)">Source settings</button></div>
+              <div class="audio-meter" role="meter" :aria-label="source.name + ' input level'" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="audioMeterPercent(studio.status.levels[source.id])"><span :style="{ width: audioMeterPercent(studio.status.levels[source.id]) + '%' }" /></div>
               <StudioPropertyInput type="range" :identity="source.id + ':volume'" min="0" max="1" step="0.01" :aria-label="source.name + ' volume'" :value="source.audio.volume" :pending="!!studio.saving" :disabled="!!studio.saving" @commit="updateAudio(source, { volume: Number($event) })" />
               <div class="audio-routing"><span v-if="source.id === studio.state.mainAudioSourceId" class="main-audio-routing">Every scene</span><select v-else :aria-label="source.name + ' audio mode'" :value="source.audio.mode" :disabled="!!studio.saving" @change="updateAudio(source, { mode: value($event) as 'always' | 'follow' })"><option value="always">Always on</option><option value="follow">Follow scene</option></select><label>Delay <StudioPropertyInput type="number" :identity="source.id + ':delay'" min="0" max="2000" step="10" integer :value="source.audio.delayMs" :aria-label="source.name + ' delay'" :pending="!!studio.saving" :disabled="!!studio.saving" @commit="updateAudio(source, { delayMs: Number($event) })" /> ms</label></div>
             </div>

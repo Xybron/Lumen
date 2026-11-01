@@ -248,6 +248,8 @@ export class StudioCompositor {
   private timer: number;
   private frames = 0;
   private measuredAt = performance.now();
+  private masterSamples = new Float32Array(2048);
+  private heldMasterLevel = 0;
   private fade: ProgramFade | null = null;
   private heldProgram: HeldProgram | null = null;
   private cueWaitAt: number | null = null;
@@ -353,7 +355,7 @@ export class StudioCompositor {
       const canvas = id === 'program' ? this.programCanvas : document.createElement('canvas');
       if (id !== 'program') { canvas.width = id === 'preview' ? 960 : 1920; canvas.height = id === 'preview' ? 540 : 1080; }
       const destination = this.audio.createMediaStreamDestination(), master = this.audio.createGain(), analyser = this.audio.createAnalyser();
-      analyser.fftSize = 256;
+      analyser.fftSize = 2048;
       master.connect(analyser); analyser.connect(destination);
       const stream = canvas.captureStream(30);
       destination.stream.getAudioTracks().forEach(t => stream.addTrack(t));
@@ -485,20 +487,27 @@ export class StudioCompositor {
       this.programMonitor.canvas.getContext('2d', { alpha: false })!.drawImage(this.programCanvas, 0, 0, PROGRAM_MONITOR_WIDTH, PROGRAM_MONITOR_HEIGHT);
       this.programMonitor.paintedAt = now;
     }
+    this.bank.sampleLevels();
+    this.bus('program').analyser.getFloatTimeDomainData(this.masterSamples);
+    for (const sample of this.masterSamples) this.heldMasterLevel = Math.max(this.heldMasterLevel, Math.abs(sample));
     this.frames++;
   }
   status() {
     const elapsed = performance.now() - this.measuredAt, fps = Math.min(60, Math.round(this.frames * 1000 / elapsed));
     this.frames = 0; this.measuredAt = performance.now();
-    const data = this.bank.status(), samples = new Float32Array(256);
+    const data = this.bank.status();
     const main = this.state.mainAudioSourceId ? this.bank.inputs.get(this.state.mainAudioSourceId) : undefined;
     if (main && ['camera', 'microphone', 'screen'].includes(main.source.kind) && main.stream
       && !main.stream.getAudioTracks().some(track => track.readyState === 'live')) {
       data.sources[main.source.id] = 'missing';
-      data.sourceErrors[main.source.id] = 'Main input has no live audio track. Reconnect it with audio enabled.';
+      data.sourceErrors[main.source.id] = main.source.kind === 'camera'
+        ? 'This camera is connected without sound. Enable Include audio in Camera settings, or set a microphone as Main.'
+        : main.source.kind === 'microphone'
+          ? 'The Main microphone has no live sound. Reconnect it or choose another microphone.'
+          : 'Main input has no live audio track. Share screen audio or set a microphone as Main.';
     }
-    this.bus('program').analyser.getFloatTimeDomainData(samples);
-    data.levels.master = Math.min(1, Math.max(...samples.map(Math.abs)));
+    data.levels.master = Math.min(1, this.heldMasterLevel);
+    this.heldMasterLevel = 0;
     return { fps, ...data };
   }
   private dispose(bus: Bus) {

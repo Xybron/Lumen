@@ -160,7 +160,7 @@ onMounted(async () => {
       reporting = true;
       void studioRequest('/engine/heartbeat', { method: 'POST', body: JSON.stringify(compositor.status()) })
         .catch(e => console.warn('Renderer heartbeat:', e)).finally(() => { reporting = false; });
-    }, 1000);
+    }, 250);
     message.value = 'Lumen production renderer is running.';
   } catch { message.value = 'This renderer is managed by the station. Open Studio to start it.'; }
 });
