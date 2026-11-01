@@ -120,6 +120,13 @@ function selected<T extends { id: string }>(items: T[], ids: string[], label: st
 function references(value: { recordingId: string; timeline?: ClipTimeline }) {
   return [value.recordingId, ...(value.timeline?.tracks.flatMap(track => track.items.flatMap(item => item.source?.kind === 'recording' ? [item.source.id] : [])) ?? [])];
 }
+function spentTemporaryExport(job: z.infer<typeof savedExportSchema>) {
+  return !!job.temporary && (
+    !!job.deliveredAt || !!job.expiredAt ||
+    ['cancelled', 'error', 'interrupted'].includes(job.status) ||
+    !!job.expiresAt && Date.parse(job.expiresAt) <= Date.now()
+  );
+}
 function assetReferences(value: { timeline?: ClipTimeline }) {
   return value.timeline?.tracks.flatMap(track => track.items.flatMap(item => item.source?.kind === 'asset' ? [item.source.id] : [])) ?? [];
 }
@@ -234,11 +241,11 @@ export class ProductionDataTransfer implements ProductionTransferAdapter {
     selected(data.drafts, ids, 'Clip project');
     if (data.exports.some(job => ids.includes(job.draftId) && (['queued', 'waiting-live', 'exporting'].includes(job.status) || downloads.has(job.id)))) fail('Cancel pending clip exports and wait for downloads to finish before clearing their projects.');
   }
-  private checkRecordingClear(records: { id: string; status: string }[], data: ClipTransferSession['data'] | undefined, ids: string[]) {
+  private checkRecordingClear(records: { id: string; status: string }[], data: ClipTransferSession['data'] | undefined, ids: string[], downloads = new Set<string>()) {
     if (ids.length && !this.clips) fail('The Clips workspace must be available to check recording dependencies before clearing.');
     if (selected(records, ids, 'Recording').some(recording => this.recordings.busy(recording.id) || ['starting', 'recording', 'stopping', 'finalizing'].includes(recording.status))) fail('Stop and finish active recordings before clearing them.');
-    const values = [...data?.drafts ?? [], ...data?.exports.map(job => ({ recordingId: job.recordingId, ...job.settings })) ?? []];
-    if (values.some(value => references(value).some(id => ids.includes(id)))) fail('A selected recording is used by a retained clip project or export. Clear those projects first.');
+    const values = [...data?.drafts ?? [], ...data?.exports.filter(job => !spentTemporaryExport(job) || downloads.has(job.id)).map(job => ({ recordingId: job.recordingId, ...job.settings })) ?? []];
+    if (values.some(value => references(value).some(id => ids.includes(id)))) fail('This recording is still used by a saved project or export. Delete those from the library first.');
   }
   transaction<T>(backupPath: string, operation: (tx: ProductionTransferTransaction) => Promise<T>): Promise<T> {
     return this.store.withTransferLock(production => this.recordings.withTransferLock(recordings => {
@@ -327,8 +334,17 @@ export class ProductionDataTransfer implements ProductionTransferAdapter {
       },
       clearScenes: async ids => { assertMutable(); const count = clearSceneDraft(state, ids, this.live()); clearedScenes.push(...ids); productionChanged ||= count > 0; return count; },
       clearRecordings: async ids => {
-        assertMutable(); this.checkRecordingClear(records, clipData, ids);
+        assertMutable(); this.checkRecordingClear(records, clipData, ids, clips?.downloads);
         deletedPaths.push(...selected(records, ids, 'Recording').map(recording => path.join(recordingStore.dir, recording.id)));
+        if (clips && clipData) {
+          const spent = clipData.exports.filter(job => spentTemporaryExport(job) && references({ recordingId: job.recordingId, ...job.settings }).some(id => ids.includes(id)));
+          for (const job of spent) {
+            const scratch = path.join(path.dirname(clips.exportsDir), 'scratch');
+            deletedPaths.push(path.join(scratch, `${job.id}.${clipExportProfile(job.options).extension}`), path.join(scratch, `${job.id}.thumbnail.jpg`));
+          }
+          if (spent.length) { const spentIds = new Set(spent.map(job => job.id)); clipData.exports = clipData.exports.filter(job => !spentIds.has(job.id)); clipsChanged = true; }
+          for (const id of ids) if (clipData.media[id]) { delete clipData.media[id]; clipsChanged = true; }
+        }
         records = records.filter(recording => !ids.includes(recording.id)); recordingsChanged ||= ids.length > 0; return ids.length;
       },
       clearClips: async ids => {

@@ -164,7 +164,7 @@ async function deleteRecording(recording: ClipRecording) {
     const confirmed = await confirmAction({
       title: 'Delete recording?',
       description: `“${recording.name}” will be removed from Recordings.`,
-      note: 'A recovery copy stays in station backups, so this will not free disk space yet. Saved projects using this recording must be removed first.',
+      note: 'A recovery copy stays in station backups, so this will not free disk space yet. Saved projects and exports using this recording must be removed first.',
       confirmLabel: 'Delete recording', tone: 'danger',
     });
     if (!confirmed) return;
