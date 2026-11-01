@@ -63,6 +63,26 @@ library. A fresh install on another computer creates a fresh station. Make a
 `.lumen` export or copy the station folder while Lumen is closed before moving
 machines or removing local data.
 
+Original recordings are in the `recordings` subfolder of that station folder.
+The **Recordings → Storage** window shows its exact path. To put future
+recordings on another drive, close Lumen, move the **entire station folder**
+there, and set the user environment variable `LUMEN_DATA_DIR` to the moved
+folder's absolute path before reopening Lumen. On Windows, for example, run
+the following in PowerShell, then sign out and in so the Start menu uses the
+new environment variable:
+
+```powershell
+[Environment]::SetEnvironmentVariable('LUMEN_DATA_DIR', 'D:\Lumen\station', 'User')
+```
+
+Keep `recordings`, `clips`, and the other station files together; saved clip
+projects refer to originals in that folder. The **Delete recording** action
+removes an original from the library only when no retained clip project or
+export needs it. Lumen places a recovery copy in `backups/data-clear` inside
+the station folder, so deleting from the library does not immediately reclaim
+disk space. Review and remove old backups from the data folder separately when
+you are certain they are no longer needed.
+
 The package includes Electron, a Node.js runtime, the production Chromium
 renderer, Windows/Mac FFmpeg and native database/image libraries. It also includes
 the local Whisper runtime and the **Base English** listening model. Larger and

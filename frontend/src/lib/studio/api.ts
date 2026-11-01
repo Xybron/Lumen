@@ -19,6 +19,7 @@ export const studioApi = {
   start: () => studioRequest<StudioStatus>('/engine/start', { method: 'POST' }),
   stop: () => studioRequest<StudioStatus>('/engine/stop', { method: 'POST' }),
   recordings: () => studioRequest<StudioRecording[]>('/recordings'),
+  recordingStorage: () => studioRequest<{ recordingsDirectory: string; backupDirectory: string; stationDirectory: string }>('/recordings/storage'),
   record: (name: string) => studioRequest<StudioRecording>('/recordings', { method: 'POST', body: JSON.stringify({ name }) }),
   stopRecording: (id: string) => studioRequest(`/recordings/${id}/stop`, { method: 'POST' }),
   recover: (id: string) => studioRequest(`/recordings/${id}/recover`, { method: 'POST' }),

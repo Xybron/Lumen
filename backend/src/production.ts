@@ -374,6 +374,13 @@ export async function createProduction(rendererOptions: Pick<RendererOriginOptio
   }));
   router.get('/studio/engine/bootstrap', requireEngine, (_req, res) => res.json(store.get()));
   router.get('/studio/recordings', requireSession, (_req, res) => res.json(recordings.list()));
+  router.get('/studio/recordings/storage', (req, res) => {
+    const user = readSession(req);
+    if (!user) { res.status(401).json({ error: 'Sign in to view station storage.' }); return; }
+    if (!user.isAdmin) { res.status(403).json({ error: 'Only a station administrator can view storage paths.' }); return; }
+    res.set('Cache-Control', 'private, no-store').json({ recordingsDirectory: path.join(DATA_DIR, 'recordings'),
+      backupDirectory: path.join(DATA_DIR, 'backups', 'data-clear'), stationDirectory: DATA_DIR });
+  });
   router.post('/studio/recordings', operator, asyncRoute(async (req, res) => {
     if (status.state !== 'running' || !hub.hasEngine()) throw new ProductionError(409, 'Start the engine before recording.');
     if (!store.get().program) throw new ProductionError(409, 'Take a scene to Program before recording.');

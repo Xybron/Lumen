@@ -219,7 +219,11 @@ async function start() {
   const root = app.isPackaged ? process.resourcesPath : process.env.LUMEN_DESKTOP_RESOURCES || path.resolve(__dirname, '..', 'build', 'resources');
   const runtime = await runtimePaths(root);
   const userDirectory = app.getPath('userData');
-  const stationDirectory = smokeDirectory ? path.join(smokeDirectory, 'station') : path.join(userDirectory, 'station');
+  const configuredStationDirectory = process.env.LUMEN_DATA_DIR;
+  if (!smokeDirectory && configuredStationDirectory && !path.isAbsolute(configuredStationDirectory)) {
+    throw new Error('LUMEN_DATA_DIR must be an absolute folder path.');
+  }
+  const stationDirectory = smokeDirectory ? path.join(smokeDirectory, 'station') : configuredStationDirectory || path.join(userDirectory, 'station');
   await fs.mkdir(userDirectory, { recursive: true });
   logFile = path.join(userDirectory, 'desktop.log');
   try { if ((await fs.stat(logFile)).size > 2 * 1024 * 1024) await fs.rename(logFile, logFile + '.previous'); } catch (error) { if (error.code !== 'ENOENT') console.error(error); }

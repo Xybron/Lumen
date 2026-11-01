@@ -143,6 +143,14 @@
 .library-picker-recording small { font-size: 11px; color: #7c8894; }
 .library-picker-recording > svg { flex-shrink: 0; color: #768898; }
 .library-picker-no-results { font-size: 11px; color: #87939d; padding: 15px 10px; }
+.library-storage-dialog { gap: 12px; padding-bottom: 23px; }
+.library-storage-dialog .library-picker-heading { margin-bottom: 0; }
+.library-storage-location { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; padding: 13px; border: 1px solid #ffffff14; border-radius: 8px; background: #101316; }
+.library-storage-location > span { width: 100%; color: #8995a1; font-size: 11px; }
+.library-storage-location > code { min-width: 0; flex: 1; overflow-wrap: anywhere; color: #dbe3e9; font-size: 11px; user-select: all; }
+.library-storage-help, .library-storage-message, .library-storage-station { color: #9aa5af; font-size: 11px; line-height: 1.6; }
+.library-storage-help code { color: #dbe3e9; }
+.library-storage-station { overflow-wrap: anywhere; }
 .library-sidebar-collapsed { grid-template-columns: 63px minmax(0, 1fr); }
 .library-sidebar-collapsed .library-sidebar { padding: 22px 8px 0; }
 .library-sidebar-collapsed .library-station { justify-content: center; padding: 0; margin-bottom: 31px; }

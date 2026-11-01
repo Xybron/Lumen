@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { DialogRoot, DialogPortal, DialogOverlay, DialogContent, DialogTitle, DialogDescription, DialogClose } from 'reka-ui';
-import { ArrowLeft, ArrowUpRight, Check, ChevronDown, Clapperboard, Copy, Download, Film, FolderOpen, Grid2X2, HardDrive, Link2, List, LoaderCircle, Music2, PanelLeftClose, PanelLeftOpen, Play, RefreshCw, Scissors, Search, ShieldCheck, Users, X } from 'lucide-vue-next';
+import { ArrowLeft, ArrowUpRight, Check, ChevronDown, Clapperboard, Copy, Download, Film, FolderOpen, Grid2X2, HardDrive, Link2, List, LoaderCircle, Music2, PanelLeftClose, PanelLeftOpen, Play, RefreshCw, Scissors, Search, ShieldCheck, Trash2, Users, X } from 'lucide-vue-next';
 import { toast } from 'vue-sonner';
 import WorkspaceHeader from '@/components/shell/WorkspaceHeader.vue';
 import LoginGate from '@/components/shell/LoginGate.vue';
@@ -13,15 +13,20 @@ import { clipsApi } from '@/lib/clips';
 import { copyTimeline, timelineDuration } from '@/lib/clip-timeline';
 import { audioExport, exportLabel, exportOptions } from '@/lib/clip-export';
 import { studioApi } from '@/lib/studio/api';
+import { dataTransferApi } from '@/lib/data-transfer-api';
+import { useConfirmation } from '@/composables/useConfirmation';
 import { useIdentityStore } from '@/stores/identity';
 import type { ClipDraft, ClipExport, ClipRecording, ClipSettings, ClipWorkspace } from '../../../shared/clips';
+import type { TransferSelection } from '../../../shared/data-transfer';
 import '@/styles/clips.css';
 import '@/styles/recording-library.css';
 
 type Collection = 'recordings' | 'mine' | 'team' | 'exports';
 const identity = useIdentityStore(), route = useRoute(), router = useRouter();
+const { confirmAction } = useConfirmation();
 const workspace = ref<ClipWorkspace | null>(null), loading = ref(false), error = ref('');
-const search = ref(''), filter = ref<'all' | 'ready'>('all'), recovering = ref(''), copying = ref(''), cancelling = ref('');
+const search = ref(''), filter = ref<'all' | 'ready'>('all'), recovering = ref(''), copying = ref(''), cancelling = ref(''), deleting = ref('');
+const storageOpen = ref(false), storageLoading = ref(false), storageError = ref(''), storagePath = ref(''), stationPath = ref(''), backupPath = ref('');
 const sidebarOpen = ref(true), view = ref<'grid' | 'list'>('grid'), order = ref<'recent' | 'name'>('recent'), searchField = ref<HTMLInputElement | null>(null);
 const newProjectOpen = ref(false), newProjectSearch = ref(''), newProjectField = ref<HTMLInputElement | null>(null);
 const collection = computed<Collection>(() => ['mine', 'team', 'exports'].includes(String(route.query.collection)) ? route.query.collection as Collection : 'recordings');
@@ -88,6 +93,38 @@ async function cancelExport(job: ClipExport) {
   catch (cause) { toast.error((cause as Error).message); }
   finally { cancelling.value = ''; }
 }
+async function showStorage() {
+  storageOpen.value = true; storageLoading.value = true; storageError.value = '';
+  try {
+    const value = await studioApi.recordingStorage();
+    storagePath.value = value.recordingsDirectory; stationPath.value = value.stationDirectory; backupPath.value = value.backupDirectory;
+  } catch (cause) { storageError.value = (cause as Error).message; }
+  finally { storageLoading.value = false; }
+}
+async function copyStoragePath() {
+  try { await navigator.clipboard.writeText(storagePath.value); toast.success('Recording folder path copied.'); }
+  catch { toast.error('Could not copy the path. Select and copy it instead.'); }
+}
+async function deleteRecording(recording: ClipRecording) {
+  if (!identity.me?.isAdmin || deleting.value) return;
+  deleting.value = recording.id;
+  const selection: TransferSelection = { bibles: [], songs: [], presentations: [], media: [], scenes: [], recordings: [recording.id], setlists: [], clips: [], settings: false };
+  let token = '';
+  try {
+    const review = await dataTransferApi.previewClear(selection); token = review.token;
+    if (review.blockers.length) { toast.error(review.blockers[0]); return; }
+    const confirmed = await confirmAction({
+      title: 'Delete recording?',
+      description: `“${recording.name}” will be removed from Recordings.`,
+      note: 'A recovery copy stays in station backups, so this will not free disk space yet. Saved projects using this recording must be removed first.',
+      confirmLabel: 'Delete recording', tone: 'danger',
+    });
+    if (!confirmed) return;
+    await dataTransferApi.clear(token, 'CLEAR'); token = '';
+    await load(true); toast.success('Recording removed. A recovery copy is in station backups.');
+  } catch (cause) { toast.error((cause as Error).message); }
+  finally { if (token) void dataTransferApi.discardClear(token).catch(() => {}); deleting.value = ''; }
+}
 function recordingActions(recording: ClipRecording): LibraryAction[] {
   const actions: LibraryAction[] = [];
   if (recording.status === 'complete') actions.push(
@@ -97,6 +134,7 @@ function recordingActions(recording: ClipRecording): LibraryAction[] {
     { label: 'Copy recording link', icon: Link2, run: () => { void copyLink(editorUrl(recording.id)); } },
   );
   else if (['interrupted', 'error'].includes(recording.status) && identity.can('*', 'author')) actions.push({ label: 'Recover recording', icon: RefreshCw, disabled: !!recovering.value, run: () => { void recover(recording.id); } });
+  if (identity.me?.isAdmin && !['starting', 'recording', 'stopping', 'finalizing'].includes(recording.status)) actions.push({ label: 'Delete recording', icon: Trash2, disabled: !!deleting.value, run: () => { void deleteRecording(recording); } });
   return actions;
 }
 function projectActions(draft: ClipDraft): LibraryAction[] { return [
@@ -128,7 +166,7 @@ onBeforeUnmount(() => { sequence++; if (timer) clearInterval(timer); window.remo
         <div class="library-sidebar-bottom"><div class="library-station-health" :class="{ protected: workspace?.liveProtected }"><ShieldCheck :size="16" /><div><strong>{{ workspace?.liveProtected ? 'Live production active' : 'Production stays separate' }}</strong><p>{{ workspace?.liveProtected ? 'Edit freely. Exports wait until Studio is idle.' : 'Your edits never change the live Program.' }}</p></div></div><div class="library-storage"><HardDrive :size="14" /><span>{{ workspace?.recordings.length ?? 0 }} recordings · {{ size(storedBytes) }}</span></div><div class="library-user"><span><img src="/images/lumen-profile-abstract.png" alt="" width="29" height="29" /></span><div><strong>{{ identity.me?.displayName || identity.me?.username }}</strong><small>Your editing workspace</small></div></div></div>
       </aside>
       <section class="library-main" aria-label="Media library">
-        <header class="library-main-header"><div><div class="library-breadcrumb"><FolderOpen :size="13" /><span>Library</span><span>/</span><span>{{ titles[collection] }}</span></div><h1>{{ titles[collection] }}</h1><p>{{ descriptions[collection] }}</p></div><div class="library-main-actions"><button class="clip-icon-button" :disabled="loading" aria-label="Refresh recordings" title="Refresh library" @click="load()"><RefreshCw :size="15" :class="{ 'clip-spin': loading }" /></button><button v-if="readyCount && collection !== 'exports'" class="clip-button clip-button-primary" @click="newProjectSearch = ''; newProjectOpen = true"><Scissors :size="14" />New project</button></div></header>
+        <header class="library-main-header"><div><div class="library-breadcrumb"><FolderOpen :size="13" /><span>Library</span><span>/</span><span>{{ titles[collection] }}</span></div><h1>{{ titles[collection] }}</h1><p>{{ descriptions[collection] }}</p></div><div class="library-main-actions"><button v-if="collection === 'recordings' && identity.me?.isAdmin" class="clip-button" @click="showStorage"><HardDrive :size="14" />Storage</button><button class="clip-icon-button" :disabled="loading" aria-label="Refresh recordings" title="Refresh library" @click="load()"><RefreshCw :size="15" :class="{ 'clip-spin': loading }" /></button><button v-if="readyCount && collection !== 'exports'" class="clip-button clip-button-primary" @click="newProjectSearch = ''; newProjectOpen = true"><Scissors :size="14" />New project</button></div></header>
         <div class="library-toolbar">
           <div v-if="collection === 'recordings'" class="library-tabs" aria-label="Filter recordings"><button :aria-pressed="filter === 'all'" :class="{ active: filter === 'all' }" @click="filter = 'all'">All recordings <span>{{ workspace?.recordings.length ?? 0 }}</span></button><button :aria-pressed="filter === 'ready'" :class="{ active: filter === 'ready' }" @click="filter = 'ready'">Ready to edit <span>{{ readyCount }}</span></button></div>
           <div v-else class="library-collection-count">{{ totalCount }} {{ collection === 'exports' ? 'exports' : 'projects' }}<span v-if="collection === 'exports' && activeExports">{{ activeExports }} in progress</span></div>
@@ -155,7 +193,7 @@ onBeforeUnmount(() => { sequence++; if (timer) clearInterval(timer); window.remo
             <div v-else class="library-card-preview"><span v-if="audioExport(exportOptions(job).container)" class="library-no-preview"><Music2 :size="32" :stroke-width="1.2" /></span><RecordingThumbnail v-else-if="recordingFor(job.recordingId)" :recording="recordingFor(job.recordingId)!" /><span v-else class="library-no-preview"><Film :size="27" /></span><span class="library-export-file">{{ exportLabel(job) }}</span><span class="clip-thumbnail-duration library-output-duration">{{ projectDuration(job.settings) }}</span></div>
             <div class="library-card-details"><div class="library-card-title"><h2>{{ job.name }}</h2><a v-if="job.status === 'complete'" :href="clipsApi.download(job.id)" class="clip-icon-button" :aria-label="`Download export ${job.name}`" :title="`Download ${exportLabel(job)}`"><Download :size="16" /></a><button v-else-if="job.canCancel && isActive(job)" class="clip-icon-button" :disabled="!!cancelling" :aria-label="`Cancel export ${job.name}`" title="Cancel export" @click="cancelExport(job)"><X :size="15" /></button></div><div class="library-card-summary"><span>{{ exportLabel(job) }} · {{ audioExport(exportOptions(job).container) ? 'Audio' : exportOptions(job).resolution }}</span><i /><span>{{ date(job.createdAt) }}</span><i />{{ projectDuration(job.settings) }}<span v-if="job.status === 'complete'">· {{ size(job.bytes) }}</span></div><div v-if="isActive(job)" class="library-export-progress" role="progressbar" :aria-label="`Export progress ${job.name}`" :aria-valuenow="Math.round(job.progress * 100)" aria-valuemin="0" aria-valuemax="100"><span :style="{ width: `${Math.max(0, Math.min(100, job.progress * 100))}%` }" /></div><p v-if="job.error" class="library-card-error">{{ job.error }}</p><div class="library-card-footer"><span class="library-export-status" :class="`library-export-status-${job.status}`"><LoaderCircle v-if="isActive(job)" :size="12" :class="{ 'clip-spin': job.status === 'exporting' }" /><Check v-else-if="job.status === 'complete'" :size="12" />{{ exportStatus(job) }}</span><RouterLink :to="editorUrl(job.recordingId, job.draftId)" class="library-open-project" :aria-label="`Open project for ${job.name}`" title="Open source project"><ArrowUpRight :size="14" /></RouterLink></div></div>
           </article></div>
-          <footer v-if="visibleCount" class="library-results-footer"><span>{{ visibleCount }} {{ collection === 'recordings' ? 'recordings' : collection === 'exports' ? 'exports' : 'projects' }}{{ visibleCount !== totalCount ? ` of ${totalCount}` : '' }}</span><span><ShieldCheck :size="12" />Originals stay untouched</span></footer>
+          <footer v-if="visibleCount" class="library-results-footer"><span>{{ visibleCount }} {{ collection === 'recordings' ? 'recordings' : collection === 'exports' ? 'exports' : 'projects' }}{{ visibleCount !== totalCount ? ` of ${totalCount}` : '' }}</span><span><ShieldCheck :size="12" />Edits leave originals unchanged</span></footer>
         </div>
       </section>
     </div>
@@ -164,6 +202,17 @@ onBeforeUnmount(() => { sequence++; if (timer) clearInterval(timer); window.remo
         <div class="library-picker-heading"><div><DialogTitle class="library-picker-title">Start a project</DialogTitle><DialogDescription class="library-picker-description">Choose a recording to open in the editor. Your original stays untouched.</DialogDescription></div><DialogClose class="clip-icon-button library-picker-close" aria-label="Close recording picker"><X :size="17" /></DialogClose></div>
         <label class="library-search library-picker-search"><Search :size="15" /><input ref="newProjectField" v-model="newProjectSearch" aria-label="Find a recording for your project" placeholder="Find a recording…" /></label>
         <div class="library-picker-recordings"><RouterLink v-for="recording in availableRecordings" :key="recording.id" :to="editorUrl(recording.id)" class="library-picker-recording" @click="newProjectOpen = false"><RecordingThumbnail :recording="recording" /><span><strong>{{ recording.name }}</strong><small>{{ date(recording.createdAt) }} · {{ duration(recording.durationMs) }}</small></span><ArrowUpRight :size="15" /></RouterLink><p v-if="!availableRecordings.length" class="library-picker-no-results">No matching recordings. Try another name.</p></div>
+      </DialogContent></DialogPortal>
+    </DialogRoot>
+    <DialogRoot v-model:open="storageOpen">
+      <DialogPortal><DialogOverlay class="library-picker-overlay" /><DialogContent class="library-picker library-storage-dialog">
+        <div class="library-picker-heading"><div><DialogTitle class="library-picker-title">Recording storage</DialogTitle><DialogDescription class="library-picker-description">Originals are saved on this station.</DialogDescription></div><DialogClose class="clip-icon-button library-picker-close" aria-label="Close storage details"><X :size="17" /></DialogClose></div>
+        <p v-if="storageLoading" class="library-storage-message">Finding the recording folder…</p>
+        <p v-else-if="storageError" class="library-storage-message" role="alert">{{ storageError }}</p>
+        <template v-else><div class="library-storage-location"><span>Recording folder</span><code>{{ storagePath }}</code><button class="clip-button" @click="copyStoragePath"><Copy :size="13" />Copy path</button></div>
+          <p class="library-storage-help">To change it, close Lumen, move the entire station folder to the new location, set <code>LUMEN_DATA_DIR</code> to that folder’s full path, then reopen Lumen. Keep the folder structure together so saved projects still find their recordings.</p>
+          <small class="library-storage-station">Station folder: {{ stationPath }}<br />Recovery backups: {{ backupPath }}</small>
+        </template>
       </DialogContent></DialogPortal>
     </DialogRoot>
   </main>
