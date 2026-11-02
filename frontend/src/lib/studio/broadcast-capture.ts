@@ -2,12 +2,14 @@
 // tracks or the independent recording encoder.
 import type { BroadcastProfile } from '../../../../shared/broadcast';
 
+export function streamVideoBitrate(profile: BroadcastProfile) { return profile === '720p' ? 2_500_000 : 4_500_000; }
+
 export function broadcastCaptureSettings(profile: BroadcastProfile) {
   return { profile, width: profile === '720p' ? 1280 : 1920, height: profile === '720p' ? 720 : 1080,
     frameRate: 30, videoBitsPerSecond: profile === '720p' ? 3_000_000 : 6_000_000, audioBitsPerSecond: 192_000 };
 }
 export function broadcastRecorderOptions(profile: BroadcastProfile, supports = (mime: string) => MediaRecorder.isTypeSupported(mime)): MediaRecorderOptions {
-  // The managed transport is WebM. Never fall back to a costly VP9 encoder.
+  // The compatibility transport is WebM. Never fall back to a costly VP9 encoder.
   const mimeType = ['video/webm;codecs=vp8,opus', 'video/webm;codecs=vp8'].find(supports);
   if (!mimeType) throw new Error('This renderer cannot encode the Program stream with VP8.');
   const { videoBitsPerSecond, audioBitsPerSecond } = broadcastCaptureSettings(profile);
@@ -73,6 +75,7 @@ export class BroadcastVideoSource {
 
 export interface BroadcastCaptureRecorder {
   readonly state: string;
+  readonly videoEncoder?: string;
   ondataavailable: ((event: { data: Blob }) => void) | null;
   onerror: (() => void) | null;
   start(timeslice: number): void;
@@ -99,9 +102,19 @@ interface Capture {
 export class ProgramBroadcastCapture {
   private current: Capture | null = null;
   constructor(private options: BroadcastCaptureOptions) {}
+  get videoEncoder() { return this.current?.recorder.videoEncoder ?? null; }
   get activeId() { return this.current?.id ?? null; }
   get queuedBytes() { return this.current?.queued ?? 0; }
-  get settings() { return this.current?.settings ?? null; }
+  get settings() {
+    const active = this.current;
+    if (!active) return null;
+    const mode = active.recorder.videoEncoder;
+    if (mode === 'worker-hardware' || mode === 'worker-software') {
+      return { ...active.settings, videoBitsPerSecond: streamVideoBitrate(active.settings.profile),
+        audioBitsPerSecond: 48000 * 2 * 16, audioCodec: 'pcm-s16' };
+    }
+    return active.settings;
+  }
   start(id: string, source: MediaStream | (() => BroadcastCaptureSource), profile: BroadcastProfile = '1080p') {
     if (this.current?.id === id) return;
     this.stop();

@@ -88,7 +88,7 @@ export interface ClipTransferAccess {
 }
 
 interface ActiveWork { kind: 'poster' | 'export' | 'preview'; id: string; process: MediaProcess | null; reason: 'live' | 'cancel' | 'shutdown' | null; done: Promise<void> }
-export async function createClips(options: { dir: string; recordings: RecordingStore; isLive: () => boolean }) {
+export async function createClips(options: { dir: string; recordings: RecordingStore; isLive: () => boolean; isStreaming?: () => boolean }) {
   const { dir, recordings, isLive } = options;
   await fs.mkdir(dir, { recursive: true });
   const exportsDir = path.join(dir, 'exports');
@@ -187,7 +187,26 @@ export async function createClips(options: { dir: string; recordings: RecordingS
   const userFor = (req: Request) => (req as Request & { user: SessionUser }).user;
   const editable = (ownerId: string, user: SessionUser) => ownerId === user.id || user.isAdmin;
   const draftFor = (draft: SavedDraft, user: SessionUser): ClipDraft => ({ ...draft, canEdit: editable(draft.ownerId, user) });
-  const exportFor = (job: SavedExport, user: SessionUser): ClipExport => ({ ...structuredClone(job), posterReady: exportPosterReady.has(job.id) && !unavailableExport(job), canCancel: unsettled(job) && editable(job.ownerId, user) });
+  function exportWaitMessage(): string | null {
+    if (transferHolds) return 'Your export will start automatically when station data transfer finishes.';
+    if (!protectedNow()) return null;
+    if (options.isStreaming?.()) return 'A stream is live. After the service, end the stream, finish any recording and stop the Studio engine. Your export will start automatically.';
+    const recordingsOnStation = recordings.list();
+    if (recordingsOnStation.some(item => ['starting', 'recording'].includes(item.status))) {
+      return 'Studio is recording. After the service, finish recording and stop the Studio engine. Your export will start automatically.';
+    }
+    if (recordingsOnStation.some(item => ['stopping', 'finalizing'].includes(item.status))) {
+      return 'The recording is being saved. Your export starts automatically once it is saved and the Studio engine stops.';
+    }
+    if (!isLive()) return 'Studio is preparing for live production. Your export will start automatically when Studio is idle.';
+    return 'The Studio engine is running. When you finish using the live outputs, choose Stop engine in Studio. Your export will start automatically.';
+  }
+  const exportFor = (job: SavedExport, user: SessionUser): ClipExport => ({
+    ...structuredClone(job),
+    ...(job.status === 'waiting-live' && { waitMessage: exportWaitMessage() ?? 'Your export will start automatically when its turn comes.' }),
+    posterReady: exportPosterReady.has(job.id) && !unavailableExport(job),
+    canCancel: unsettled(job) && editable(job.ownerId, user),
+  });
   function recording(id: string) {
     const item = recordings.list().find(value => value.id === id);
     if (!item) throw new ClipError(404, 'Recording not found.');
@@ -528,7 +547,7 @@ export async function createClips(options: { dir: string; recordings: RecordingS
       drafts: data.drafts.map(value => draftFor(value, user)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
       exports: data.exports.map(value => exportFor(value, user)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
       assets: assets.list(),
-      liveProtected, blockReason: liveProtected ? 'Live production is protected. Exports and thumbnail processing resume when the engine and recording have stopped.' : null,
+      liveProtected, blockReason: exportWaitMessage(),
     };
     res.setHeader('Cache-Control', 'no-store'); res.json(workspace);
     void tick().catch(() => {});

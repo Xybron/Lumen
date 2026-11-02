@@ -82,8 +82,9 @@ export async function createProduction(rendererOptions: Pick<RendererOriginOptio
     router.use((_req, res) => res.status(503).json({ error: 'Output sharing is unavailable. Check the private output settings and station storage; existing files were preserved.' }));
     return { router, async close() {} };
   });
+  const broadcasting = () => ['starting', 'live', 'stopping'].includes(broadcast?.snapshot().session?.state ?? '');
   const clips = await createClips({
-    dir: path.join(DATA_DIR, 'clips'), recordings,
+    dir: path.join(DATA_DIR, 'clips'), recordings, isStreaming: broadcasting,
     // Keep heavy post-production work out of the live renderer's resource
     // budget, including startup, a stranded renderer and recording recovery.
     isLive: () => !!browser || !!launchTask || recoveryRequests > 0 || status.state === 'starting' || status.state === 'running'
@@ -114,7 +115,6 @@ export async function createProduction(rendererOptions: Pick<RendererOriginOptio
     if (dependencies.localWatch) { await clips.close(); hub.close(); throw error; }
     return null;
   });
-  const broadcasting = () => ['starting', 'live', 'stopping'].includes(broadcast?.snapshot().session?.state ?? '');
   function broadcastService() {
     if (!broadcast) throw new ProductionError(503, 'Go Live is unavailable. Existing settings are preserved. Check station storage and relay configuration.');
     return broadcast;
@@ -317,10 +317,10 @@ export async function createProduction(rendererOptions: Pick<RendererOriginOptio
     else await broadcastService().stopDestination(id);
     res.json(broadcastSnapshot());
   }));
-  router.put('/studio/engine/broadcast/:id/chunks/:sequence', requireEngine, raw({ type: 'application/octet-stream', limit: '8mb' }), asyncRoute(async (req, res) => {
+  router.put('/studio/engine/broadcast/:id/chunks/:sequence', requireEngine, raw({ type: ['application/octet-stream', 'video/x-matroska'], limit: '8mb' }), asyncRoute(async (req, res) => {
     const sequence = z.coerce.number().int().min(0).max(99999999).parse(req.params.sequence);
     if (!Buffer.isBuffer(req.body) || !req.body.length) throw new ProductionError(400, 'Empty stream chunk.');
-    await broadcastService().chunk(String(req.params.id), sequence, req.body); res.json({ ok: true });
+    await broadcastService().chunk(String(req.params.id), sequence, req.body, !!req.is('video/x-matroska')); res.json({ ok: true });
   }));
   router.post('/studio/engine/broadcast/:id/error', requireEngine, asyncRoute(async (req, res) => {
     const input = z.object({ error: z.string().max(500) }).strict().parse(req.body);

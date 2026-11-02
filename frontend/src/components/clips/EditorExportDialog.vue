@@ -7,7 +7,7 @@ import { formatClipTime } from '@/lib/clip-timeline';
 import { chooseClipDestination, clipDeliveryFilename, destinationLabel, supportsClipSavePicker, type ClipDestination } from '@/lib/clip-delivery';
 import type { ClipExportOptions, ClipFormat } from '../../../../shared/clips';
 
-const props = defineProps<{ open: boolean; name: string; format: ClipFormat; duration: number; liveProtected: boolean; disabled: boolean; error?: string }>();
+const props = defineProps<{ open: boolean; name: string; format: ClipFormat; duration: number; waitMessage?: string | null; disabled: boolean; error?: string }>();
 const emit = defineEmits<{ 'update:open': [open: boolean]; export: [options: ClipExportOptions, destination: ClipDestination] }>();
 const options = reactive<ClipExportOptions>(defaultExportOptions());
 const destination = shallowRef<ClipDestination | null>(null), picking = ref(false), destinationError = ref('');
@@ -38,10 +38,10 @@ function useBrowserDownloads() { destination.value = { kind: 'download', name: c
         <label class="clip-field"><span>Resolution<span v-if="audioOnly">Not used for audio</span></span><select v-model="options.resolution" aria-label="Export resolution" :disabled="disabled || picking || audioOnly"><option value="1080p">1080p · Full HD</option><option value="720p">720p · Smaller file</option></select></label>
         <div class="nle-export-destination"><div><span>Save to</span><strong data-testid="export-destination">{{ destination ? destinationLabel(destination) : pickerSupported ? 'Choose a location on this device' : 'Browser download' }}</strong><small>{{ destination?.kind === 'file' ? 'The completed file goes directly to your chosen location.' : destination?.kind !== 'download' && pickerSupported ? 'A system save dialog lets you choose the folder and filename.' : 'Your browser chooses the folder or asks where to save. Lumen cannot verify browser downloads.' }}</small></div><button v-if="pickerSupported" class="clip-button" type="button" :disabled="disabled || picking" aria-label="Choose export save location" @click="chooseLocation"><LoaderCircle v-if="picking" :size="14" class="clip-spin" /><FolderOpen v-else :size="14" />{{ destination ? 'Change' : 'Choose' }}</button></div>
         <dl class="nle-export-details"><div><dt>{{ audioOnly ? 'Audio' : 'Frame size' }}</dt><dd>{{ audioOnly ? choice.description : exportDimensions(format, options) }}</dd></div><div v-if="!audioOnly"><dt>Frame rate</dt><dd>30 fps</dd></div><div><dt>Includes</dt><dd>{{ audioOnly ? 'Mixed timeline audio and fades' : 'Picture, transitions and mixed audio' }}</dd></div></dl>
-        <p class="nle-export-safety"><ShieldCheck :size="15" /><span>{{ liveProtected ? 'Live production is protected. Rendering waits until Studio is idle.' : 'Your original and live production stay untouched.' }} Temporary render files are removed after a confirmed save, or expire after 24 hours if not saved.</span></p>
+        <p class="nle-export-safety"><ShieldCheck :size="15" /><span>{{ waitMessage || 'Your original recording is preserved.' }} Temporary render files are removed after a confirmed save, or expire after 24 hours if not saved.</span></p>
         <p v-if="destinationError || error" class="nle-export-error" role="alert">{{ destinationError || error }}</p>
         <button v-if="destinationError && pickerSupported" class="clip-button" type="button" :disabled="disabled || picking" @click="useBrowserDownloads"><Download :size="14" />Use browser Downloads instead</button>
-        <footer><button class="clip-button" type="button" :disabled="disabled || picking" @click="emit('update:open', false)">Keep editing</button><button class="clip-button clip-button-primary" type="submit" :disabled="disabled || picking"><LoaderCircle v-if="disabled || picking" :size="14" class="clip-spin" /><Download v-else :size="14" />Start export</button></footer>
+        <footer><button class="clip-button" type="button" :disabled="disabled || picking" @click="emit('update:open', false)">Keep editing</button><button class="clip-button clip-button-primary" type="submit" :disabled="disabled || picking"><LoaderCircle v-if="disabled || picking" :size="14" class="clip-spin" /><Download v-else :size="14" />{{ waitMessage ? 'Queue export' : 'Start export' }}</button></footer>
       </form>
     </DialogContent>
   </Dialog>

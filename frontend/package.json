@@ -17,6 +17,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-vue-next": "^0.453.0",
+    "mediabunny": "1.65.0",
     "motion": "^11.11.10",
     "pinia": "^2.2.4",
     "reka-ui": "^2.9.6",

@@ -99,9 +99,13 @@ async function processProfile() {
   if (process.platform !== 'win32' && processes.length) cpu = await new Promise(resolve => { const child = spawn('ps', ['-p', processes.map(value => value.pid).join(','), '-o', 'pid=,pcpu='], { stdio: ['ignore', 'pipe', 'ignore'] }), chunks = []; const timer = setTimeout(() => { child.kill('SIGKILL'); resolve('CPU sample timed out'); }, 1500); child.stdout.on('data', chunk => chunks.push(chunk)); child.once('error', () => { clearTimeout(timer); resolve('CPU sampling unavailable'); }); child.once('close', code => { clearTimeout(timer); const value = Buffer.concat(chunks).toString().trim(); resolve(code === 0 && value ? value : 'CPU sampling unavailable'); }); });
   const profile = { note: 'Diagnostic process lifetime CPU percentages, not a cross-machine benchmark. Receiver processes exist only in this local test.', capture: diagnostics.renderer?.broadcast?.capture, encoder: diagnostics.broadcast?.encoder, processes, cpu };
   await fs.writeFile(path.join(directory, 'broadcast-process-profile.json'), JSON.stringify(profile, null, 2));
-  assert.deepEqual(profile.capture && { profile: profile.capture.profile, width: profile.capture.width, height: profile.capture.height, frameRate: profile.capture.frameRate, videoBitsPerSecond: profile.capture.videoBitsPerSecond, audioBitsPerSecond: profile.capture.audioBitsPerSecond }, { profile: '720p', width: 1280, height: 720, frameRate: 30, videoBitsPerSecond: 3000000, audioBitsPerSecond: 192000 }, '720p streaming input avoids a redundant 1080p/6Mbps software capture');
-  assert.ok(['videotoolbox', 'mediafoundation', 'software'].includes(profile.encoder));
+  const workerEncoded = profile.encoder === 'worker-h264';
+  assert.deepEqual(profile.capture && { profile: profile.capture.profile, width: profile.capture.width, height: profile.capture.height, frameRate: profile.capture.frameRate, videoBitsPerSecond: profile.capture.videoBitsPerSecond, audioBitsPerSecond: profile.capture.audioBitsPerSecond }, { profile: '720p', width: 1280, height: 720, frameRate: 30, videoBitsPerSecond: workerEncoded ? 2500000 : 3000000, audioBitsPerSecond: workerEncoded ? 1536000 : 192000 }, '720p streaming input avoids a redundant 1080p/6Mbps software capture');
+  assert.ok(['worker-h264', 'videotoolbox', 'mediafoundation', 'software'].includes(profile.encoder));
+  if (process.env.LUMEN_EXPECT_BROADCAST_WORKER === '1') assert.equal(profile.encoder, 'worker-h264', 'dedicated worker delivers H.264');
+  if (profile.encoder === 'worker-h264') assert.equal(processes.find(p => p.kind === 'encoder')?.codec, 'copy', 'FFmpeg passes worker video through without a second video encode');
   assert.equal(stats.spawned.filter(value => value.kind === 'encoder').length, 1, 'YouTube, Facebook and Watch share exactly one actual encoder, excluding capability probes');
+  if (process.env.LUMEN_FIXTURE_BLOCK_WORKER === '1') assert.equal(profile.capture.videoEncoder, 'compatibility');
   return profile;
 }
 
@@ -226,12 +230,12 @@ try {
   await until(async () => await dialog(page).locator('.broadcast-program-monitor video').evaluate(video => video.readyState >= 2 && video.muted && video.videoWidth > 100), 'Reopening Go Live automatically reconnects the muted Program preview');
   watchPage = await viewer.newPage(); watchPage.on('pageerror', error => errors.push(error.message)); watchPage.on('request', request => publicRequests.push(request.url())); watchPage.on('console', message => { if (['error', 'warning'].includes(message.type())) publicConsole.push(message.text()); }); await watchPage.bringToFront(); await watchPage.goto(`${relayOrigin}/watch/live`);
   await publicPixel('red');
-  const platforms = await Promise.all(['youtube', 'facebook'].map(name => verifyPlatform(name, 1)));
   const profile = await processProfile();
+  const platforms = await Promise.all(['youtube', 'facebook'].map(name => verifyPlatform(name, 1)));
   assert.equal(await watchPage.locator('video').evaluate(video => !window.Hls?.isSupported() || video.currentSrc.startsWith('blob:')), true, 'A capable MSE player is preferred over Chromium’s unreliable native HLS maybe claim');
   const energy = await verifyHlsAudio(); await watchPage.screenshot({ path: path.join(directory, 'broadcast-independent-public-live.png'), fullPage: true });
   assert.equal((await viewer.request.get(`${relayOrigin}/api/studio`)).status(), 404); assert.equal((await anonymous.request.get(`${base}/api/studio/broadcast`)).status(), 401);
-  checks.push(`Both real loopback RTMPS/FLV destinations plus HLS decode 720p H.264/AAC and stereo Main audio (${energy.map(value => value.toFixed(3)).join('/')}) with zero retries, one shared encode and an actual 720p/3Mbps input; automatic muted monitor releases/reconnects`);
+  checks.push(`Both real loopback RTMPS/FLV destinations plus HLS decode 720p H.264/AAC and stereo Main audio (${energy.map(value => value.toFixed(3)).join('/')}) with zero retries, one shared encode and a 720p streaming input; automatic muted monitor releases/reconnects`);
   await command({ type: 'take', sceneId: 'blue_program' }); await publicPixel('blue'); const switched = await production(); assert.equal(switched.mainAudioSourceId, before.mainAudioSourceId); assert.deepEqual(switched.sources, before.sources); await verifyHlsAudio();
   await dialog(page).getByRole('button', { name: 'Stop Lumen Watch destination', exact: true }).click();
   await until(async () => (await snapshot()).session.watch.state === 'stopped', 'destination-only stop is honest'); assert.equal((await status()).recording.id, recordingId);
@@ -250,6 +254,7 @@ try {
   assert.equal((await status()).recording.id, recordingId); assert.equal((await status()).state, 'running'); await until(async () => (await (await fetch(`${relayOrigin}/api/watch/live`)).json()).status === 'offline', 'independent public relay visibly goes Offline');
   assert.deepEqual(await production(), switched);
   checks.push('Non-admin Studio operators can end a session but cannot change credentials; Keep recording is the default and leaves the same recording and engine running');
+  await json(await admin.request.put(`${base}/api/studio/broadcast/config`, { data: { profile: '1080p' } }));
   await unifiedSetup(operatorPage, 'Operator setup after ending the stream');
   await dialog(operatorPage).getByLabel('Record with stream', { exact: true }).uncheck();
   await dialog(operatorPage).getByRole('button', { name: 'Review stream', exact: true }).click();
@@ -259,6 +264,10 @@ try {
   assert.equal(await dialog(operatorPage).locator('.broadcast-program-monitor video').count(), 0, 'Entering confirmation releases the automatic monitor');
   await dialog(operatorPage).getByRole('button', { name: 'Go Live', exact: true }).click();
   await until(async () => (await snapshot()).session.watch.state === 'live', 'second session reuses the already-running local recording', 60000); assert.equal((await status()).recording.id, recordingId);
+  const fullSize = await until(async () => (await fixtureStats()).receivers.find(value => value.name === 'youtube' && value.number === 2 && value.bytes > 10000), '1080p platform receives media');
+  const fullProbe = await ff(['-hide_banner', '-i', path.join(directory, 'local-rtmps', fullSize.filename), '-t', '0.1', '-f', 'null', '-']);
+  assert.match(fullProbe.diagnostics, /Video: h264[^\n]*1920x1080/);
+  assert.match(fullProbe.diagnostics, /Audio: aac[^\n]*stereo/);
   await dialog(operatorPage).getByRole('button', { name: 'End stream', exact: true }).click(); await dialog(operatorPage).getByRole('radio', { name: 'Stop recording when ending stream', exact: true }).check(); await dialog(operatorPage).getByRole('button', { name: 'End stream', exact: true }).click();
   await until(async () => (await snapshot()).session.state === 'stopped' && !(await status()).recording, 'explicit stop-both ends the recording without stopping Studio');
   const recording = await until(async () => (await recordingList()).find(value => value.id === recordingId && value.status === 'complete'), 'independent local recording finalizes', 60000);

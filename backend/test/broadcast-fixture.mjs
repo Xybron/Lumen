@@ -90,6 +90,12 @@ app.get('/__fixture/broadcast', requireSession, async (_request, response) => {
 });
 app.use('/media/incoming', (_request, response) => response.status(404).end());
 app.use('/media', express.static(MEDIA_DIR, { fallthrough: false }));
+// Exercise the station compatibility path without changing production code.
+if (process.env.LUMEN_FIXTURE_BLOCK_WORKER === '1') {
+  app.get(/^\/assets\/broadcast-encoder\.worker-.*\.js$/, (_req, res) => {
+    res.type('application/javascript').send("self.onmessage = () => self.postMessage('error')");
+  });
+}
 app.use(express.static(FRONTEND_DIST)); app.get('*', (_request, response) => response.sendFile(path.join(FRONTEND_DIST, 'index.html')));
 await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
 console.log(JSON.stringify({ phase: 'broadcast-fixture-ready', base, relayOrigin }));

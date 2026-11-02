@@ -75,7 +75,7 @@ test('real shared encode fans out to FLV and independent HLS while a failed dest
   t.after(async () => { await service.close(); await fs.rm(dir, { recursive: true, force: true }); });
   await service.configure({ profile: '720p', watch: { enabled: true }, destinations: [{ id: 'youtube', enabled: true, streamKey: 'private-YT-key' }, { id: 'facebook', enabled: true, streamKey: 'private-FB-key?private-query=123' }] });
   assert.equal(service.preflight().estimatedUploadKbps, Math.ceil(2660 * 3 * 1.15));
-  const attempts = await Promise.allSettled([service.start(), service.start()]); assert.equal(attempts.filter(result => result.status === 'fulfilled').length, 1); assert.equal(encodeCount, 1);
+  const attempts = await Promise.allSettled([service.start(), service.start()]); assert.equal(attempts.filter(result => result.status === 'fulfilled').length, 1); assert.equal(encodeCount, 0, 'encoding starts with the first valid chunk');
   const session = service.snapshot().session!; assert.equal(session.state, 'starting'); assert.equal(session.watch.state, 'connecting'); assert.ok(session.id.startsWith('broadcast_'));
   await assert.rejects(service.configure({ profile: '1080p' }), { status: 409 });
   await assert.rejects(service.chunk(session.id, 2, bytes.subarray(0, 10)), { status: 409 });

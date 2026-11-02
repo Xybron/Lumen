@@ -119,6 +119,7 @@ export interface ClipExport {
   deliveredAt?: string;
   expiredAt?: string;
   posterReady?: boolean;
+  waitMessage?: string;
   canCancel: boolean;
 }
 export interface ClipWorkspace {

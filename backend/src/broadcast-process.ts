@@ -9,6 +9,7 @@ export const BROADCAST_CHUNK_LIMIT = 8 * 1024 * 1024;
 export const BROADCAST_SINK_LIMIT = 2 * 1024 * 1024;
 export type BroadcastSpawn = (file: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
 export type BroadcastEncoder = 'videotoolbox' | 'mediafoundation' | 'software';
+export type StreamEncoder = BroadcastEncoder | 'worker-h264';
 export type BroadcastFailureCode = 'protocol' | 'certificate' | 'publish-rejected' | 'network' | 'encoder' | 'input' | 'storage' | 'backpressure' | 'unknown';
 /** Fixed-token streaming classifier: only integer match positions and a code
  * survive a callback. No diagnostic line, URL, key or query is retained. */
@@ -58,16 +59,19 @@ export interface BroadcastProcess {
   failure(): BroadcastFailureCode;
   terminate(): Promise<void>;
 }
-export function broadcastEncoderArguments(profile: BroadcastProfile, encoder: BroadcastEncoder = 'software'): string[] {
+export function broadcastEncoderArguments(profile: BroadcastProfile, encoder: StreamEncoder = 'software'): string[] {
   const [width, height, bitrate] = profile === '1080p' ? [1920, 1080, 4500] : [1280, 720, 2500];
-  return ['-hide_banner', '-nostdin', '-loglevel', 'error', '-threads', '2', '-fflags', '+genpts',
-    '-protocol_whitelist', 'pipe', '-format_whitelist', 'matroska,webm', '-probesize', '1048576', '-analyzeduration', '1000000', '-i', 'pipe:0',
-    '-map', '0:v:0', '-map', '0:a:0', '-sn', '-dn', '-filter_threads', '1',
+  const video = encoder === 'worker-h264' ? ['-c:v', 'copy', '-bsf:v', 'h264_mp4toannexb'] : [
+    '-filter_threads', '1',
     '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1`,
     ...(encoder === 'videotoolbox' ? ['-c:v', 'h264_videotoolbox', '-allow_sw', '0', '-realtime', '1', '-constant_bit_rate', '1', '-bf', '0']
       : encoder === 'mediafoundation' ? ['-c:v', 'h264_mf', '-hw_encoding', '1', '-scenario', 'live_streaming', '-rate_control', 'cbr', '-bf', '0']
         : ['-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency', '-x264-params', 'nal-hrd=cbr:force-cfr=1']),
-    '-profile:v', 'high', '-pix_fmt', encoder === 'mediafoundation' ? 'nv12' : 'yuv420p', '-r', '30', '-b:v', `${bitrate}k`, '-minrate', `${bitrate}k`, '-maxrate', `${bitrate}k`, '-bufsize', `${bitrate * 2}k`, '-g', '60', '-keyint_min', '60', '-sc_threshold', '0',
+    '-profile:v', 'high', '-pix_fmt', encoder === 'mediafoundation' ? 'nv12' : 'yuv420p', '-r', '30', '-b:v', `${bitrate}k`, '-minrate', `${bitrate}k`, '-maxrate', `${bitrate}k`, '-bufsize', `${bitrate * 2}k`, '-g', '60', '-keyint_min', '60', '-sc_threshold', '0'];
+  return ['-hide_banner', '-nostdin', '-loglevel', 'error', '-threads', '2', '-fflags', '+genpts',
+    '-protocol_whitelist', 'pipe', '-format_whitelist', 'matroska,webm', '-probesize', '1048576', '-analyzeduration', '1000000', '-i', 'pipe:0',
+    '-map', '0:v:0', '-map', '0:a:0', '-sn', '-dn',
+    ...video,
     '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-ac', '2', '-max_muxing_queue_size', '128', '-threads', '2',
     '-map_metadata', '-1', '-progress', 'pipe:3', '-stats_period', '0.5', '-nostats', '-mpegts_flags', '+resend_headers',
     '-muxdelay', '0', '-muxpreload', '0', '-flush_packets', '1', '-f', 'mpegts', 'pipe:1'];

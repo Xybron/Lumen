@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import ffmpeg from 'ffmpeg-static';
 import type { BroadcastConfigInput, BroadcastDestinationId, BroadcastPreflight, BroadcastSession, BroadcastSinkStatus, BroadcastSnapshot } from '../../shared/broadcast.js';
-import { BROADCAST_CHUNK_LIMIT, BROADCAST_INPUT_LIMIT, broadcastEncoderArguments, broadcastHlsArguments, broadcastRtmpBridgeArguments, broadcastFailureMessage, broadcastFailureCanRetry, selectBroadcastEncoder, disableBroadcastHardware, spawnBroadcastProcess, timeout, writeBroadcastSink, type BroadcastEncoder, type BroadcastFailureCode, type BroadcastProcess, type BroadcastSpawn } from './broadcast-process.js';
+import { BROADCAST_CHUNK_LIMIT, BROADCAST_INPUT_LIMIT, broadcastEncoderArguments, broadcastHlsArguments, broadcastRtmpBridgeArguments, broadcastFailureMessage, broadcastFailureCanRetry, selectBroadcastEncoder, disableBroadcastHardware, spawnBroadcastProcess, timeout, writeBroadcastSink, type StreamEncoder, type BroadcastFailureCode, type BroadcastProcess, type BroadcastSpawn } from './broadcast-process.js';
 import { openBroadcastRtmpsTransport, type BroadcastRtmpsTransport, type BroadcastTlsConnect } from './broadcast-rtmps.js';
 
 export class BroadcastError extends Error { constructor(public status: number, message: string) { super(message); } }
@@ -55,8 +55,8 @@ interface Run {
   session: BroadcastSession;
   config: PrivateConfig;
   directory: string;
-  encoder: BroadcastProcess;
-  encoderKind: BroadcastEncoder;
+  encoder: BroadcastProcess | null;
+  encoderKind: StreamEncoder | null;
   sinks: Map<string, Sink>;
   nextChunk: number;
   queuedBytes: number;
@@ -196,8 +196,11 @@ export async function createBroadcast(options: {
     notify(true);
     run.stopTask = (async () => {
       // Finish the encoder first so all sinks can consume its buffered tail.
-      run.encoder.input.end();
-      await timeout(run.encoder.done, 2500).catch(() => run.encoder.terminate());
+      const encoder = run.encoder;
+      if (encoder) {
+        encoder.input.end();
+        await timeout(encoder.done, 2500).catch(() => encoder.terminate());
+      }
       await Promise.all([...run.sinks.values()].map(async sink => {
         sink.stopped = true;
         const child = sink.process; if (!child) { await sink.transport?.close(); sink.transport = null; return; }
@@ -337,7 +340,6 @@ export async function createBroadcast(options: {
       if (closed) throw new BroadcastError(503, 'Streaming service is shutting down.');
       if (current) throw new BroadcastError(409, 'A stream is already in progress.');
       const checks = preflight(); if (!checks.ready) throw new BroadcastError(409, checks.checks.find(c => !c.ok)?.message ?? 'Complete Go Live setup first.');
-      const encoderKind = await selectBroadcastEncoder(config.profile);
       const disk = await fs.statfs(directory); if (disk.bavail * disk.bsize < 256 * 1024 * 1024) throw new BroadcastError(507, 'Free some station storage before going live.');
       const id = `broadcast_${randomUUID()}`, startedAt = Date.now(), sessionDirectory = path.join(directory, id);
       await fs.mkdir(sessionDirectory, { mode: 0o700 });
@@ -346,32 +348,13 @@ export async function createBroadcast(options: {
       const session: BroadcastSession = { id, profile: config.profile, state: 'starting', startedAt: new Date(startedAt).toISOString(), chunks: 0, bytes: 0, destinations, watch };
       let run: Run;
       try {
-        const encoder = spawnBroadcastProcess(broadcastEncoderArguments(config.profile, encoderKind), value => {
-          if (!run || !isRunning(run)) return;
-          if (Number(value.frame) > 0) run.encoded = true; updateLive(run);
-        }, options.spawn);
-        run = { session, config: structuredClone(config), directory: sessionDirectory, encoder, encoderKind, sinks: new Map(), nextChunk: 0, queuedBytes: 0, ingest: Promise.resolve(),
+        run = { session, config: structuredClone(config), directory: sessionDirectory, encoder: null, encoderKind: null, sinks: new Map(), nextChunk: 0, queuedBytes: 0, ingest: Promise.resolve(),
           stopping: false, stopTask: null, encoded: false, inputAt: 0, outputAt: 0, startedAt, watchController: new AbortController(), watchBusy: false, relayStarted: false, relayEpoch: randomUUID(), relayPublished: '', relayRetryAt: 0 };
         current = run;
         for (const status of [...destinations, watch]) {
           const sink: Sink = { status, process: null, retry: null, stopped: status.state === 'disabled', starting: false, backpressureAt: 0, failures: 0, healthyAt: 0, transport: null }; run.sinks.set(status.id, sink);
           if (!sink.stopped) launchSink(run, sink);
         }
-        encoder.output.on('data', (bytes: Buffer) => {
-          if (current !== run) return;
-          run.outputAt = Date.now();
-          for (const sink of run.sinks.values()) {
-            const child = sink.process; if (!child || sink.stopped) continue;
-            if (!writeBroadcastSink(child.input, bytes)) { loseSink(run, sink, child, 'backpressure'); continue; }
-            sink.status.bytes += bytes.length;
-            if (child.input.writableNeedDrain) sink.backpressureAt ||= Date.now(); else sink.backpressureAt = 0;
-          }
-        });
-        void encoder.done.then(() => {
-          if (!isRunning(run)) return;
-          if (run.encoderKind !== 'software') disableBroadcastHardware(run.session.profile);
-          fatal(run, run.encoderKind !== 'software' ? 'The hardware encoder became unavailable. Restart only the stream to use compatible software; local recording and Studio are unchanged.' : 'The stream encoder stopped. Local recording and Studio remain independent.');
-        });
         notify(true); return structuredClone(session);
       } catch {
         await fs.rm(sessionDirectory, { recursive: true, force: true }).catch(() => {});
@@ -379,7 +362,37 @@ export async function createBroadcast(options: {
       }
     });
   }
-  async function chunk(id: string, sequence: number, bytes: Buffer) {
+  // Choose the pipeline from the first authenticated media chunk. A renderer
+  // can use the compatibility path if its hardware encoder fails to start.
+  async function openEncoder(run: Run, workerEncoded: boolean) {
+    const kind = workerEncoded ? 'worker-h264' : await selectBroadcastEncoder(run.session.profile);
+    if (!isRunning(run)) throw new BroadcastError(409, 'This streaming session has stopped.');
+    const encoder = spawnBroadcastProcess(broadcastEncoderArguments(run.session.profile, kind), value => {
+      if (!isRunning(run)) return;
+      if (Number(value.frame) > 0) run.encoded = true;
+      updateLive(run);
+    }, options.spawn);
+    run.encoder = encoder;
+    run.encoderKind = kind;
+    const usesNativeEncoder = kind === 'mediafoundation' || kind === 'videotoolbox';
+    encoder.output.on('data', (bytes: Buffer) => {
+      if (current !== run) return;
+      run.outputAt = Date.now();
+      for (const sink of run.sinks.values()) {
+        const child = sink.process; if (!child || sink.stopped) continue;
+        if (!writeBroadcastSink(child.input, bytes)) { loseSink(run, sink, child, 'backpressure'); continue; }
+        sink.status.bytes += bytes.length;
+        if (child.input.writableNeedDrain) sink.backpressureAt ||= Date.now(); else sink.backpressureAt = 0;
+      }
+    });
+    void encoder.done.then(() => {
+      if (!isRunning(run)) return;
+      if (usesNativeEncoder) disableBroadcastHardware(run.session.profile);
+      fatal(run, usesNativeEncoder ? 'The hardware encoder became unavailable. Restart only the stream to use compatible software; local recording and Studio are unchanged.' : 'The stream encoder stopped. Local recording and Studio remain independent.');
+    });
+    return encoder;
+  }
+  async function chunk(id: string, sequence: number, bytes: Buffer, workerEncoded = false) {
     const run = current;
     if (!run || id !== run.session.id || !isRunning(run)) throw new BroadcastError(409, 'This streaming session is not accepting media.');
     if (!Number.isInteger(sequence) || sequence < 0 || sequence > 2_147_483_647) throw new BroadcastError(422, 'Invalid stream chunk sequence.');
@@ -391,12 +404,15 @@ export async function createBroadcast(options: {
       if (!isRunning(run)) throw new BroadcastError(409, 'This streaming session has stopped.');
       if (sequence < run.nextChunk) return { nextSequence: run.nextChunk };
       if (sequence !== run.nextChunk) throw new BroadcastError(409, `Expected stream chunk ${run.nextChunk}.`);
-      if (run.encoder.input.destroyed || run.encoder.input.writableLength + bytes.length > BROADCAST_INPUT_LIMIT) throw new BroadcastError(503, 'The stream encoder is not accepting media.');
+      if (run.encoder && (run.encoderKind === 'worker-h264') !== workerEncoded) throw new BroadcastError(409, 'Stream format changed mid-session.');
       try {
-        await timeout(new Promise<void>((resolve, reject) => { run.encoder.input.write(bytes, error => error ? reject(error) : resolve()); }), 8000);
+        const encoder = run.encoder ?? await openEncoder(run, workerEncoded);
+        if (encoder.input.destroyed || encoder.input.writableLength + bytes.length > BROADCAST_INPUT_LIMIT) throw new Error('Encoder input unavailable.');
+        await timeout(new Promise<void>((resolve, reject) => { encoder.input.write(bytes, error => error ? reject(error) : resolve()); }), 8000);
       } catch {
-        if (run.encoderKind !== 'software' && isRunning(run)) disableBroadcastHardware(run.session.profile);
-        fatal(run, run.encoderKind !== 'software' ? 'The hardware encoder stopped accepting media. Restart only the stream to use compatible software; local recording is unchanged.' : 'The stream encoder could not keep up with its input. Local recording continues independently.');
+        const hardwareFailed = run.encoderKind === 'videotoolbox' || run.encoderKind === 'mediafoundation';
+        if (hardwareFailed && isRunning(run)) disableBroadcastHardware(run.session.profile);
+        fatal(run, hardwareFailed ? 'The hardware encoder stopped accepting media. Restart only the stream to use compatible software; local recording is unchanged.' : 'The stream encoder could not keep up with its input. Local recording continues independently.');
         throw new BroadcastError(503, 'Stream media could not be accepted.');
       }
       run.nextChunk++; run.session.chunks++; run.session.bytes += bytes.length; run.inputAt = Date.now(); run.session.lastChunkAt = new Date(run.inputAt).toISOString(); notify();

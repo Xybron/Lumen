@@ -101,9 +101,9 @@ test('diagnostics become only bounded finite codes, including patterns split acr
 });
 
 test('hardware selection requires a real probe and never enables implicit software VideoToolbox fallback', { timeout: 8000 }, async () => {
-  const encoder = await selectBroadcastEncoder('720p'); assert.ok(['software', 'videotoolbox'].includes(encoder));
+  const encoder = await selectBroadcastEncoder('720p'); assert.ok(['software', 'videotoolbox', 'mediafoundation'].includes(encoder));
   const args = broadcastEncoderArguments('720p', encoder);
-  assert.equal(args[args.indexOf('-c:v') + 1], encoder === 'videotoolbox' ? 'h264_videotoolbox' : 'libx264');
+  assert.equal(args[args.indexOf('-c:v') + 1], { videotoolbox: 'h264_videotoolbox', mediafoundation: 'h264_mf', software: 'libx264' }[encoder]);
   if (encoder === 'videotoolbox') assert.equal(args[args.indexOf('-allow_sw') + 1], '0');
 });
 

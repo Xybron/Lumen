@@ -5,6 +5,7 @@ import { StudioSignal, StudioPeer } from '@/lib/studio/signal';
 import { studioRequest } from '@/lib/studio/api';
 import type { ProductionState, StudioSignalMessage, StudioRecording } from '../../../shared/production';
 import { MULTIVIEW_OUTPUT_ID } from '../../../shared/multiview-layout';
+import { StudioBroadcastRecorder } from '@/lib/studio/broadcast-recorder';
 import { ProgramBroadcastCapture } from '@/lib/studio/broadcast-capture';
 import { PROGRAM_MONITOR_OUTPUT_ID } from '../../../shared/program-monitor.js';
 
@@ -17,8 +18,9 @@ const inputOwners = new Map<string, StudioPeer>();
 let recorder: MediaRecorder | null = null;
 let currentRecording: StudioRecording | null = null;
 const broadcast = new ProgramBroadcastCapture({
+  createRecorder: (stream, profile) => new StudioBroadcastRecorder(stream, profile),
   upload: (id, sequence, data, abort) => studioRequest(`/engine/broadcast/${id}/chunks/${sequence}`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: data, signal: abort,
+    method: 'PUT', headers: { 'Content-Type': data.type === 'video/x-matroska' ? data.type : 'application/octet-stream' }, body: data, signal: abort,
   }),
   onFailure: (id, error) => studioRequest(`/engine/broadcast/${id}/error`, {
     method: 'POST', body: JSON.stringify({ error }), signal: AbortSignal.timeout(8000),
@@ -142,7 +144,7 @@ onMounted(async () => {
     (window as unknown as { __lumenDiagnostics: () => Promise<unknown> }).__lumenDiagnostics = async () => ({
       audioState: compositor?.audio.state, audioTime: compositor?.audio.currentTime,
       broadcast: { id: broadcast.activeId, queuedBytes: broadcast.queuedBytes,
-        capture: broadcast.settings ? { ...broadcast.settings, effectiveFrameRate: compositor?.broadcastFrameRate } : null },
+        capture: broadcast.settings ? { ...broadcast.settings, videoEncoder: broadcast.videoEncoder, effectiveFrameRate: compositor?.broadcastFrameRate } : null },
       inputs: [...(compositor?.bank.inputs.values() ?? [])].map(input => ({
         id: input.source.id, kind: input.source.kind, gain: input.gain.gain.value,
         tracks: input.stream?.getTracks().map(t => ({ kind: t.kind, enabled: t.enabled, muted: t.muted, state: t.readyState })),

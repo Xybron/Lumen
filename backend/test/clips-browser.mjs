@@ -92,6 +92,7 @@ try {
   await startServer();
   browser = await chromium.launch({ executablePath: process.env.LUMEN_CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
   admin = await browser.newContext(); teammate = await browser.newContext({ viewport: { width: 1512, height: 982 } }); secondTeammate = await browser.newContext(); anonymous = await browser.newContext();
+  await teammate.addInitScript(() => { Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true }); });
   assert.equal((await admin.request.post(`${base}/api/auth/login`, { data: { username: 'admin', password: 'admin' } })).status(), 200);
   for (const [context, username, displayName] of [[teammate, 'clipeditor', 'Content team'], [secondTeammate, 'othereditor', 'Second teammate']]) {
     await json(await admin.request.post(`${base}/api/users`, { data: { username, displayName, password: 'test-editor-password' } }));
@@ -234,11 +235,12 @@ try {
   await exportDialog.getByLabel('Export resolution', { exact: true }).selectOption('1080p');
   await exportDialog.getByRole('button', { name: 'Start export', exact: true }).click();
   const portraitJob = await until(async () => (await workspace()).exports.find(job => job.draftId === editorDraft.id), 'editor queues its saved snapshot');
-  await page.getByTestId('clip-export-job').filter({ hasText: editorDraft.name }).waitFor();
+  const portraitCard = page.locator(`[data-testid="export-progress-card"][data-job-id="${portraitJob.id}"]`);
+  await portraitCard.waitFor();
   const portraitComplete = await completedExport(portraitJob.id);
   await verifyMp4(portraitComplete, 1080, 1920, 4, 'green');
   const download = page.waitForEvent('download');
-  await page.getByRole('link', { name: `Download MP4 ${editorDraft.name}`, exact: true }).click();
+  await portraitCard.getByRole('button', { name: `Download ${editorDraft.name}`, exact: true }).click();
   assert.match((await download).suggestedFilename(), /\.mp4$/i, 'Completed export downloads from editor');
 
   const remoteDraft = await saveDraft(editorDraft, { name: 'Title acknowledged in another editor window' });
@@ -278,7 +280,7 @@ try {
   await json(await starting);
   await until(async () => (await engineStatus()).state === 'running', 'isolated production engine running', 30000);
   await until(async () => (await engineStatus()).levels.master > .01, 'persistent Main audio remains audible during independent clip work', 20000);
-  const waitingCancel = await exportDraft(updated);
+  const waitingCancel = await json(await teammate.request.post(`${base}/api/clips/drafts/${updated.id}/exports`, { data: { revision: updated.revision, temporary: true } }), 202);
   await page.getByRole('button', { name: `Cancel export ${updated.name}`, exact: true }).click();
   await until(async () => (await workspace()).exports.find(job => job.id === waitingCancel.id)?.status === 'cancelled', 'editor UI cancels a waiting job without touching live production');
   const protectedJob = await exportDraft(updated);
@@ -287,7 +289,8 @@ try {
   await page.reload(); await page.getByTestId('clip-editor').waitFor();
   await page.getByRole('button', { name: 'Export', exact: true }).click();
   const liveExportDialog = page.getByRole('dialog', { name: 'Export your edit', exact: true });
-  await liveExportDialog.getByText(/Live production is protected/).waitFor();
+  await liveExportDialog.getByText(/Stop engine in Studio.*start automatically/).waitFor();
+  await liveExportDialog.getByRole('button', { name: 'Queue export', exact: true }).waitFor();
   await liveExportDialog.getByRole('button', { name: 'Keep editing', exact: true }).click();
   // Simulate a newly-finalized recording whose server poster must wait for
   // production. The visible client decodes one frame, without a server worker.

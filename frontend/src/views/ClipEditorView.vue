@@ -313,9 +313,9 @@ onBeforeUnmount(() => { sequence++; importController?.abort(); pause(); if (poll
         </div></aside>
       </div>
       <EditorTimeline :timeline="timeline" :current="currentMs" :duration="duration" :selected-id="selectedId" :disabled="!editable || busy" :undo-available="undo.length > 0" :redo-available="redo.length > 0" :thumbnail="thumbnail" :height="timelineHeight" @seek="ms => { pause(); seek(ms); }" @select="select" @move="moveItem" @trim="trimItem" @begin="beginGesture" @end="endGesture" @track="trackPatch" @split="split" @remove="remove" @duplicate="duplicate" @undo="undoEdit" @redo="redoEdit" @add-track="addTrack" @height="timelineHeight = $event" @transition="openTransitions" />
-      <footer class="nle-statusbar"><span><ShieldCheck :size="11" />{{ workspace?.liveProtected ? 'Production is protected · Heavy exports wait until idle' : 'Originals protected · Editing is independent of live production' }}</span><span>{{ timeline.tracks.length }} tracks · {{ itemCount() }} clips · {{ time(duration) }}</span></footer>
+      <footer class="nle-statusbar"><span><ShieldCheck :size="11" />{{ workspace?.liveProtected ? 'Exports queued until Studio is idle' : 'Originals protected · Editing is independent of live production' }}</span><span>{{ timeline.tracks.length }} tracks · {{ itemCount() }} clips · {{ time(duration) }}</span></footer>
     </div>
     <input ref="uploadInput" type="file" accept="video/*,image/*,audio/*" multiple hidden aria-label="Import media files" @change="importFiles" />
-    <EditorExportDialog v-model:open="exportDialogOpen" :name="fields.name" :format="fields.format" :duration="duration" :live-protected="!!workspace?.liveProtected" :disabled="busy" :error="error" @export="exportClip" />
+    <EditorExportDialog v-model:open="exportDialogOpen" :name="fields.name" :format="fields.format" :duration="duration" :wait-message="workspace?.blockReason" :disabled="busy" :error="error" @export="exportClip" />
   </main>
 </template>
