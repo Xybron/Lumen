@@ -80,6 +80,9 @@ export class SourceBank {
       let input = this.inputs.get(source.id);
       if (!input) {
         const gain = this.audio.createGain(), delay = this.audio.createDelay(2), analyser = this.audio.createAnalyser();
+        // A new muted player may begin before its first gain ramp completes.
+        // Start every input silent, then apply the saved level below.
+        gain.gain.value = 0;
         analyser.fftSize = 2048;
         delay.connect(gain); gain.connect(analyser);
         input = { source, element: null, stream: null, node: null, gain, delay, analyser, samples: new Float32Array(2048), error: '', playback: new MediaPlayback() };

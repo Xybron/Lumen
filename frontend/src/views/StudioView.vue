@@ -113,7 +113,8 @@ async function inspectLayer() {
   name?.focus({ preventScroll: true });
   name?.select();
 }
-const monitorAudio = ref(false), programReady = ref(false);
+const monitorAudio = ref(false), programReady = ref(false), programAudioReady = ref(false);
+const monitorLabel = computed(() => !monitorAudio.value ? 'Monitor' : !programReady.value ? 'Connecting…' : !programAudioReady.value ? 'Waiting for audio…' : 'Listening');
 const now = ref(Date.now());
 const clock = window.setInterval(() => { now.value = Date.now(); }, 1000);
 const engineRunning = computed(() => studio.status.state === 'running');
@@ -332,8 +333,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keydown));
           <label class="transition-duration"><span>Duration</span><span class="duration-field"><input v-model="fadeDurationInput" type="number" aria-label="Fade duration" min="100" max="3000" step="50" @change="setFadeDuration" /><span>ms</span></span></label>
         </div>
         <section class="monitor-panel program-panel"><div class="monitor-title"><span><span class="tiny-dot" />PROGRAM</span><small>{{ studio.state.program?.name ?? 'Nothing on air yet' }}</small></div>
-          <div class="monitor-frame"><div v-if="!programReady" class="program-empty"><Monitor :size="28" :stroke-width="1.25" /><b>{{ studio.state.program ? engineRunning ? 'Connecting to Program…' : 'Engine offline' : 'No scene on Program' }}</b><p>{{ studio.state.program ? studio.state.program.name : 'Choose a scene, then Cut or Fade to Program.' }}</p></div><StudioMonitor output-id="program" :audible="monitorAudio" @ready="programReady = $event" @blocked="monitorAudio = false" /><span v-if="programReady" class="program-badge"><span />LIVE PROGRAM</span><span v-if="recording && programReady" class="recording-badge">● REC</span></div>
-          <div class="monitor-bottom"><span>{{ recording ? 'Recording Program + master audio' : 'Live composition' }}</span><button :class="{ active: monitorAudio }" @click="monitorAudio = !monitorAudio" :title="monitorAudio ? 'Mute monitoring' : 'Monitor audio — use headphones'"><Headphones :size="12" />{{ monitorAudio ? 'Listening' : 'Monitor' }}</button></div>
+          <div class="monitor-frame"><div v-if="!programReady" class="program-empty"><Monitor :size="28" :stroke-width="1.25" /><b>{{ studio.state.program ? engineRunning ? 'Connecting to Program…' : 'Engine offline' : 'No scene on Program' }}</b><p>{{ studio.state.program ? studio.state.program.name : 'Choose a scene, then Cut or Fade to Program.' }}</p></div><StudioMonitor output-id="program" :audible="monitorAudio" @ready="programReady = $event" @audio-ready="programAudioReady = $event" @blocked="monitorAudio = false" /><span v-if="programReady" class="program-badge"><span />LIVE PROGRAM</span><span v-if="recording && programReady" class="recording-badge">● REC</span></div>
+          <div class="monitor-bottom"><span>{{ recording ? 'Recording Program + master audio' : 'Live composition' }}</span><button :class="{ active: monitorAudio }" @click="monitorAudio = !monitorAudio" :title="monitorAudio ? !programReady ? 'Waiting for Program to connect' : !programAudioReady ? 'Program is connected but audio has not arrived. Check the Main input.' : 'Mute monitoring' : 'Monitor audio — use headphones'"><Headphones :size="12" />{{ monitorLabel }}</button></div>
         </section>
       </div>
       <p class="preview-note"><Lock :size="11" />Edits stay in Preview until you Cut or Fade.</p>

@@ -4,13 +4,41 @@ import { StudioSignal, StudioPeer } from '@/lib/studio/signal';
 import { MULTIVIEW_OUTPUT_ID } from '../../../../shared/multiview-layout';
 import { PROGRAM_MONITOR_OUTPUT_ID } from '../../../../shared/program-monitor.js';
 const props = withDefaults(defineProps<{ outputId: string; audible?: boolean }>(), { audible: false });
-const emit = defineEmits<{ ready: [value: boolean]; blocked: [] }>();
+const emit = defineEmits<{ ready: [value: boolean]; 'audio-ready': [value: boolean]; blocked: [] }>();
 const video = ref<HTMLVideoElement | null>(null);
 const ready = ref(false);
 let signal: StudioSignal | null = null, peer: StudioPeer | null = null;
 let retry: number | undefined;
-function reset() { peer?.close(); peer = null; ready.value = false; emit('ready', false); if (video.value) video.value.srcObject = null; }
-function request() { signal?.send({ t: 'watch', outputId: props.outputId }); }
+let requestedAt = 0, disconnectedAt = 0, observedAudio: MediaStreamTrack | null = null, audioReady = false;
+function updateAudioReady() {
+  const stream = video.value?.srcObject as MediaStream | null;
+  const track = stream?.getAudioTracks().find(item => item.readyState === 'live') ?? null;
+  if (track !== observedAudio) {
+    observedAudio?.removeEventListener('mute', updateAudioReady);
+    observedAudio?.removeEventListener('unmute', updateAudioReady);
+    observedAudio?.removeEventListener('ended', updateAudioReady);
+    observedAudio = track;
+    track?.addEventListener('mute', updateAudioReady);
+    track?.addEventListener('unmute', updateAudioReady);
+    track?.addEventListener('ended', updateAudioReady);
+  }
+  const available = !!track && !track.muted;
+  if (audioReady !== available) { audioReady = available; emit('audio-ready', available); }
+}
+function reset() {
+  peer?.close(); peer = null; disconnectedAt = 0;
+  ready.value = false; emit('ready', false);
+  if (video.value) video.value.srcObject = null;
+  updateAudioReady();
+}
+function request() { requestedAt = performance.now(); signal?.send({ t: 'watch', outputId: props.outputId }); }
+function playMonitor(element: HTMLVideoElement) {
+  void element.play().catch(error => {
+    // Replacing a peer can interrupt an old play() promise. That is not an
+    // autoplay denial and must not silently turn headphone monitoring off.
+    if (video.value === element && (error as DOMException)?.name === 'NotAllowedError') emit('blocked');
+  });
+}
 onMounted(() => {
   signal = new StudioSignal();
   signal.onConnected = request;
@@ -21,20 +49,34 @@ onMounted(() => {
     if (m.t !== 'signal' || m.key !== `out:${props.outputId}` || !m.peerId || !signal) return;
     if (m.description?.type === 'offer') {
       reset(); peer = new StudioPeer(signal, m.peerId, m.key);
-      peer.pc.ontrack = e => {
-        if (video.value) { video.value.srcObject = e.streams[0] ?? new MediaStream([e.track]); void video.value.play().catch(() => emit('blocked')); }
+      const current = peer;
+      current.pc.ontrack = e => {
+        if (peer !== current || !video.value) return;
+        video.value.srcObject = e.streams[0] ?? new MediaStream([e.track]);
+        updateAudioReady();
+        playMonitor(video.value);
       };
-      peer.pc.onconnectionstatechange = () => { if (peer?.pc.connectionState === 'failed') reset(); };
+      current.pc.onconnectionstatechange = () => {
+        if (peer !== current) return;
+        if (['failed', 'closed'].includes(current.pc.connectionState)) { reset(); request(); }
+        else if (current.pc.connectionState === 'disconnected') disconnectedAt ||= performance.now();
+        else disconnectedAt = 0;
+      };
     }
     void peer?.receive(m).catch(() => reset());
   });
   // Re-request a missing stream after an engine restart or a failed ICE exchange.
-  retry = window.setInterval(() => { if (!ready.value && (!peer || ['failed', 'closed', 'disconnected'].includes(peer.pc.connectionState))) request(); }, 3000);
+  retry = window.setInterval(() => {
+    updateAudioReady();
+    const staleOffer = !ready.value && requestedAt > 0 && performance.now() - requestedAt > 9000;
+    const lostConnection = disconnectedAt > 0 && performance.now() - disconnectedAt > 6000;
+    if (staleOffer || lostConnection || (!ready.value && !peer)) { reset(); request(); }
+  }, 3000);
 });
 watch(() => props.outputId, (id, old) => { signal?.send({ t: 'unwatch', outputId: old }); reset(); signal?.send({ t: 'watch', outputId: id }); });
-watch(() => props.audible, async value => { if (video.value) { video.value.muted = !value; try { await video.value.play(); } catch { emit('blocked'); } } });
+watch(() => props.audible, value => { if (video.value) { video.value.muted = !value; playMonitor(video.value); } });
 onBeforeUnmount(() => { clearInterval(retry); reset(); signal?.close(); });
-function playing() { ready.value = true; emit('ready', true); }
+function playing() { ready.value = true; emit('ready', true); updateAudioReady(); }
 defineExpose({ video });
 </script>
 <template><video ref="video" :muted="!audible" autoplay playsinline class="studio-video" :class="{ 'is-ready': ready }" @playing="playing" /></template>

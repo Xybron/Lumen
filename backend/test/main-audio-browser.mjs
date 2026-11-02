@@ -127,6 +127,36 @@ try {
   await page.locator('.audio-panel').scrollIntoViewIfNeeded();
   await mixerRow('main').getByTestId('main-audio-badge').waitFor();
   const baseline = (await status()).levels.master;
+  const studioProgram = page.locator('.program-panel');
+  await until(() => studioProgram.locator('video').evaluate(video => video.readyState >= 2 &&
+    video.srcObject?.getAudioTracks().some(track => track.readyState === 'live' && !track.muted)), 'Studio Program monitor receives live audio');
+  await studioProgram.getByRole('button', { name: 'Monitor', exact: true }).click();
+  await studioProgram.getByRole('button', { name: 'Listening', exact: true }).waitFor();
+  assert.ok(await measure(studioProgram) > .02, 'Studio Program headphone monitor receives the actual Main audio');
+  await studioProgram.getByRole('button', { name: 'Listening', exact: true }).click();
+  // A lost answer used to strand the monitor in "Connecting" indefinitely:
+  // the peer existed, so the old retry condition never requested a new offer.
+  const stalledPage = await context.newPage(); let firstAnswerDropped = false;
+  await stalledPage.routeWebSocket('**/studio/ws', ws => {
+    const server = ws.connectToServer();
+    ws.onMessage(message => {
+      try {
+        const value = JSON.parse(String(message));
+        if (!firstAnswerDropped && value.t === 'signal' && value.key === 'out:program' && value.description?.type === 'answer') {
+          firstAnswerDropped = true; return;
+        }
+      } catch { /* Preserve ordinary signaling frames. */ }
+      server.send(message);
+    });
+  });
+  await stalledPage.goto(`${base}/studio`);
+  await until(() => firstAnswerDropped, 'first Program answer intercepted');
+  const stalledProgram = stalledPage.locator('.program-panel');
+  await stalledProgram.getByRole('button', { name: 'Monitor', exact: true }).click();
+  await stalledProgram.getByRole('button', { name: 'Connecting…', exact: true }).waitFor();
+  await stalledProgram.getByRole('button', { name: 'Listening', exact: true }).waitFor({ timeout: 22000 });
+  assert.ok(await measure(stalledProgram) > .02, 'stalled Program offer retries and restores headphone audio');
+  await stalledPage.close();
   // Hold the replacement command while the old feed is muted. The old
   // source-specific Unmute control must not queue a stale unmute behind it.
   await page.getByRole('button', { name: 'Mute Service mixer', exact: true }).click();
@@ -311,7 +341,7 @@ try {
   for (const output of [program, pinned, projector, preview]) await output.close();
   assert.equal((await request.post(`${base}/api/studio/engine/stop`)).status(), 200);
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ result: 'PASS', artifacts: dir, baseline, recordingPeak: peak, checks: ['compact Output footer in dedicated Audio panel', 'per-source mixer Main actions with scene persistence', 'read-only Sources Main badge follows replacement and clear', 'Main badge states: ready, muted, disconnected, offline and text-only', 'input status independent of final output mute', 'badge recovers after unmute and healthy input selection', 'disconnected badge takes priority over saved input mute', 'single persistent route through Cut/Fade', 'Program, pinned output and recording audio', 'all outputs succeed ICE and receive actual RTP without capture permissions or mDNS resolution', 'silent Preview and projector', 'muted new uploads', 'replacement and master mute', 'in-flight switch/mute safety', 'text-only channels excluded with legacy warning', 'no fallback on disconnect', 'three desktop columns and 390px stacked panels without overflow', 'selection persists after reload and engine stop', 'all open outputs automatically reconnect and recover correct audio after engine restart'] }, null, 2));
+  console.log(JSON.stringify({ result: 'PASS', artifacts: dir, baseline, recordingPeak: peak, checks: ['compact Output footer in dedicated Audio panel', 'per-source mixer Main actions with scene persistence', 'read-only Sources Main badge follows replacement and clear', 'Main badge states: ready, muted, disconnected, offline and text-only', 'input status independent of final output mute', 'badge recovers after unmute and healthy input selection', 'disconnected badge takes priority over saved input mute', 'single persistent route through Cut/Fade', 'Studio headphone monitor receives Main audio and recovers from a lost connection answer', 'Program, pinned output and recording audio', 'all outputs succeed ICE and receive actual RTP without capture permissions or mDNS resolution', 'silent Preview and projector', 'muted new uploads', 'replacement and master mute', 'in-flight switch/mute safety', 'text-only channels excluded with legacy warning', 'no fallback on disconnect', 'three desktop columns and 390px stacked panels without overflow', 'selection persists after reload and engine stop', 'all open outputs automatically reconnect and recover correct audio after engine restart'] }, null, 2));
 } catch (error) {
   await page?.screenshot({ path: path.join(dir, 'failure.png'), fullPage: true }).catch(() => {});
   const diagnostics = {
