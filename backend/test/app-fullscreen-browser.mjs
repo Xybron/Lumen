@@ -34,22 +34,42 @@ try {
   await page.goto(`${base}/studio`);
   await page.getByRole('heading', { name: 'Production Studio' }).waitFor();
   assert.ok((await context.request.post(`${base}/api/studio/engine/start`)).ok());
-  const preview = page.locator('.preview-panel'), previewButton = preview.getByRole('button', { name: 'Fullscreen Preview', exact: true });
-  await until(() => preview.locator('video').evaluate(video => video.videoWidth > 0 && video.readyState >= 2), 'Preview receives a live picture');
-  await preview.locator('video').evaluate(video => { window.originalPreviewStream = video.srcObject; });
-  const initialProgram = (await (await context.request.get(`${base}/api/studio`)).json()).program;
+  const studioState = async () => (await context.request.get(`${base}/api/studio`)).json();
+  const draft = await studioState();
+  assert.ok((await context.request.post(`${base}/api/studio/command`, { data: { revision: draft.revision, command: { type: 'take', sceneId: 'scene_close' } } })).ok());
+  const initialState = await studioState();
+  const preview = page.locator('.preview-panel'), program = page.locator('.program-panel');
+  const previewButton = preview.getByRole('button', { name: 'Fullscreen Preview', exact: true });
   await page.getByRole('button', { name: 'Enter fullscreen', exact: true }).click();
   await until(() => page.evaluate(() => document.fullscreenElement === document.documentElement), 'Studio enters fullscreen');
-  await previewButton.click();
-  await until(() => preview.evaluate(panel => document.fullscreenElement === panel), 'Preview fills the screen inside app fullscreen');
-  const size = await preview.locator('.monitor-frame').boundingBox();
-  assert.ok(size.width > 1000 && Math.abs(size.width / size.height - 16 / 9) < .015, 'Large picture preserves its aspect ratio');
-  assert.equal(await preview.locator('video').evaluate(video => video.srcObject === window.originalPreviewStream && !video.paused), true, 'Fullscreen uses the same playing feed');
-  await page.keyboard.press('Tab');
-  assert.equal(await preview.evaluate(panel => panel.contains(document.activeElement)), true, 'Preview focus stays away from live controls');
-  await preview.getByRole('button', { name: 'Exit Preview fullscreen' }).click();
-  await until(() => page.evaluate(() => document.fullscreenElement === document.documentElement), 'Closing Preview restores fullscreen Studio');
-  assert.deepEqual((await (await context.request.get(`${base}/api/studio`)).json()).program, initialProgram);
+  for (const [name, monitor] of [['Preview', preview], ['Program', program]]) {
+    const video = monitor.locator('video'), picture = monitor.locator('.monitor-picture');
+    const button = monitor.getByRole('button', { name: 'Fullscreen ' + name, exact: true });
+    await until(() => video.evaluate(media => media.videoWidth > 0 && media.readyState >= 2), name + ' receives a live picture');
+    await video.evaluate(media => { window.originalMonitorStream = media.srcObject; });
+    const muted = await video.evaluate(media => media.muted);
+    await page.mouse.move(0, 0);
+    const opacity = () => button.evaluate(el => getComputedStyle(el).opacity);
+    await until(async () => await opacity() === '0', name + ' has no overlay at rest');
+    await picture.hover();
+    await until(async () => await opacity() === '1', name + ' reveals fullscreen on hover');
+    const frame = await picture.boundingBox(), icon = await button.boundingBox();
+    assert.ok(Math.abs(frame.x + frame.width - icon.x - icon.width - 8) < 1 && Math.abs(icon.y - frame.y - 8) < 1, name + ' control sits inside the top-right corner');
+    await page.mouse.move(0, 0);
+    await page.keyboard.press('Tab'); await button.focus();
+    await until(async () => await opacity() === '1', name + ' also reveals fullscreen for the keyboard');
+    await page.keyboard.press('Enter');
+    await until(() => monitor.evaluate(panel => document.fullscreenElement === panel), name + ' fills the screen inside app fullscreen');
+    const size = await monitor.locator('.monitor-frame').boundingBox();
+    assert.ok(size.width > 1000 && Math.abs(size.width / size.height - 16 / 9) < .015, 'Large picture preserves its aspect ratio');
+    assert.equal(await video.evaluate(media => media.srcObject === window.originalMonitorStream && !media.paused), true, name + ' keeps its playing feed');
+    assert.equal(await video.evaluate(media => media.muted), muted, name + ' keeps its audio setting');
+    await page.keyboard.press('Tab');
+    assert.equal(await monitor.evaluate(panel => panel.contains(document.activeElement)), true, 'Focus stays away from transition controls');
+    await monitor.getByRole('button', { name: 'Exit ' + name + ' fullscreen' }).click();
+    await until(() => page.evaluate(() => document.fullscreenElement === document.documentElement), 'Closing monitor restores fullscreen Studio');
+    assert.deepEqual(await studioState(), initialState, 'Fullscreen preserves Preview, Program and the production revision');
+  }
 
   await page.getByRole('button', { name: 'Add channel' }).click();
   await page.getByRole('menuitem', { name: 'Presentation' }).click();
@@ -67,7 +87,7 @@ try {
   await until(() => page.evaluate(() => document.fullscreenElement === document.documentElement), 'Fullscreen survives channel to Studio navigation');
   await page.getByRole('button', { name: 'Exit fullscreen', exact: true }).click();
   await until(() => page.evaluate(() => document.fullscreenElement === null), 'Studio button exits fullscreen entered on channel');
-  await previewButton.click(); await preview.getByRole('button', { name: 'Exit Preview fullscreen' }).waitFor();
+  await preview.locator('.monitor-picture').hover(); await previewButton.click(); await preview.getByRole('button', { name: 'Exit Preview fullscreen' }).waitFor();
   await page.keyboard.press('Escape');
   await until(() => page.evaluate(() => document.fullscreenElement === null), 'Escape returns to the docked Preview');
 
@@ -81,9 +101,9 @@ try {
   const refresh = () => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
   await refresh();
   await page.locator('.broadcast-trigger').getByText('Live controls').waitFor();
-  await previewButton.click();
+  await program.locator('.monitor-picture').hover(); await program.getByRole('button', { name: 'Fullscreen Program', exact: true }).click();
   session.destinations[0].state = 'retrying'; session.destinations[0].retries = 1;
-  const alert = preview.locator('.stream-alert');
+  const alert = program.locator('.stream-alert');
   await alert.getByText(/YouTube is reconnecting.*Facebook/).waitFor(); // picked up by normal polling
   await alert.getByRole('button', { name: 'Stream controls' }).click();
   const panel = page.getByRole('dialog', { name: 'Go Live', exact: true });
@@ -105,9 +125,23 @@ try {
   await viewer.goto(`${base}/studio/output/program`);
   assert.equal(await viewer.locator('.stream-alert').count(), 0, 'Operator notices do not appear on the public output');
   await viewer.close();
+  const touch = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 }, storageState: await context.storageState() });
+  const phone = await touch.newPage();
+  await phone.goto(`${base}/studio`);
+  for (const name of ['Preview', 'Program']) {
+    const button = phone.getByRole('button', { name: 'Fullscreen ' + name, exact: true });
+    await button.waitFor();
+    const box = await button.boundingBox();
+    assert.ok(box.width >= 44 && box.height >= 44);
+    assert.equal(await button.evaluate(el => getComputedStyle(el).opacity), '1', name + ' is visible without touch hover');
+    await button.tap();
+    await phone.getByRole('button', { name: 'Exit ' + name + ' fullscreen' }).tap();
+    await until(() => phone.evaluate(() => document.fullscreenElement === null), 'Tap restores docked Studio');
+  }
+  await touch.close();
   await context.request.post(`${base}/api/studio/engine/stop`);
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ result: 'PASS', checks: ['Preview enlarges the existing live feed and restores fullscreen Studio', 'channel navigation preserves app fullscreen', 'destination loss, recovery, station offline and terminal stream alerts', 'fullscreen alerts open controls, dismissal retains header status'] }, null, 2));
+  console.log(JSON.stringify({ result: 'PASS', checks: ['Preview and Program hover and keyboard controls preserve both live feeds, audio settings and production state; touch controls stay visible', 'channel navigation preserves app fullscreen', 'destination loss, recovery, station offline and terminal stream alerts', 'fullscreen alerts open controls, dismissal retains header status'] }, null, 2));
 } catch (error) {
   await page?.screenshot({ path: path.join(dir, 'failure.png'), fullPage: true }).catch(() => {});
   console.error(error); console.error(logs.slice(-5000)); console.error(`Artifacts: ${dir}`); process.exitCode = 1;

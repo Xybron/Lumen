@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { toast } from 'vue-sonner';
-import { useEventListener, useResizeObserver } from '@vueuse/core';
+import { useResizeObserver } from '@vueuse/core';
 import { Aperture, ArrowRightLeft, Plus, Copy, Trash2, Layers, Camera, Monitor,
   Mic, Image, Film, Music2, Presentation, Lock, Volume2, VolumeX, Circle, Square as StopIcon,
   FolderOpen, LoaderCircle, Power, ChevronRight, Headphones, CircleHelp, RotateCcw, Play, Pause, Repeat, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Maximize2, Minimize2, AlertCircle, Search, X, LayoutGrid, List, Keyboard, Settings2 } from 'lucide-vue-next';
@@ -14,6 +14,7 @@ import BroadcastButton from '@/components/broadcast/BroadcastButton.vue';
 import MobileControlButton from '@/components/mobile/MobileControlButton.vue';
 import ChannelNav from '@/components/shell/ChannelNav.vue';
 import ProgramHealth from '@/components/studio/ProgramHealth.vue';
+import StudioMonitorPanel from '@/components/studio/StudioMonitorPanel.vue';
 import StudioMonitor from '@/components/studio/StudioMonitor.vue';
 import ScenePoster from '@/components/studio/ScenePoster.vue';
 import SourceDialog from '@/components/studio/SourceDialog.vue';
@@ -51,33 +52,6 @@ function addSourceDialog() { propertiesSourceId.value = null; sourceOpen.value =
 function editSourceDialog(source: StudioSource) { propertiesSourceId.value = source.id; sourceOpen.value = true; }
 const sceneShortcutsOpen = ref(false);
 const { isFullscreen, isSupported: fullscreenSupported, toggle: toggleNativeFullscreen } = useAppFullscreen();
-const previewPanel = ref<HTMLElement | null>(null), previewExpand = ref<HTMLButtonElement | null>(null);
-const previewFullscreen = ref(false);
-useEventListener(document, 'fullscreenchange', () => {
-  const wasExpanded = previewFullscreen.value;
-  previewFullscreen.value = !!previewPanel.value && document.fullscreenElement === previewPanel.value;
-  if (wasExpanded !== previewFullscreen.value) previewExpand.value?.focus({ preventScroll: true });
-});
-async function togglePreviewFullscreen() {
-  try {
-    if (previewFullscreen.value) await document.exitFullscreen();
-    else await previewPanel.value?.requestFullscreen();
-  } catch { toast.error('Preview could not enter fullscreen in this window.'); }
-}
-function previewKeys(event: KeyboardEvent) {
-  if (!previewFullscreen.value) return;
-  if (event.key === 'Escape') {
-    event.preventDefault(); event.stopPropagation(); void togglePreviewFullscreen();
-  } else if (event.key === 'Tab' && previewPanel.value) {
-    // Only the exit button and any stream alert are actionable in this view.
-    const buttons = [...previewPanel.value.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
-      .filter(button => !button.closest('[inert]') && button.getClientRects().length);
-    if (!buttons.length) return;
-    const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
-    event.preventDefault();
-    buttons[(index + (event.shiftKey ? -1 : 1) + buttons.length) % buttons.length].focus();
-  }
-}
 async function toggleFullscreen() {
   try { await toggleNativeFullscreen(); }
   catch { toast.error('Fullscreen is unavailable in this window. Try opening Lumen in a browser window.'); }
@@ -285,7 +259,7 @@ async function removeOutput(id: string) {
   if (canOperate.value && studio.state?.outputs.some(item => item.id === id)) run(studio.edit(d => { d.outputs = d.outputs.filter(o => o.id !== id); }));
 }
 function keydown(e: KeyboardEvent) {
-  if (previewFullscreen.value) return;
+  if (document.fullscreenElement?.classList.contains('monitor-panel')) return;
   const target = e.target instanceof Element ? e.target : null;
   if (e.defaultPrevented || e.isComposing || e.ctrlKey || e.metaKey || e.altKey ||
     target?.closest('input, textarea, select, a, summary, [contenteditable]:not([contenteditable="false"]), [role="dialog"], [role="menu"], [role="menuitem"]') ||
@@ -352,26 +326,21 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keydown));
       <div v-if="studio.state.channelInsert" class="studio-banner" role="status">An earlier channel override is still on Program. Cut or Fade a Studio scene to return to scene-only control.</div>
       <div v-if="!studio.state.scenes.length && studio.state.program" class="studio-banner studio-clear-program" role="status"><span>Program is still showing the last live scene.</span><button class="s-button" @click="clearProgram">Clear Program</button></div>
       <div class="monitors-grid">
-        <section ref="previewPanel" class="monitor-panel preview-panel" :role="previewFullscreen ? 'dialog' : undefined"
-          :aria-modal="previewFullscreen || undefined" aria-label="Studio Preview" @keydown="previewKeys">
-          <div class="monitor-title"><span><span class="tiny-dot" />PREVIEW</span><small>{{ selected?.name ?? 'Choose a scene' }}<i v-if="liveEdited">Unpublished edits</i></small>
-            <button v-if="fullscreenSupported" ref="previewExpand" type="button" class="s-icon preview-expand" :aria-pressed="previewFullscreen"
-              :aria-label="previewFullscreen ? 'Exit Preview fullscreen' : 'Fullscreen Preview'" :title="previewFullscreen ? 'Exit Preview fullscreen' : 'Fullscreen Preview'" @click="togglePreviewFullscreen">
-              <Minimize2 v-if="previewFullscreen" :size="15" /><Maximize2 v-else :size="15" /><span v-if="previewFullscreen">Exit fullscreen</span>
-            </button>
-          </div>
-          <StudioCanvas :inert="previewFullscreen" :scene="selected" :sources="studio.state.sources" :engine-running="engineRunning" @inspect="inspectLayer" />
-          <div class="monitor-bottom"><span>Draft · 1920 × 1080</span><button v-if="sceneAnimationDuration" class="scene-rehearsal-button" :aria-label="scenePreviewPlaying ? 'Pause scene animation preview' : 'Preview scene animations'" title="Rehearse all element animations locally" @click="previewSceneAnimations"><Pause v-if="scenePreviewPlaying" :size="11" /><Play v-else :size="11" />{{ scenePreviewPlaying ? 'Pause' : 'Rehearse' }}</button><span>16:9</span></div>
-        </section>
+        <StudioMonitorPanel label="Preview" class="preview-panel">
+          <template #scene>{{ selected?.name ?? 'Choose a scene' }}<i v-if="liveEdited">Unpublished edits</i></template>
+          <template #default="{ fullscreen }"><StudioCanvas :inert="fullscreen" :scene="selected" :sources="studio.state.sources" :engine-running="engineRunning" @inspect="inspectLayer" /></template>
+          <template #footer><span>Draft · 1920 × 1080</span><button v-if="sceneAnimationDuration" class="scene-rehearsal-button" :aria-label="scenePreviewPlaying ? 'Pause scene animation preview' : 'Preview scene animations'" title="Rehearse all element animations locally" @click="previewSceneAnimations"><Pause v-if="scenePreviewPlaying" :size="11" /><Play v-else :size="11" />{{ scenePreviewPlaying ? 'Pause' : 'Rehearse' }}</button><span>16:9</span></template>
+        </StudioMonitorPanel>
         <div class="transition-controls" role="group" aria-label="Scene transitions">
           <button class="transition-button" aria-label="Cut" aria-keyshortcuts="Space" title="Cut and swap Preview / Program — Space" :disabled="!canTake" @click="take('cut')"><span>Cut<ArrowRightLeft :size="14" /></span><kbd aria-hidden="true">Space</kbd></button>
           <button class="transition-button fade-button" aria-label="Fade" aria-keyshortcuts="Shift+Space" title="Fade and swap Preview / Program — Shift + Space" :disabled="!canTake" @click="take('fade')"><span>Fade<ArrowRightLeft :size="14" /></span><kbd aria-hidden="true">⇧ Space</kbd></button>
           <label class="transition-duration"><span>Duration</span><span class="duration-field"><input v-model="fadeDurationInput" type="number" aria-label="Fade duration" min="100" max="3000" step="50" @change="setFadeDuration" /><span>ms</span></span></label>
         </div>
-        <section class="monitor-panel program-panel"><div class="monitor-title"><span><span class="tiny-dot" />PROGRAM</span><small>{{ studio.state.program?.name ?? 'Nothing on air yet' }}</small></div>
+        <StudioMonitorPanel label="Program" class="program-panel">
+          <template #scene>{{ studio.state.program?.name ?? 'Nothing on air yet' }}</template>
           <div class="monitor-frame"><div v-if="!programReady" class="program-empty"><Monitor :size="28" :stroke-width="1.25" /><b>{{ studio.state.program ? engineRunning ? 'Connecting to Program…' : 'Engine offline' : 'No scene on Program' }}</b><p>{{ studio.state.program ? studio.state.program.name : 'Choose a scene, then Cut or Fade to Program.' }}</p></div><StudioMonitor output-id="program" compact-program :audible="monitorAudio" @ready="programReady = $event" @audio-ready="programAudioReady = $event" @blocked="monitorAudio = false" /><span v-if="programReady" class="program-badge"><span />LIVE PROGRAM</span><span v-if="recording && programReady" class="recording-badge">● REC</span></div>
-          <div class="monitor-bottom"><ProgramHealth v-if="engineRunning" /><span v-else>{{ recording ? 'Recording Program + master audio' : 'Live composition' }}</span><button :class="{ active: monitorAudio }" @click="monitorAudio = !monitorAudio" :title="monitorAudio ? !programReady ? 'Waiting for Program to connect' : !programAudioReady ? 'Program is connected but audio has not arrived. Check the Main input.' : 'Mute monitoring' : 'Monitor audio — use headphones'"><Headphones :size="12" />{{ monitorLabel }}</button></div>
-        </section>
+          <template #footer><ProgramHealth v-if="engineRunning" /><span v-else>{{ recording ? 'Recording Program + master audio' : 'Live composition' }}</span><button :class="{ active: monitorAudio }" @click="monitorAudio = !monitorAudio" :title="monitorAudio ? !programReady ? 'Waiting for Program to connect' : !programAudioReady ? 'Program is connected but audio has not arrived. Check the Main input.' : 'Mute monitoring' : 'Monitor audio — use headphones'"><Headphones :size="12" />{{ monitorLabel }}</button></template>
+        </StudioMonitorPanel>
       </div>
       <p class="preview-note"><Lock :size="11" />Edits stay in Preview until you Cut or Fade.</p>
 
