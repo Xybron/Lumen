@@ -190,7 +190,7 @@ test('Multiview inspects channel video/images without activating always-audio or
   assert.equal(bank.multiviewVideos.size, 0); assert.equal(held.pauses, 0);
   // Once Program independently activates the matching URL, observe its exact
   // media element/time. Closing Multiview must not pause that owned player.
-  (input as any).channelItemKey = 'media/backgrounds/current.mp4'; held.src = '/media/backgrounds/current.mp4';
+  (input as any).channelItemKey = 'film:media/backgrounds/current.mp4'; held.src = '/media/backgrounds/current.mp4';
   view = bank.multiviewView(ids);
   assert.equal(view.inputs.get(source.id).element, held);
   assert.equal(created.length, 3);

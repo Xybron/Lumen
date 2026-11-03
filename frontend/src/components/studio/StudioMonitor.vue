@@ -3,7 +3,7 @@ import { onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { StudioSignal, StudioPeer } from '@/lib/studio/signal';
 import { MULTIVIEW_OUTPUT_ID } from '../../../../shared/multiview-layout';
 import { PROGRAM_MONITOR_OUTPUT_ID } from '../../../../shared/program-monitor.js';
-const props = withDefaults(defineProps<{ outputId: string; audible?: boolean }>(), { audible: false });
+const props = withDefaults(defineProps<{ outputId: string; audible?: boolean; compactProgram?: boolean }>(), { audible: false });
 const emit = defineEmits<{ ready: [value: boolean]; 'audio-ready': [value: boolean]; blocked: [] }>();
 const video = ref<HTMLVideoElement | null>(null);
 const ready = ref(false);
@@ -31,7 +31,7 @@ function reset() {
   if (video.value) video.value.srcObject = null;
   updateAudioReady();
 }
-function request() { requestedAt = performance.now(); signal?.send({ t: 'watch', outputId: props.outputId }); }
+function request() { requestedAt = performance.now(); signal?.send({ t: 'watch', outputId: props.outputId, compactProgram: props.compactProgram }); }
 function playMonitor(element: HTMLVideoElement) {
   void element.play().catch(error => {
     // Replacing a peer can interrupt an old play() promise. That is not an
@@ -73,7 +73,7 @@ onMounted(() => {
     if (staleOffer || lostConnection || (!ready.value && !peer)) { reset(); request(); }
   }, 3000);
 });
-watch(() => props.outputId, (id, old) => { signal?.send({ t: 'unwatch', outputId: old }); reset(); signal?.send({ t: 'watch', outputId: id }); });
+watch(() => props.outputId, (_id, old) => { signal?.send({ t: 'unwatch', outputId: old }); reset(); request(); });
 watch(() => props.audible, value => { if (video.value) { video.value.muted = !value; playMonitor(video.value); } });
 onBeforeUnmount(() => { clearInterval(retry); reset(); signal?.close(); });
 function playing() { ready.value = true; emit('ready', true); updateAudioReady(); }

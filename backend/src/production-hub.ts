@@ -7,7 +7,7 @@ import { PROGRAM_MONITOR_OUTPUT_ID } from '../../shared/program-monitor.js';
 
 interface Peer {
   id: string; ws: WebSocket; engine: boolean; operator: boolean; signedIn: boolean;
-  watching: Set<string>; publishing: Set<string>; alive: boolean;
+  watching: Map<string, boolean>; publishing: Set<string>; alive: boolean;
   outputScope?: string;
   outputAudioEnabled?: boolean;
   mobileProgram?: boolean;
@@ -78,14 +78,14 @@ export class ProductionHub {
     let signedIn = false;
     try { if (!outputScope) { const user = userFromCookieHeader(req.headers.cookie); signedIn = !!user; operator = !!user && userCan(user, '*', 'author'); } } catch { /* anonymous output */ }
     const peer: Peer = { id: randomUUID(), ws, engine: !outputScope && this.isEngine(req), operator, signedIn,
-      watching: new Set(outputScope ? [outputScope] : []), publishing: new Set(), alive: true, ...(outputScope ? { outputScope } : {}), ...(mobileProgram ? { mobileProgram: true } : {}) };
+      watching: new Map(outputScope ? [[outputScope, false]] : []), publishing: new Set(), alive: true, ...(outputScope ? { outputScope } : {}), ...(mobileProgram ? { mobileProgram: true } : {}) };
     if (peer.engine && this.engine) { ws.close(1008, 'Renderer already connected'); return; }
     this.peers.set(peer.id, peer);
     this.send(peer, { t: 'connected', peerId: peer.id, state: this.state(), status: this.status() });
     if (peer.engine) {
       this.engine = peer;
       for (const p of this.peers.values()) {
-        for (const outputId of p.watching) this.send(peer, { t: 'watch', peerId: p.id, key: `out:${outputId}`, outputId });
+        for (const [outputId, compactProgram] of p.watching) this.send(peer, { t: 'watch', peerId: p.id, key: `out:${outputId}`, outputId, compactProgram });
         for (const sourceId of p.publishing) {
           this.send(peer, { t: 'publish', peerId: p.id, key: `in:${sourceId}`, sourceId });
           this.send(p, { t: 'publish-ready', peerId: peer.id, key: `in:${sourceId}`, sourceId });
@@ -112,8 +112,9 @@ export class ProductionHub {
           const allowed = peer.outputScope ? m.outputId === peer.outputScope : ['preview', 'multiview', PROGRAM_MONITOR_OUTPUT_ID].includes(m.outputId) ? peer.operator :
             m.outputId === 'program' ? peer.signedIn : this.state().outputs.some(o => o.id === m.outputId);
           if (!allowed) return;
-          peer.watching.add(m.outputId);
-          this.engineSend({ t: 'watch', peerId: peer.id, outputId: m.outputId, key: `out:${m.outputId}` });
+          const compactProgram = peer.operator && m.outputId === 'program' && m.compactProgram === true;
+          peer.watching.set(m.outputId, compactProgram);
+          this.engineSend({ t: 'watch', peerId: peer.id, outputId: m.outputId, key: `out:${m.outputId}`, compactProgram });
         } else if (m.t === 'unwatch' && typeof m.outputId === 'string') {
           peer.watching.delete(m.outputId);
           this.engineSend({ t: 'unwatch', peerId: peer.id, key: `out:${m.outputId}` });

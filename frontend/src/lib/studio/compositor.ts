@@ -7,6 +7,7 @@ import { layoutChannelOverlay, type ChannelOverlayLayout } from './channel-overl
 import { blendProgramPictures, programPictureSources, withProgramInsert, type ProgramPicture } from './program-picture';
 import { outputAudioEnabled, sourceAudioWeight } from './audio-routing';
 import { BroadcastVideoSource } from './broadcast-capture';
+import { ProgramFrameTiming } from './program-frame-timing';
 import type { BroadcastProfile } from '../../../../shared/broadcast';
 import { PROGRAM_MONITOR_OUTPUT_ID, PROGRAM_MONITOR_WIDTH, PROGRAM_MONITOR_HEIGHT, PROGRAM_MONITOR_FRAME_RATE } from '../../../../shared/program-monitor.js';
 import { MULTIVIEW_OUTPUT_ID, MULTIVIEW_COLUMNS, MULTIVIEW_TILE_WIDTH, MULTIVIEW_TILE_HEIGHT,
@@ -247,8 +248,7 @@ export class StudioCompositor {
   readonly bank = new SourceBank(this.audio);
   private buses = new Map<string, Bus>();
   private timer: number;
-  private frames = 0;
-  private measuredAt = performance.now();
+  readonly timing = new ProgramFrameTiming();
   private masterSamples = new Float32Array(2048);
   private heldMasterLevel = 0;
   private fade: ProgramFade | null = null;
@@ -261,7 +261,6 @@ export class StudioCompositor {
   private multiview: { canvas: HTMLCanvasElement; stream: MediaStream; paintedAt: number } | null = null;
   private programMonitor: { canvas: HTMLCanvasElement; stream: MediaStream; paintedAt: number } | null = null;
   private broadcastVideo: BroadcastVideoSource | null = null;
-  private broadcastOverload = 0;
   private broadcastRecovery = 0;
   constructor(private state: ProductionState) {
     this.animationRuns = new AnimationRunTracker(state);
@@ -273,8 +272,7 @@ export class StudioCompositor {
       // A superseding Take must not treat its saved-but-unready scene as live.
       this.heldProgram = { mix: [], pictures: [{ ...weightedScene(null, 1), inserts: [] }], sources: [] };
     }
-    this.bus('program'); this.bus('preview');
-    for (const output of state.outputs) this.bus(output.id);
+    this.bus('program');
     void this.audio.resume();
     this.timer = window.setInterval(() => this.draw(), 1000 / 30);
     this.draw();
@@ -301,7 +299,8 @@ export class StudioCompositor {
     this.syncSources();
     this.previewPaintedAt = -Infinity;
     if (this.multiview) this.multiview.paintedAt = -Infinity;
-    this.draw();
+    // The next Program tick paints the latest state. A burst of operator
+    // edits should not insert extra full-resolution draws between ticks.
   }
   private previewHasMotion(scene: StudioScene | null) {
     return scene?.layers.some(layer => {
@@ -400,12 +399,23 @@ export class StudioCompositor {
   }
   broadcastStream(profile: BroadcastProfile) {
     this.broadcastVideo?.close();
-    this.broadcastOverload = 0; this.broadcastRecovery = 0;
+    this.broadcastRecovery = 0;
     const video = new BroadcastVideoSource(this.programCanvas, this.bus('program').stream, profile);
     this.broadcastVideo = video;
     return { stream: video.stream, release: () => { video.close(); if (this.broadcastVideo === video) this.broadcastVideo = null; } };
   }
   get broadcastFrameRate() { return this.broadcastVideo?.frameRate ?? null; }
+  get renderedOutputs() { return [...this.buses.keys()]; }
+  releaseOutput(id: string) {
+    if (id === MULTIVIEW_OUTPUT_ID) { this.releaseMultiview(); return; }
+    if (id === PROGRAM_MONITOR_OUTPUT_ID) { this.releaseProgramMonitor(); return; }
+    const bus = this.buses.get(id);
+    if (id === 'program' || !bus) return;
+    this.dispose(bus);
+    bus.canvas.width = bus.canvas.height = 0;
+    this.buses.delete(id);
+    if (id === 'preview') this.previewPaintedAt = -Infinity;
+  }
   releaseProgramMonitor() {
     if (!this.programMonitor) return;
     this.programMonitor.stream.getVideoTracks().forEach(track => track.stop());
@@ -459,14 +469,26 @@ export class StudioCompositor {
     // this usually millisecond-long handoff waits. On restart it starts black.
     if (cueReady) this.paintProgram(now);
     const ids = ['program', 'preview', ...this.state.outputs.map(o => o.id)];
-    for (const [id, bus] of this.buses) {
-      if (!ids.includes(id)) { this.dispose(bus); this.buses.delete(id); }
+    for (const id of this.buses.keys()) {
+      if (!ids.includes(id)) this.releaseOutput(id);
     }
     for (const id of ids) {
       const output = this.state.outputs.find(o => o.id === id);
       const scene = id === 'preview' ? this.state.scenes.find(s => s.id === this.state.previewSceneId) ?? null :
         output?.mode === 'scene' ? output.scene : this.state.program;
-      const bus = this.bus(id);
+      const bus = this.buses.get(id);
+      if (!bus) {
+        // A channel video on Preview or a pinned scene still follows its
+        // playback clock and audio settings when there is no display watching.
+        if ((id === 'preview' || output?.mode === 'scene') && !output?.blanked) {
+          const run = id === 'preview' ? null : this.animationRuns.output(id);
+          for (const layer of scene?.layers ?? []) {
+            const input = layer.visible && layer.kind === 'source' && layer.sourceId && this.bank.inputs.get(layer.sourceId);
+            if (input && input.source.kind === 'channel' && sampleAnimation(layer.animation, run ? now - run.startedAt : null).opacity > 0) this.bank.channelItem(input);
+          }
+        }
+        continue;
+      }
       const followsProgram = id !== 'preview' && output?.mode !== 'scene';
       let painted = true;
       if (id === 'preview' && !this.previewHasMotion(scene) && now - this.previewPaintedAt < 100) {
@@ -526,28 +548,21 @@ export class StudioCompositor {
     this.bank.sampleLevels();
     this.bus('program').analyser.getFloatTimeDomainData(this.masterSamples);
     for (const sample of this.masterSamples) this.heldMasterLevel = Math.max(this.heldMasterLevel, Math.abs(sample));
-    this.frames++;
+    if (this.timing.record(performance.now())) this.adjustBroadcastCadence();
   }
-  status() {
-    const elapsed = performance.now() - this.measuredAt, fps = Math.min(60, Math.round(this.frames * 1000 / elapsed));
-    this.frames = 0; this.measuredAt = performance.now();
+  private adjustBroadcastCadence() {
     // Only the optional 720p stream yields frames. Preview, Program, recording
     // and projection keep their own 30 fps sources and never inherit this rate.
-    if (this.broadcastVideo?.settings.profile === '720p' && elapsed >= 150) {
-      if (fps < 26) {
-        this.broadcastOverload++; this.broadcastRecovery = 0;
-        if (this.broadcastOverload >= 4) {
-          this.broadcastVideo.setFrameRate(this.broadcastVideo.frameRate === 30 ? 20 : 15);
-          this.broadcastOverload = 0;
-        }
-      } else if (fps >= 29) {
-        this.broadcastRecovery++; this.broadcastOverload = 0;
-        if (this.broadcastRecovery >= 16) {
-          this.broadcastVideo.setFrameRate(this.broadcastVideo.frameRate === 15 ? 20 : 30);
-          this.broadcastRecovery = 0;
-        }
-      } else { this.broadcastOverload = 0; this.broadcastRecovery = 0; }
+    const video = this.broadcastVideo;
+    if (video?.settings.profile !== '720p') return;
+    this.broadcastRecovery = this.timing.fps >= 29 ? this.broadcastRecovery + 1 : 0;
+    if (this.timing.fps < 26) video.setFrameRate(video.frameRate === 30 ? 20 : 15);
+    else if (this.broadcastRecovery >= 4) {
+      video.setFrameRate(video.frameRate === 15 ? 20 : 30);
+      this.broadcastRecovery = 0;
     }
+  }
+  status() {
     const data = this.bank.status();
     const main = this.state.mainAudioSourceId ? this.bank.inputs.get(this.state.mainAudioSourceId) : undefined;
     if (main && ['camera', 'microphone', 'screen'].includes(main.source.kind) && main.stream
@@ -561,7 +576,7 @@ export class StudioCompositor {
     }
     data.levels.master = Math.min(1, this.heldMasterLevel);
     this.heldMasterLevel = 0;
-    return { fps, ...data };
+    return { fps: this.timing.fps, ...data };
   }
   private dispose(bus: Bus) {
     for (const route of bus.routes.values()) { try { route.input.disconnect(route.gain); } catch { /* removed input */ } route.gain.disconnect(); }

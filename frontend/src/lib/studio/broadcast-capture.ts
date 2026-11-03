@@ -24,10 +24,14 @@ export class BroadcastVideoSource {
   private context: CanvasRenderingContext2D | null = null;
   private closed = false;
   private manualFrames = false;
-  private lastFrameAt = -Infinity;
+  private nextFrameAt: number | null = null;
   private cadence = 30;
   get frameRate() { return this.cadence; }
-  setFrameRate(rate: 15 | 20 | 30) { this.cadence = rate; }
+  setFrameRate(rate: 15 | 20 | 30) {
+    if (rate === this.cadence) return;
+    if (this.nextFrameAt !== null) this.nextFrameAt += 1000 / rate - 1000 / this.cadence;
+    this.cadence = rate;
+  }
   constructor(private source: HTMLCanvasElement, program: MediaStream, profile: BroadcastProfile,
     createCanvas: () => HTMLCanvasElement = () => document.createElement('canvas')) {
     this.settings = broadcastCaptureSettings(profile);
@@ -56,10 +60,14 @@ export class BroadcastVideoSource {
   }
   draw(now = performance.now()) {
     if (this.closed || !this.canvas || !this.context) return;
-    if (now - this.lastFrameAt < 1000 / this.cadence - 1) return;
+    const period = 1000 / this.cadence;
+    const due = this.nextFrameAt ?? now;
+    if (now + 1 < due) return;
+    // Keep the clock's phase when a tick is a little late. Anchoring the
+    // next frame to this draw makes 20 fps on a 30 fps clock run at 15 fps.
+    this.nextFrameAt = due + (Math.floor((now + 1 - due) / period) + 1) * period;
     this.context.drawImage(this.source, 0, 0, this.settings.width, this.settings.height);
     if (this.manualFrames) (this.stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack).requestFrame();
-    this.lastFrameAt = now;
   }
   close() {
     if (this.closed) return;

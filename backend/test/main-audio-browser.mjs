@@ -130,6 +130,16 @@ try {
   const studioProgram = page.locator('.program-panel');
   await until(() => studioProgram.locator('video').evaluate(video => video.readyState >= 2 &&
     video.srcObject?.getAudioTracks().some(track => track.readyState === 'live' && !track.muted)), 'Studio Program monitor receives live audio');
+  assert.ok(await studioProgram.locator('video').evaluate(video => video.videoWidth > 0 && video.videoWidth <= 960 && video.videoHeight <= 540), 'Studio monitor caps its picture at 960 × 540');
+  await studioProgram.getByRole('button', { name: 'Program health' }).click();
+  const health = page.getByRole('dialog', { name: 'Program health' });
+  await health.getByText('Program rendering').waitFor();
+  await health.getByRole('button', { name: 'Refresh' }).click();
+  await health.getByText(/100 ms or more since engine start/).waitFor();
+  await page.keyboard.press('Escape');
+  const renderer = async () => (await (await request.get(`${base}/api/studio/diagnostics`)).json()).renderer;
+  assert.deepEqual((await renderer()).renderedOutputs.sort(), ['preview', 'program'], 'Unwatched named outputs have no compositor buses');
+  assert.equal((await renderer()).peers.find(peer => peer.key === 'out:program').videoScale, 2, 'Studio requests half resolution before WebRTC adapts');
   await studioProgram.getByRole('button', { name: 'Monitor', exact: true }).click();
   await studioProgram.getByRole('button', { name: 'Listening', exact: true }).waitFor();
   assert.ok(await measure(studioProgram) > .02, 'Studio Program headphone monitor receives the actual Main audio');
@@ -192,6 +202,9 @@ try {
   await until(async () => (await get()).mainAudioSourceId === 'main' && (await status()).levels.master > .02, 'main restored after guarded handoff');
   const outputPage = async outputId => { const output = await context.newPage(); await output.goto(`${base}/studio/output/${outputId}`); await until(() => output.locator('video').evaluate(video => video.readyState >= 2 && video.videoWidth > 0 && video.srcObject?.getAudioTracks().length > 0), `${outputId} video and audio stream`); return output; };
   const program = await outputPage('program'), pinned = await outputPage('screen_broadcast'), projector = await outputPage('screen_main'), preview = await outputPage('preview');
+  const withProjector = await renderer();
+  assert.ok(withProjector.peers.some(peer => peer.key === 'out:program' && peer.videoScale === 1), 'Full Program delivery has no Studio monitor resolution cap');
+  assert.ok(withProjector.renderedOutputs.includes('screen_main'), 'Projector bus acquired when viewed');
   // A running compositor/audio meter does not prove an output is connected.
   // Check actual ICE transport and received packets, without granting capture
   // permissions or changing the ordinary viewer's mDNS/privacy settings.
@@ -339,6 +352,7 @@ try {
   assert.ok(await measure(preview) < .0001, 'Restart keeps Preview silent');
   assert.equal((await get()).mainAudioSourceId, 'main');
   for (const output of [program, pinned, projector, preview]) await output.close();
+  await until(async () => (await renderer()).renderedOutputs.sort().join(',') === 'preview,program', 'Last projector viewer releases its bus while Studio keeps Preview and Program');
   assert.equal((await request.post(`${base}/api/studio/engine/stop`)).status(), 200);
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ result: 'PASS', artifacts: dir, baseline, recordingPeak: peak, checks: ['compact Output footer in dedicated Audio panel', 'per-source mixer Main actions with scene persistence', 'read-only Sources Main badge follows replacement and clear', 'Main badge states: ready, muted, disconnected, offline and text-only', 'input status independent of final output mute', 'badge recovers after unmute and healthy input selection', 'disconnected badge takes priority over saved input mute', 'single persistent route through Cut/Fade', 'Studio headphone monitor receives Main audio and recovers from a lost connection answer', 'Program, pinned output and recording audio', 'all outputs succeed ICE and receive actual RTP without capture permissions or mDNS resolution', 'silent Preview and projector', 'muted new uploads', 'replacement and master mute', 'in-flight switch/mute safety', 'text-only channels excluded with legacy warning', 'no fallback on disconnect', 'three desktop columns and 390px stacked panels without overflow', 'selection persists after reload and engine stop', 'all open outputs automatically reconnect and recover correct audio after engine restart'] }, null, 2));

@@ -102,6 +102,22 @@ test('720p falls back to ordinary canvas capture when manual frames are unavaila
   surface.close(); assert.equal(stopped, 2);
 });
 
+test('720p keeps its target cadence across jitter and never replays a backlog after a stall', () => {
+  for (const rate of [15, 20, 30] as const) {
+    const f = videoSurfaceFixture(), surface = new BroadcastVideoSource(f.source, f.program, '720p', () => f.canvas);
+    surface.setFrameRate(rate);
+    const start = performance.now() + 100;
+    surface.draw(start);
+    const before = f.draws();
+    for (let i = 1; i <= 300; i++) surface.draw(start + i * 1000 / 30 + (i % 2 ? 4 : 0));
+    assert.ok(Math.abs(f.draws() - before - rate * 10) <= 1, `Deliver ${rate} fps at normal Program cadence`);
+    const count = f.draws();
+    for (let i = 0; i < 10; i++) surface.draw(start + 18000);
+    assert.equal(f.draws(), count + 1, 'skip missed deadlines after a long stall');
+    surface.close();
+  }
+});
+
 test('1080p directly reuses Program, allocates no extra surface and stops no shared tracks', () => {
   const f = videoSurfaceFixture(), surface = new BroadcastVideoSource(f.source, f.program, '1080p', () => { throw new Error('No redundant 1080p canvas.'); });
   assert.equal(surface.stream, f.program); surface.draw(); surface.close(); surface.close();

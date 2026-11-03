@@ -44,18 +44,17 @@ export class StudioPeer {
       if (e.candidate) signal.send({ t: 'signal', peerId, key, candidate: e.candidate.toJSON() });
     };
   }
-  async offer(stream: MediaStream, maxVideoFrameRate?: number) {
+  async offer(stream: MediaStream, videoEncoding?: RTCRtpEncodingParameters) {
     for (const track of stream.getTracks()) {
-      const sender = this.pc.addTrack(track, stream);
-      if (track.kind === 'video' && maxVideoFrameRate) {
-        // The production canvas is 30 fps. Publishing a 50/60 fps capture
-        // card feed only spends extra encoding time on frames Program drops.
-        const parameters = sender.getParameters();
-        if (parameters.encodings?.length) {
-          parameters.encodings[0].maxFramerate = maxVideoFrameRate;
-          await sender.setParameters(parameters).catch(() => {});
-        }
+      if (track.kind === 'video' && videoEncoding) {
+        // Declare the limit before negotiating. Some browsers don't expose
+        // sender encodings through getParameters() until after the offer.
+        try {
+          this.pc.addTransceiver(track, { direction: 'sendonly', streams: [stream], sendEncodings: [videoEncoding] });
+          continue;
+        } catch { /* Older senders can still offer their native track. */ }
       }
+      this.pc.addTrack(track, stream);
     }
     await this.pc.setLocalDescription(await this.pc.createOffer());
     this.signal.send({ t: 'signal', peerId: this.peerId, key: this.key, description: this.pc.localDescription!.toJSON() });

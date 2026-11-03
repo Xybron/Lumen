@@ -4,10 +4,8 @@ import { StudioCompositor } from '@/lib/studio/compositor';
 import { StudioSignal, StudioPeer } from '@/lib/studio/signal';
 import { studioRequest } from '@/lib/studio/api';
 import type { ProductionState, StudioSignalMessage, StudioRecording } from '../../../shared/production';
-import { MULTIVIEW_OUTPUT_ID } from '../../../shared/multiview-layout';
 import { StudioBroadcastRecorder } from '@/lib/studio/broadcast-recorder';
 import { ProgramBroadcastCapture } from '@/lib/studio/broadcast-capture';
-import { PROGRAM_MONITOR_OUTPUT_ID } from '../../../shared/program-monitor.js';
 
 const message = ref('Starting production renderer…');
 let compositor: StudioCompositor | null = null;
@@ -37,8 +35,7 @@ function closePeer(key: string) {
     inputOwners.delete(sourceId); compositor?.bank.setStream(sourceId, null);
   }
   peer.close();
-  if (peer.key === `out:${MULTIVIEW_OUTPUT_ID}` && ![...peers.values()].some(p => p.key === peer.key)) compositor?.releaseMultiview();
-  if (peer.key === `out:${PROGRAM_MONITOR_OUTPUT_ID}` && ![...peers.values()].some(p => p.key === peer.key)) compositor?.releaseProgramMonitor();
+  if (peer.key.startsWith('out:') && ![...peers.values()].some(p => p.key === peer.key)) compositor?.releaseOutput(peer.key.slice(4));
 }
 
 async function receive(m: StudioSignalMessage) {
@@ -51,7 +48,7 @@ async function receive(m: StudioSignalMessage) {
   if (m.t === 'watch' && m.peerId && m.key && m.outputId) {
     closePeer(key);
     const peer = new StudioPeer(signal, m.peerId, m.key); peers.set(key, peer);
-    try { await peer.offer(compositor.stream(m.outputId)); }
+    try { await peer.offer(compositor.stream(m.outputId), m.compactProgram ? { scaleResolutionDownBy: 2, maxFramerate: 30 } : undefined); }
     catch (error) { if (peers.get(key) === peer) closePeer(key); throw error; }
   } else if (m.t === 'publish' && m.peerId && m.key && m.sourceId) {
     closePeer(key);
@@ -142,6 +139,9 @@ onMounted(async () => {
     await document.fonts.ready;
     compositor = new StudioCompositor(state);
     (window as unknown as { __lumenDiagnostics: () => Promise<unknown> }).__lumenDiagnostics = async () => ({
+      renderedOutputs: compositor?.renderedOutputs,
+      timing: compositor && { fps: compositor.timing.fps, pauses: compositor.timing.pauses,
+        longestPauseMs: compositor.timing.longestPauseMs, lastPauseAt: compositor.timing.lastPauseAt },
       audioState: compositor?.audio.state, audioTime: compositor?.audio.currentTime,
       broadcast: { id: broadcast.activeId, queuedBytes: broadcast.queuedBytes,
         capture: broadcast.settings ? { ...broadcast.settings, videoEncoder: broadcast.videoEncoder, effectiveFrameRate: compositor?.broadcastFrameRate } : null },
@@ -150,8 +150,14 @@ onMounted(async () => {
         tracks: input.stream?.getTracks().map(t => ({ kind: t.kind, enabled: t.enabled, muted: t.muted, state: t.readyState })),
       })),
       peers: await Promise.all([...peers.values()].map(async peer => {
-        const stats: unknown[] = []; (await peer.pc.getStats()).forEach(s => { if (s.type === 'inbound-rtp' || s.type === 'outbound-rtp') stats.push(s); });
-        return { key: peer.key, state: peer.pc.connectionState, stats };
+        const stats: unknown[] = [];
+        let videoScale: number | undefined;
+        try {
+          (await peer.pc.getStats()).forEach(s => { if (s.type === 'inbound-rtp' || s.type === 'outbound-rtp') stats.push(s); });
+          const sender = peer.pc.getSenders().find(sender => sender.track?.kind === 'video');
+          if (sender) videoScale = sender.getParameters().encodings?.[0]?.scaleResolutionDownBy ?? 1;
+        } catch { /* A viewer can disconnect during the sample. */ }
+        return { key: peer.key, state: peer.pc.connectionState, stats, videoScale };
       })),
     });
     signal = new StudioSignal();

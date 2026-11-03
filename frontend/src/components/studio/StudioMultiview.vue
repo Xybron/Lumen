@@ -130,7 +130,7 @@ function focusBoard(event: PointerEvent) {
         <div class="multiview-bus-label"><b><span />Program</b><span>{{ studio.state?.program?.name ?? 'Nothing live' }}</span></div>
         <div class="multiview-monitor">
           <ScenePoster v-if="(!programReady || !engineRunning) && studio.state?.program" :scene="studio.state.program" :sources="studio.state.sources" />
-          <StudioMonitor v-if="engineRunning" output-id="program" :audible="false" @ready="programReady = $event" />
+          <StudioMonitor v-if="engineRunning" output-id="program" compact-program :audible="false" @ready="programReady = $event" />
           <div v-if="!studio.state?.program" class="multiview-monitor-empty"><Circle :size="20" :stroke-width="1.25" /><span>No scene on Program</span></div>
           <span v-else-if="!engineRunning || !programReady" class="multiview-feed-state">{{ engineRunning ? 'Connecting…' : 'Engine offline · last composition' }}</span>
         </div>

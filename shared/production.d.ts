@@ -178,6 +178,7 @@ export type StudioSignalMessage = {
   peerId?: string;
   key?: string;
   outputId?: string;
+  compactProgram?: boolean;
   sourceId?: string;
   description?: RTCSessionDescriptionInit;
   candidate?: RTCIceCandidateInit;

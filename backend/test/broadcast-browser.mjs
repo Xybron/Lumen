@@ -1,4 +1,4 @@
-// Full Program -> independent MediaRecorder -> real FFmpeg HLS -> public relay
+// Generated camera -> Program -> stream encoder -> real FFmpeg HLS/RTMPS
 // browser test. Generated media, temporary identity/data, no physical devices,
 // no platform credentials or external streaming endpoints are used.
 import assert from 'node:assert/strict';
@@ -14,7 +14,7 @@ import ffmpeg from 'ffmpeg-static';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..'), directory = await fs.mkdtemp(path.join(os.tmpdir(), 'lumen-broadcast-browser-'));
 const port = Number(process.env.LUMEN_BROADCAST_TEST_PORT ?? 3470), base = `http://127.0.0.1:${port}`;
-const videoFile = path.join(directory, 'media', 'backgrounds', 'program-red.mp4'), toneFile = path.join(directory, 'media', 'music', 'main-tone.wav');
+const videoFile = path.join(directory, 'camera.y4m'), toneFile = path.join(directory, 'media', 'music', 'main-tone.wav');
 const errors = [], mutations = [], publicRequests = [], checks = [], privateKey = 'fixture-youtube-key-loopback-only', facebookKey = 'fixture-facebook-key-loopback-only';
 const publicConsole = [];
 let server, browser, admin, operator, viewer, anonymous, page, operatorPage, watchPage, relayOrigin, logs = '';
@@ -32,13 +32,20 @@ const digest = value => createHash('sha256').update(value).digest('hex');
 const dialog = target => target.getByRole('dialog', { name: 'Go Live', exact: true });
 async function command(value) { const state = await production(); return json(await admin.request.post(`${base}/api/studio/command`, { data: { revision: state.revision, command: value } })); }
 async function stopServer() { const child = server; if (!child || child.exitCode !== null || child.signalCode !== null) return; await new Promise(resolve => { child.once('exit', resolve); child.kill('SIGTERM'); setTimeout(() => { if (child.exitCode === null) child.kill('SIGKILL'); }, 9000).unref(); }); }
-async function instrument(target) {
+async function instrument(target, allowTestCamera = false) {
   target.setDefaultTimeout(18000);
-  await target.addInitScript(() => {
+  await target.addInitScript(allowTestCamera => {
     window.__broadcastCaptureRequests = 0; window.__broadcastCopied = [];
-    if (navigator.mediaDevices) navigator.mediaDevices.getUserMedia = async () => { window.__broadcastCaptureRequests++; throw new DOMException('Physical devices are outside this fixture.', 'NotAllowedError'); };
+    if (navigator.mediaDevices) {
+      const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+      navigator.mediaDevices.getUserMedia = async constraints => {
+        window.__broadcastCaptureRequests++;
+        if (allowTestCamera && constraints.video && !constraints.audio) return capture(constraints);
+        throw new DOMException('Only the generated test camera may be opened.', 'NotAllowedError');
+      };
+    }
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async text => { window.__broadcastCopied.push({ text, active: navigator.userActivation.isActive }); } } });
-  });
+  }, allowTestCamera);
   target.on('pageerror', error => errors.push(error.message)); target.on('dialog', async value => { errors.push(`Unexpected native ${value.type()} dialog`); await value.dismiss(); });
   target.on('request', request => { if (['POST', 'PUT', 'DELETE'].includes(request.method())) mutations.push({ method: request.method(), pathname: new URL(request.url()).pathname }); });
 }
@@ -90,7 +97,25 @@ async function verifyPlatform(name, number) {
   assert.ok(samples.length > 5000); let energy = [0, 0];
   for (let index = 0; index < samples.length; index += 8) { energy[0] += samples.readFloatLE(index) ** 2; energy[1] += samples.readFloatLE(index + 4) ** 2; }
   energy = energy.map(value => Math.sqrt(value / (samples.length / 8))); assert.ok(energy[0] > .035 && energy[1] > .015, `${name} carries persistent stereo Main audio: ${energy}`);
-  return { name, receivedBytes: record.receivedBytes, bytes: record.bytes, energy };
+  const motion = await verifyCameraMotion(filename, name);
+  return { name, receivedBytes: record.receivedBytes, bytes: record.bytes, energy, ...motion };
+}
+
+async function verifyCameraMotion(filename, name) {
+  // Sample the moving white bar in two seconds of the actual receiver file.
+  // Repeated frames remain repeats at 30 fps, even if the transport clock runs on.
+  const rowWidth = 160;
+  const rows = (await ff(['-hide_banner', '-loglevel', 'error', '-i', filename, '-ss', '1', '-t', '2', '-an',
+    '-vf', 'fps=30,scale=160:90,format=gray,crop=160:1:0:45', '-f', 'rawvideo', '-'])).output;
+  let previous = -1, held = 0, longestHold = 0, movingFrames = 0;
+  for (let offset = 0; offset + rowWidth <= rows.length; offset += rowWidth) {
+    const position = rows.subarray(offset, offset + rowWidth).findIndex(pixel => pixel > 190);
+    if (position >= 0 && position !== previous) { movingFrames++; held = 0; }
+    else longestHold = Math.max(longestHold, ++held);
+    previous = position;
+  }
+  assert.ok(movingFrames >= 28 && longestHold < 15, `${name} moving camera: ${movingFrames} distinct updates, longest hold ${longestHold}/30 s`);
+  return { movingFrames, longestHold };
 }
 async function processProfile() {
   const stats = await fixtureStats(), diagnostics = await json(await admin.request.get(`${base}/api/studio/diagnostics`));
@@ -111,13 +136,16 @@ async function processProfile() {
 
 try {
   await fs.mkdir(path.dirname(videoFile), { recursive: true }); await fs.mkdir(path.dirname(toneFile), { recursive: true });
-  await ff(['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=red:s=640x360:r=30', '-t', '4', '-threads', '2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', videoFile]);
+  await ff(['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i',
+    "color=c=red:s=960x540:r=30[base];color=c=white:s=48x540:r=30[bar];[base][bar]overlay=x='mod(n*8,912)'",
+    '-t', '2', '-pix_fmt', 'yuv420p', videoFile]);
   await ff(['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=4', '-af', 'pan=stereo|c0=2*c0|c1=c0', '-c:a', 'pcm_s16le', toneFile]);
   const sourceHashes = [digest(await fs.readFile(videoFile)), digest(await fs.readFile(toneFile))];
   server = spawn(process.execPath, ['backend/test/broadcast-fixture.mjs'], { cwd: root, env: { ...process.env, PORT: String(port), LUMEN_DATA_DIR: directory, LUMEN_BROADCAST_FIXTURE: 'yes' }, stdio: ['ignore', 'pipe', 'pipe'] });
   server.stdout.on('data', value => { logs += value; for (const line of value.toString().split('\n')) { try { const message = JSON.parse(line); if (message.phase === 'broadcast-fixture-ready') relayOrigin = message.relayOrigin; } catch { /* Ordinary fixture startup diagnostics. */ } } }); server.stderr.on('data', value => { logs += value; });
   await until(async () => relayOrigin && (await fetch(`${base}/api/content`, { signal: AbortSignal.timeout(1500) })).ok, 'disposable station and independent loopback relay start');
-  browser = await chromium.launch({ executablePath: process.env.LUMEN_CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--autoplay-policy=no-user-gesture-required', '--force-color-profile=srgb'] });
+  browser = await chromium.launch({ executablePath: process.env.LUMEN_CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true,
+    args: ['--autoplay-policy=no-user-gesture-required', '--force-color-profile=srgb', '--use-fake-device-for-media-stream', `--use-file-for-fake-video-capture=${videoFile}`] });
   admin = await browser.newContext({ viewport: { width: 1512, height: 982 } }); operator = await browser.newContext({ viewport: { width: 1512, height: 982 } }); viewer = await browser.newContext({ viewport: { width: 1440, height: 1000 } }); anonymous = await browser.newContext();
   await json(await admin.request.post(`${base}/api/auth/login`, { data: { username: 'admin', password: 'admin' } }));
   const created = await json(await admin.request.post(`${base}/api/users`, { data: { username: 'broadcastoperator', displayName: 'Media operator', password: 'fixture-operator-password' } }));
@@ -126,13 +154,18 @@ try {
   const content = { version: 2, updatedAt: new Date().toISOString(), settings: {}, music: { mode: 'off' }, channels: [{ id: 'presentation', name: 'Presentation', kind: 'presentation', playlistId: 'slides', defaultMode: 'manual' }], playlists: [{ id: 'slides', name: 'Presentation', items: [] }] };
   await json(await admin.request.put(`${base}/api/content`, { data: content }));
   const state = await production(), audio = (muted = true) => ({ muted, volume: .75, mode: 'follow', delayMs: 0 });
-  state.sources = [{ id: 'program_video', name: 'Program camera fixture', kind: 'video', url: 'media/backgrounds/program-red.mp4', loop: true, audio: audio() }, { id: 'main_tone', name: 'Service Main audio', kind: 'audio', url: 'media/music/main-tone.wav', loop: true, audio: audio() }];
+  state.sources = [{ id: 'program_video', name: 'Program camera fixture', kind: 'camera', loop: false, audio: audio() }, { id: 'main_tone', name: 'Service Main audio', kind: 'audio', url: 'media/music/main-tone.wav', loop: true, audio: audio() }];
   const layer = { id: 'layer_program', name: 'Program video', kind: 'source', sourceId: 'program_video', visible: true, locked: false, x: 0, y: 0, width: 100, height: 100, opacity: 1, fit: 'cover', text: '', color: '#ffffff', background: '#00000000', fontSize: 72, fontWeight: 500, align: 'center', radius: 0 };
   state.scenes = [{ id: 'red_program', name: 'Red Program', background: '#ff0000', layers: [layer] }, { id: 'blue_program', name: 'Blue Program', background: '#0000ff', layers: [] }];
   state.previewSceneId = 'red_program'; state.mainAudioSourceId = null; state.masterVolume = .8; state.masterMuted = false;
   await json(await admin.request.put(`${base}/api/studio`, { data: state })); await command({ type: 'set-main-audio', sourceId: 'main_tone' }); await command({ type: 'take', sceneId: 'red_program' });
   const before = await production(); assert.equal((await status()).state, 'offline');
-  page = await admin.newPage(); await instrument(page); await page.goto(`${base}/studio`); await page.getByRole('button', { name: 'Open Go Live controls', exact: true }).waitFor(); await open();
+  await admin.grantPermissions(['camera'], { origin: base });
+  page = await admin.newPage(); await instrument(page, true); await page.goto(`${base}/studio`);
+  const cameraRow = page.locator('[data-source-id="program_video"].source-row');
+  await cameraRow.getByRole('button', { name: 'Connect', exact: true }).click();
+  await cameraRow.getByRole('button', { name: 'Disconnect', exact: true }).waitFor();
+  await open();
   await panelBounds(page, 'Desktop initial setup');
   await unifiedSetup(page, 'Desktop initial setup');
   assert.equal(await dialog(page).getByRole('button', { name: 'Save setup', exact: true }).count(), 0, 'Unchanged setup has no redundant Save action');
@@ -273,6 +306,7 @@ try {
   const recording = await until(async () => (await recordingList()).find(value => value.id === recordingId && value.status === 'complete'), 'independent local recording finalizes', 60000);
   assert.ok(recording.bytes > 10000); const file = await admin.request.get(`${base}/api/studio/recordings/${recordingId}/download`); assert.equal(file.status(), 200); const savedRecording = path.join(directory, 'actual-independent-recording.webm'); await fs.writeFile(savedRecording, await file.body());
   const recorded = await ff(['-hide_banner', '-i', savedRecording, '-t', '0.1', '-f', 'null', '-']); assert.match(recorded.diagnostics, /Video:[^\n]*1920x1080/); assert.match(recorded.diagnostics, /Audio:/);
+  const recordedMotion = await verifyCameraMotion(savedRecording, 'local Program recording');
   const finalFanout = await fixtureStats(); assert.equal(finalFanout.spawned.filter(value => value.kind === 'encoder').length, 2, 'Each of two broadcast sessions has one actual encoder'); assert.equal(finalFanout.spawned.filter(value => value.kind === 'youtube').length, 2); assert.equal(finalFanout.spawned.filter(value => value.kind === 'facebook').length, 2);
   assert.deepEqual(await production(), switched); assert.equal((await status()).state, 'running'); assert.deepEqual([digest(await fs.readFile(videoFile)), digest(await fs.readFile(toneFile))], sourceHashes);
   checks.push('Recording-off confirmation hides its row/name and preserves an existing recording on restart; explicit Stop both produces a real seekable video/audio recording while Studio, scene state, original media and Main audio remain intact');
@@ -287,8 +321,9 @@ try {
     await dialog(operatorPage).getByText('Station defaults', { exact: true }).click();
   }
   assert.ok(publicRequests.every(url => url.startsWith(relayOrigin) || url.startsWith('blob:')), 'Public playback never depends on the station origin or an external CDN'); assert.deepEqual(errors, []);
-  for (const target of [page, operatorPage]) assert.equal(await target.evaluate(() => window.__broadcastCaptureRequests), 0);
-  console.log(JSON.stringify({ ok: true, directory, relayOrigin, checks, platforms, encoder: profile.processes.filter(value => value.kind === 'encoder'), recording: { id: recording.id, bytes: recording.bytes, durationMs: recording.durationMs }, errors, publicRequests: publicRequests.length }, null, 2));
+  assert.equal(await page.evaluate(() => window.__broadcastCaptureRequests), 1, 'Only the explicit camera connection acquires capture');
+  assert.equal(await operatorPage.evaluate(() => window.__broadcastCaptureRequests), 0, 'Monitoring and publishing never acquire a camera implicitly');
+  console.log(JSON.stringify({ ok: true, directory, relayOrigin, checks, platforms, encoder: profile.processes.filter(value => value.kind === 'encoder'), recording: { id: recording.id, bytes: recording.bytes, durationMs: recording.durationMs, ...recordedMotion }, errors, publicRequests: publicRequests.length }, null, 2));
 } catch (error) {
   for (const [target, name] of [[page, 'broadcast-failure.png'], [operatorPage, 'broadcast-operator-failure.png'], [watchPage, 'broadcast-watch-failure.png']]) if (target && !target.isClosed()) await target.screenshot({ path: path.join(directory, name), fullPage: true }).catch(() => {});
   const publicVideo = watchPage && !watchPage.isClosed() ? await watchPage.locator('video').evaluate(video => ({ paused: video.paused, time: video.currentTime, duration: video.duration, width: video.videoWidth, height: video.videoHeight, ready: video.readyState, network: video.networkState, src: video.currentSrc, visibility: document.visibilityState, native: video.canPlayType('application/vnd.apple.mpegurl'), hls: window.Hls?.isSupported(), error: video.error?.message, buffered: Array.from({ length: video.buffered.length }, (_, index) => [video.buffered.start(index), video.buffered.end(index)]) })).catch(() => null) : null;

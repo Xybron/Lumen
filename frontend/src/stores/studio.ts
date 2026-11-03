@@ -55,7 +55,7 @@ export const useStudioStore = defineStore('studio', () => {
       const capture = captures.get(m.sourceId);
       if (capture) {
         capture.peer?.close(); capture.peer = new StudioPeer(signal, m.peerId, m.key);
-        void capture.peer.offer(capture.stream, 30).catch(e => toast.error(`Input connection failed: ${e.message}`));
+        void capture.peer.offer(capture.stream, { maxFramerate: 30 }).catch(e => toast.error(`Input connection failed: ${e.message}`));
       }
     }
     if (m.t === 'signal' && m.key?.startsWith('in:')) void captures.get(m.key.slice(3))?.peer?.receive(m).catch(() => {});
