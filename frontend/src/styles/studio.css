@@ -69,6 +69,12 @@
 .program-panel .monitor-title > span { color: #d5a29a; }.program-panel .tiny-dot { background: #d8998e; }
 .monitor-frame { position: relative; aspect-ratio: 16/9; overflow: hidden; border-radius: 8px; border: 1px solid #ffffff26; background: #090a0c; }
 .preview-frame { border-color: #7dd3fc66; }.program-panel .monitor-frame { border-color: #d38e8547; }
+.preview-panel .monitor-title small { margin-left: auto; }
+.preview-panel:fullscreen { display: grid; grid-template-rows: 40px 1fr; background: #090a0c; }
+.preview-panel:fullscreen .monitor-title { margin: 0; padding: 0 12px; }
+.preview-panel:fullscreen .preview-expand { width: auto; gap: 6px; padding: 0 8px; font-size: 12px; }
+.studio-app .preview-panel:fullscreen .monitor-frame { place-self: center; width: min(100%, calc((100dvh - 40px) * 16 / 9)); border: 0; border-radius: 0; }
+.preview-panel:fullscreen :is(.monitor-bottom, .canvas-selection, .animation-preview-badge) { display: none; }
 .monitor-bottom { display: flex; justify-content: space-between; gap: 6px; margin-top: 8px; color: #f4f4f580; font-size: 10px; }
 .monitor-bottom button { display: flex; align-items: center; gap: 5px; }.monitor-bottom button.active { color: #7dd3fc; }
 .program-empty { position: absolute; inset: 0; display: flex; justify-content: center; align-items: center; flex-direction: column; gap: 9px; color: #646970; background: #0c0d0f; }

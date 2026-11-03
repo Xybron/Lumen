@@ -9,6 +9,7 @@ import StudioMultiviewOverlay from '@/components/studio/StudioMultiviewOverlay.v
 import ConfirmationDialog from '@/components/shell/ConfirmationDialog.vue';
 import ExportProgressOverlay from '@/components/clips/ExportProgressOverlay.vue';
 import BroadcastPanel from '@/components/broadcast/BroadcastPanel.vue';
+import BroadcastAlert from '@/components/broadcast/BroadcastAlert.vue';
 import { useIdentityStore } from '@/stores/identity';
 import { appFullscreenKey } from '@/composables/useAppFullscreen';
 import { sceneShortcutSurfaceBlocked } from '@/lib/studio/scene-shortcuts';
@@ -26,6 +27,7 @@ useEventListener(window, 'keydown', (event: KeyboardEvent) => {
 });
 const channelOrStudio = computed(() => route.name === 'dashboard' || route.name === 'studio');
 const exportSurface = computed(() => ['dashboard', 'studio', 'studio-multiview', 'switch', 'recordings', 'clip-editor'].includes(String(route.name)));
+const broadcastSurface = computed(() => identity.ready && identity.isAuthenticated && identity.can('*', 'author') && (exportSurface.value || route.name === 'team'));
 const TeamIntegration = defineAsyncComponent(() => import('@/components/team/TeamIntegration.vue'));
 const teamSurface = computed(() => channelOrStudio.value || route.name === 'team');
 </script>
@@ -37,6 +39,6 @@ const teamSurface = computed(() => channelOrStudio.value || route.name === 'team
   <StudioMultiviewOverlay v-if="identity.ready && identity.isAuthenticated && identity.can('*', 'author') && channelOrStudio" />
   <ConfirmationDialog />
   <ExportProgressOverlay v-if="exportSurface" :visible="exportSurface" />
-  <BroadcastPanel v-if="identity.ready && identity.isAuthenticated && identity.can('*', 'author') && (channelOrStudio || route.name === 'studio-multiview' || route.name === 'switch')" />
+  <template v-if="broadcastSurface"><BroadcastPanel /><BroadcastAlert /></template>
   <Toaster theme="dark" position="bottom-right" />
 </template>

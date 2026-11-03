@@ -1,6 +1,16 @@
 .broadcast-trigger { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 34px; padding: 7px 11px; border: 1px solid #ffffff1a; border-radius: 7px; background: #ffffff03; color: #c8d1d7; font-size: 12px; font-weight: 500; white-space: nowrap; cursor: pointer; }
 .broadcast-trigger:hover { background: #ffffff09; border-color: #ffffff29; }
 .broadcast-trigger.is-active { color: #f0b8ad; border-color: #d3847145; background: #cf7c6810; }
+.broadcast-trigger.has-warning { color: #ffd6a5; border-color: #efaf6766; background: #604524; }
+.stream-alert, .broadcast-notice-inline { --notice-color: #efb46f; display: flex; align-items: center; gap: 10px; color: #f6f6f7; background: #29231e; font-size: 13px; }
+:is(.stream-alert, .broadcast-notice-inline)[data-tone="danger"] { --notice-color: #ffaaa0; background: #302324; }
+:is(.stream-alert, .broadcast-notice-inline)[data-tone="info"] { --notice-color: #9ccfe9; background: #202b32; }
+:is(.stream-alert, .broadcast-notice-inline) > svg { flex-shrink: 0; color: var(--notice-color); }
+.stream-alert { position: fixed; z-index: 80; top: 12px; left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100% - 24px); padding: 10px 12px; border: 1px solid var(--notice-color); border-radius: 9px; box-shadow: 0 6px 24px #0006; }
+.stream-alert p { color: #e0ddda; font-size: 12px; }
+.stream-alert button { flex-shrink: 0; }
+.stream-alert-controls { color: var(--notice-color); font-weight: 550; }
+.broadcast-notice-inline { padding: 9px 24px; border-bottom: 1px solid var(--border-hair); }
 .broadcast-trigger time { font-size: 10px; font-variant-numeric: tabular-nums; color: #b9a19c; }
 .broadcast-panel[data-slot="dialog-content"] { display: flex; flex-direction: column; width: min(920px, calc(100vw - 40px)); max-width: 920px; max-height: min(790px, calc(100dvh - 48px)); gap: 0; padding: 0; border: 1px solid var(--border-hair); border-radius: 12px; background: var(--surface-1); color: var(--text-primary); color-scheme: dark; box-shadow: 0 24px 90px #0008; overflow: hidden; font-size: 13px; }
 .broadcast-panel.is-confirmation[data-slot="dialog-content"] { width: min(560px, calc(100vw - 40px)); }

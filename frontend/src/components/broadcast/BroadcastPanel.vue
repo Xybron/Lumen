@@ -100,6 +100,9 @@ function shortcuts(event: KeyboardEvent) { if (event.key === 'Enter' && (event.c
         <span v-if="broadcast.active" class="broadcast-running"><i />{{ broadcast.snapshot?.session?.state === 'starting' ? 'Connecting' : broadcast.snapshot?.session?.state === 'stopping' ? 'Ending stream' : 'Stream active' }}</span>
         <button type="button" class="broadcast-icon" aria-label="Close Go Live controls" @click="broadcast.open = false"><X :size="17" /></button>
       </header>
+      <p v-if="broadcast.notice" class="broadcast-notice-inline" :data-tone="broadcast.notice.tone" :role="broadcast.notice.tone === 'info' ? 'status' : 'alert'">
+        <Radio v-if="broadcast.notice.tone === 'info'" :size="16" /><CircleAlert v-else :size="16" /><span><b>{{ broadcast.notice.label }}</b> · {{ broadcast.notice.message }}</span>
+      </p>
       <aside v-if="localWatch" class="broadcast-local-notice" aria-label="Local Lumen Watch"><Aperture :size="15" aria-hidden="true" /><div><strong>Local Lumen Watch</strong><p>Watch is local to this computer. Facebook and YouTube stream publicly when enabled.</p></div></aside>
       <div class="broadcast-panel-body">
         <div v-if="broadcast.loading && !config" class="broadcast-loading"><LoaderCircle :size="21" class="broadcast-spin" />Connecting to this station…</div>

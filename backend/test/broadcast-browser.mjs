@@ -272,11 +272,13 @@ try {
   await command({ type: 'take', sceneId: 'blue_program' }); await publicPixel('blue'); const switched = await production(); assert.equal(switched.mainAudioSourceId, before.mainAudioSourceId); assert.deepEqual(switched.sources, before.sources); await verifyHlsAudio();
   await dialog(page).getByRole('button', { name: 'Stop Lumen Watch destination', exact: true }).click();
   await until(async () => (await snapshot()).session.watch.state === 'stopped', 'destination-only stop is honest'); assert.equal((await status()).recording.id, recordingId);
+  await dialog(page).locator('.broadcast-notice-inline').getByText(/Lumen Watch was stopped.*Still sending to YouTube and Facebook/).waitFor();
   await dialog(page).getByRole('button', { name: 'Retry Lumen Watch destination', exact: true }).click(); await until(async () => (await snapshot()).session.watch.state === 'live', 'retry reconnects the real HLS relay', 60000);
   assert.equal((await status()).recording.id, recordingId); assert.deepEqual((await production()).sources, before.sources);
   const ongoing = await snapshot(); assert.ok(ongoing.session.destinations.every(destination => destination.state === 'live' && destination.retries === 0), 'Watch Stop/Retry never disrupts either active platform');
   const fanout = await fixtureStats(); assert.equal(fanout.spawned.filter(value => value.kind === 'encoder').length, 1); assert.equal(fanout.spawned.filter(value => value.kind === 'youtube').length, 1); assert.equal(fanout.spawned.filter(value => value.kind === 'facebook').length, 1);
   checks.push('Manual Studio scene switching reaches the public HLS picture while Main audio persists; stopping/retrying one destination leaves the independent recording and production sources running');
+  await close(page);
   operatorPage = await operator.newPage(); await instrument(operatorPage); await operatorPage.goto(`${base}/studio`); await open(operatorPage);
   assert.equal(await dialog(operatorPage).getByRole('navigation').count(), 0);
   assert.equal(await dialog(operatorPage).getByLabel('Stream quality', { exact: true }).isVisible(), true); assert.equal(await dialog(operatorPage).getByLabel('Stream quality', { exact: true }).isDisabled(), true); assert.equal((await operator.request.put(`${base}/api/studio/broadcast/config`, { data: { profile: '1080p' } })).status(), 403);
@@ -286,6 +288,8 @@ try {
   await dialog(operatorPage).getByRole('button', { name: 'End stream', exact: true }).click(); await until(async () => (await snapshot()).session.state === 'stopped', 'operator ends the broadcast with default keep-recording');
   assert.equal((await status()).recording.id, recordingId); assert.equal((await status()).state, 'running'); await until(async () => (await (await fetch(`${relayOrigin}/api/watch/live`)).json()).status === 'offline', 'independent public relay visibly goes Offline');
   assert.deepEqual(await production(), switched);
+  await page.bringToFront(); await page.locator('.stream-alert').getByText('Stream ended', { exact: true }).waitFor();
+  await operatorPage.bringToFront();
   checks.push('Non-admin Studio operators can end a session but cannot change credentials; Keep recording is the default and leaves the same recording and engine running');
   await json(await admin.request.put(`${base}/api/studio/broadcast/config`, { data: { profile: '1080p' } }));
   await unifiedSetup(operatorPage, 'Operator setup after ending the stream');
