@@ -16,6 +16,17 @@ export function broadcastRecorderOptions(profile: BroadcastProfile, supports = (
   return { mimeType, videoBitsPerSecond, audioBitsPerSecond };
 }
 
+/** Where supported, capture exactly when the compositor has finished a frame. */
+export function captureCanvasFrames(canvas: HTMLCanvasElement, frameRate: number) {
+  try {
+    const stream = canvas.captureStream(0);
+    const track = stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined;
+    if (typeof track?.requestFrame === 'function') return { stream, requestFrame: () => track.requestFrame() };
+    stream.getVideoTracks().forEach(video => video.stop());
+  } catch { /* Older canvas implementations only accept automatic capture. */ }
+  return { stream: canvas.captureStream(frameRate), requestFrame: undefined };
+}
+
 /** One small broadcast-only surface, painted by the compositor's existing tick. */
 export class BroadcastVideoSource {
   readonly stream: MediaStream;
@@ -23,7 +34,7 @@ export class BroadcastVideoSource {
   private canvas: HTMLCanvasElement | null = null;
   private context: CanvasRenderingContext2D | null = null;
   private closed = false;
-  private manualFrames = false;
+  private requestFrame?: () => void;
   private nextFrameAt: number | null = null;
   private cadence = 30;
   get frameRate() { return this.cadence; }
@@ -43,15 +54,8 @@ export class BroadcastVideoSource {
     this.canvas = canvas; this.context = context;
     // Manual frames let the renderer shed stream work if Program becomes busy.
     // Program's own 30 fps canvas and audio route remain untouched.
-    try {
-      const manual = canvas.captureStream(0);
-      if (typeof (manual.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined)?.requestFrame === 'function') {
-        this.stream = manual; this.manualFrames = true;
-      } else {
-        manual.getVideoTracks().forEach(track => track.stop());
-        this.stream = canvas.captureStream(30);
-      }
-    } catch { this.stream = canvas.captureStream(30); }
+    const capture = captureCanvasFrames(canvas, this.settings.frameRate);
+    this.stream = capture.stream; this.requestFrame = capture.requestFrame;
     // The existing Program mix is shared, not cloned, reconfigured or owned.
     try {
       for (const track of program.getAudioTracks()) this.stream.addTrack(track);
@@ -67,7 +71,7 @@ export class BroadcastVideoSource {
     // next frame to this draw makes 20 fps on a 30 fps clock run at 15 fps.
     this.nextFrameAt = due + (Math.floor((now + 1 - due) / period) + 1) * period;
     this.context.drawImage(this.source, 0, 0, this.settings.width, this.settings.height);
-    if (this.manualFrames) (this.stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack).requestFrame();
+    this.requestFrame?.();
   }
   close() {
     if (this.closed) return;

@@ -151,6 +151,10 @@ export async function createBroadcast(options: {
       watch: { enabled: config.watch.enabled, configured: relay?.configured === true, ...(relay?.publicUrl ? { publicUrl: relay.publicUrl } : {}) } },
       session: structuredClone(current?.session ?? last), preflight: preflight() };
   }
+  function sessionStatus() {
+    const session = current?.session ?? last;
+    return session ? { id: session.id, state: session.state } : undefined;
+  }
   function notify(force = false) {
     if (!force && Date.now() - notifiedAt < 500) return;
     notifiedAt = Date.now(); try { options.onStatus?.(snapshot()); } catch { /* UI callback cannot stop the media service. */ }
@@ -380,7 +384,14 @@ export async function createBroadcast(options: {
       run.outputAt = Date.now();
       for (const sink of run.sinks.values()) {
         const child = sink.process; if (!child || sink.stopped) continue;
-        if (!writeBroadcastSink(child.input, bytes)) { loseSink(run, sink, child, 'backpressure'); continue; }
+        const accepted = writeBroadcastSink(child.input, bytes, error => {
+          // A large write can cross the high-water mark every time, even if
+          // it drains between frames. Retry only after sustained lack of progress.
+          if (!error && sink.process === child && sink.backpressureAt) {
+            sink.backpressureAt = child.input.writableNeedDrain ? Date.now() : 0;
+          }
+        });
+        if (!accepted) { loseSink(run, sink, child, 'backpressure'); continue; }
         sink.status.bytes += bytes.length;
         if (child.input.writableNeedDrain) sink.backpressureAt ||= Date.now(); else sink.backpressureAt = 0;
       }
@@ -462,6 +473,6 @@ export async function createBroadcast(options: {
     if (run.config.watch.enabled) void publishWatch(run);
   }, 500); watchdog.unref();
   async function close() { closed = true; clearInterval(watchdog); await stop(); await lock; }
-  return { snapshot, preflight, configure, start, chunk, error, stop, retryDestination, stopDestination, close,
+  return { snapshot, sessionStatus, preflight, configure, start, chunk, error, stop, retryDestination, stopDestination, close,
     diagnostics: () => current ? { encoder: current.encoderKind, queuedBytes: current.queuedBytes } : null };
 }

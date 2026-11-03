@@ -29,7 +29,7 @@ const {
   currentItem,
   currentPrayerLabel,
   settings,
-  progress,
+  clock,
   showWarning,
   showCountdown,
   musicPlaying,
@@ -72,7 +72,7 @@ useEventListener(document, 'dblclick', () => {
       </div>
     </Transition>
 
-    <ProgressBar :progress="progress" :manual="state.mode === 'manual'" />
+    <ProgressBar v-if="!state.blanked" :clock="clock" :duration-ms="state.durationMs" :playing="state.playing" :manual="state.mode === 'manual'" />
 
     <WarningPill :visible="showWarning" :remaining-ms="remainingMs" />
     <CountdownChip

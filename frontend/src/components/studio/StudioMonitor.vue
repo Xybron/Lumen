@@ -31,7 +31,7 @@ function reset() {
   if (video.value) video.value.srcObject = null;
   updateAudioReady();
 }
-function request() { requestedAt = performance.now(); signal?.send({ t: 'watch', outputId: props.outputId, compactProgram: props.compactProgram }); }
+function request() { requestedAt = performance.now(); signal?.send({ t: 'watch', outputId: props.outputId, compactProgram: props.compactProgram, monitorOnly: true }); }
 function playMonitor(element: HTMLVideoElement) {
   void element.play().catch(error => {
     // Replacing a peer can interrupt an old play() promise. That is not an

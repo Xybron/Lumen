@@ -36,6 +36,10 @@ export interface SceneSourceBank {
 }
 
 interface MultiviewVideo { url: string; element: HTMLVideoElement; paused: boolean }
+interface CachedImage { image: HTMLImageElement; lastUsedAt: number }
+const artworkGraceMs = 10_000;
+const standbyImageLimit = 12;
+const standbyPixelLimit = 16 * 1024 * 1024; // About 64 MiB at four bytes per pixel.
 
 export class SourceBank {
   readonly inputs = new Map<string, MediaInput>();
@@ -44,7 +48,8 @@ export class SourceBank {
   private channelStates = new Map<string, ProjectionState>();
   private subscribed = new Set<string>();
   private stopWs: () => void;
-  private images = new Map<string, HTMLImageElement>();
+  private images = new Map<string, CachedImage>();
+  private imageSweepAt = 0;
   private multiviewVideos = new Map<string, MultiviewVideo>();
   private multiviewInputs = new Map<string, MediaInput>();
   private multiviewBank: SceneSourceBank | null = null;
@@ -118,9 +123,29 @@ export class SourceBank {
     this.pruneMultiviewVideos();
   }
   image(url: string) {
-    let image = this.images.get(url);
-    if (!image) { image = new Image(); image.src = `/${url.replace(/^\//, '')}`; this.images.set(url, image); }
+    const now = performance.now(), cached = this.images.get(url);
+    if (cached) { cached.lastUsedAt = now; return cached.image; }
+    const image = new Image();
+    image.src = `/${url.replace(/^\//, '')}`;
+    this.images.set(url, { image, lastUsedAt: now });
     return image;
+  }
+  private trimArtwork() {
+    if (!this.images.size) return;
+    const now = performance.now();
+    if (now < this.imageSweepAt) return;
+    this.imageSweepAt = now + artworkGraceMs;
+    // Keep source-owned images and the complete working set of every viewer,
+    // including a slow-loading slide. Only older, unused artwork has a budget.
+    const owned = new Set([...this.inputs.values()].map(input => input.element));
+    const standby = [...this.images].filter(([, cached]) => !owned.has(cached.image) && now - cached.lastUsedAt >= artworkGraceMs);
+    standby.sort((a, b) => b[1].lastUsedAt - a[1].lastUsedAt);
+    let kept = 0, pixels = 0;
+    for (const [url, { image }] of standby) {
+      const size = image.naturalWidth * image.naturalHeight;
+      if (kept >= standbyImageLimit || pixels + size > standbyPixelLimit) this.images.delete(url);
+      else { kept++; pixels += size; }
+    }
   }
   private setMedia(input: MediaInput, url: string, audioOnly = false) {
     input.node?.disconnect();
@@ -346,6 +371,7 @@ export class SourceBank {
     }
   }
   status() {
+    this.trimArtwork();
     const sources: Record<string, 'ready' | 'missing' | 'loading' | 'error'> = {}, levels: Record<string, number> = {}, sourceErrors: Record<string, string> = {};
     for (const [id, input] of this.inputs) {
       const kind = input.source.kind;
@@ -365,5 +391,5 @@ export class SourceBank {
     this.clearElement(input);
     input.node?.disconnect(); input.gain.disconnect(); input.delay.disconnect(); input.analyser.disconnect();
   }
-  close() { this.stopWs(); this.releaseMultiview(); for (const input of this.inputs.values()) this.dispose(input); this.inputs.clear(); }
+  close() { this.stopWs(); this.releaseMultiview(); for (const input of this.inputs.values()) this.dispose(input); this.inputs.clear(); this.images.clear(); }
 }

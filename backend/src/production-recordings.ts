@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import { createReadStream, createWriteStream } from 'node:fs';
+import { createReadStream } from 'node:fs';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { spawn } from 'node:child_process';
@@ -11,6 +11,9 @@ import { ProductionError } from './production-store.js';
 import type { StudioRecording } from '../../shared/production.js';
 
 export interface SavedRecording extends StudioRecording { nextChunk: number }
+function capturing(record: StudioRecording) {
+  return record.status === 'starting' || record.status === 'recording' || record.status === 'stopping';
+}
 export class RecordingStore {
   private records = new Map<string, SavedRecording>();
   private chain: Promise<unknown> = Promise.resolve();
@@ -42,8 +45,25 @@ export class RecordingStore {
   list(): StudioRecording[] {
     return [...this.records.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(({ nextChunk: _, ...r }) => ({ ...r }));
   }
-  active() { return this.list().find(r => ['starting', 'recording', 'stopping'].includes(r.status)) ?? null; }
-  busy(id: string) { return this.finalizing.has(id) || ['starting', 'recording', 'stopping', 'finalizing'].includes(this.records.get(id)?.status ?? ''); }
+  active(): StudioRecording | null {
+    // This runs on each renderer heartbeat. Copy only the active record.
+    let latest: SavedRecording | undefined;
+    for (const record of this.records.values()) {
+      if (!capturing(record)) continue;
+      if (!latest || record.createdAt > latest.createdAt) latest = record;
+    }
+    if (!latest) return null;
+    const { nextChunk: _, ...record } = latest;
+    return record;
+  }
+  busy(id: string) {
+    const record = this.records.get(id);
+    return this.finalizing.has(id) || !!record && (capturing(record) || record.status === 'finalizing');
+  }
+  hasActiveWork() {
+    for (const record of this.records.values()) if (capturing(record) || record.status === 'finalizing') return true;
+    return false;
+  }
   private async persist(r: SavedRecording) { await atomicWriteJson(path.join(this.dir, r.id, 'recording.json'), r); }
   private serial<T>(_id: string, fn: () => Promise<T>): Promise<T> {
     const run = this.chain.then(fn);
@@ -119,24 +139,28 @@ export class RecordingStore {
   }
   private async remux(r: SavedRecording) {
     const dir = path.join(this.dir, r.id);
-    const input = path.join(dir, 'capture.webm');
     const nextChunk = r.nextChunk;
     async function* parts() {
       for (let i = 0; i < nextChunk; i++) {
         for await (const data of createReadStream(path.join(dir, `${String(i).padStart(8, '0')}.part`))) yield data;
       }
     }
-    await pipeline(Readable.from(parts()), createWriteStream(input));
     const executable = ffmpeg;
     if (!executable) throw new Error('FFmpeg is unavailable');
     const temp = path.join(dir, 'finalizing.webm');
-    await new Promise<void>((resolve, reject) => {
-      const proc = spawn(executable, ['-hide_banner', '-loglevel', 'error', '-y', '-i', input, '-map', '0', '-c', 'copy', '-f', 'webm', temp], { stdio: ['ignore', 'ignore', 'pipe'] });
+    const proc = spawn(executable, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'matroska', '-i', 'pipe:0', '-map', '0', '-c', 'copy', '-f', 'webm', temp], { stdio: ['pipe', 'ignore', 'pipe'] });
+    const finished = new Promise<void>((resolve, reject) => {
       let stderr = '';
       proc.stderr.on('data', b => { stderr = (stderr + b).slice(-4000); });
       proc.once('error', reject);
       proc.once('close', code => code === 0 ? resolve() : reject(new Error(stderr || `FFmpeg exited ${code}`)));
     });
+    // Recorder chunks form a single WebM stream. Feed them in order, with
+    // backpressure, so a long service does not require a second staging file.
+    const [processResult, inputResult] = await Promise.allSettled([finished, pipeline(Readable.from(parts(), { objectMode: false }), proc.stdin)]);
+    if (inputResult.status === 'rejected' && inputResult.reason?.code !== 'EPIPE') throw inputResult.reason;
+    if (processResult.status === 'rejected') throw processResult.reason;
+    if (inputResult.status === 'rejected') throw inputResult.reason;
     await this.serial(r.id, async () => {
       const current = this.require(r.id);
       await fs.rename(temp, path.join(dir, 'recording.webm'));

@@ -17,6 +17,37 @@ class Socket extends EventEmitter {
   frame(value: unknown) { this.emit('message', Buffer.from(JSON.stringify(value))); }
 }
 
+test('meter fanout updates controllers but only engine or audio changes wake projector clients', t => {
+  const state = initialProduction();
+  const status = { state: 'running' as const, fps: 30, levels: { master: 0 }, sources: {}, sourceErrors: {}, recording: null };
+  const hub = new ProductionHub(req => req.headers['x-engine'] === 'yes', () => state, () => status);
+  t.after(() => hub.close());
+  const connect = (engine = false) => {
+    const socket = new Socket();
+    hub.wss.emit('connection', socket, { headers: engine ? { 'x-engine': 'yes' } : {} });
+    return socket;
+  };
+  const engine = connect(true), control = connect(), monitor = connect(), output = new Socket();
+  monitor.frame({ t: 'watch', outputId: 'screen_main', monitorOnly: true });
+  hub.attachOutputViewer(output as unknown as WebSocket, 'screen_main');
+  hub.broadcast({ t: 'status', status });
+  for (const socket of [engine, control, monitor, output]) socket.messages = [];
+  for (let i = 0; i < 100; i++) {
+    hub.broadcast({ t: 'status', status: { ...status, levels: { master: i / 100 } } });
+  }
+  assert.equal(control.messages.length, 100);
+  assert.deepEqual([engine.messages.length, monitor.messages.length, output.messages.length], [0, 0, 0]);
+  state.outputs[0].audioEnabled = true;
+  hub.broadcast({ t: 'state', state }); hub.broadcast({ t: 'state', state });
+  assert.deepEqual(output.messages, [{ t: 'output-status', outputId: 'screen_main', engineState: 'running', audioEnabled: true }]);
+  hub.broadcast({ t: 'status', status: { ...status, state: 'offline' } });
+  assert.equal(output.messages.at(-1)?.engineState, 'offline');
+  assert.equal((monitor.messages.at(-1)?.status as typeof status).state, 'offline');
+  state.outputs.shift();
+  hub.broadcast({ t: 'state', state });
+  assert.equal(output.readyState, WebSocket.CLOSED, 'An output removed from the document immediately revokes its scoped connection');
+});
+
 test('authenticated mobile monitor is silent, narrow and cannot become a public monitor or operator', t => {
   const state = initialProduction();
   state.sources.push({ id: 'private-camera', name: 'Private device', kind: 'camera', loop: false, url: 'media/private-input', audio: { volume: 1, muted: false, mode: 'always', delayMs: 0 } });

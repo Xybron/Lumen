@@ -173,7 +173,7 @@ export function disableBroadcastHardware(profile: BroadcastProfile) {
 
 /** Non-blocking fanout: a slow sink is discarded rather than backpressuring the
  * shared encoder. The parent can reconnect it at a later MPEG-TS keyframe. */
-export function writeBroadcastSink(input: Writable, bytes: Buffer): boolean {
+export function writeBroadcastSink(input: Writable, bytes: Buffer, onWritten?: (error?: Error | null) => void): boolean {
   if (input.destroyed || input.writableEnded || input.writableLength + bytes.length > BROADCAST_SINK_LIMIT) return false;
-  try { input.write(bytes, () => {}); return true; } catch { return false; }
+  try { input.write(bytes, onWritten); return true; } catch { return false; }
 }

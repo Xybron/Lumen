@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import ffmpeg from 'ffmpeg-static';
 import { ProductionStore } from '../src/production-store.js';
 import { CommandSchema, ProductionSchema } from '../src/production-schema.js';
 import { RecordingStore } from '../src/production-recordings.js';
@@ -206,4 +208,29 @@ test('recording chunks are ordered, retry-idempotent, and marked recoverable aft
   assert.equal(restarted.list()[0].status, 'interrupted');
   assert.equal(restarted.list()[0].bytes, 11);
   await assert.rejects(restarted.chunk(recording.id, 2, Buffer.from('late')), { status: 409 });
+});
+
+test('finalization reads saved chunks directly and retains them for a retry after a read failure', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'lumen-remux-test-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const source = execFileSync(ffmpeg!, ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=160x90:r=5',
+    '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000', '-t', '1', '-threads', '1',
+    '-c:v', 'libvpx', '-c:a', 'libopus', '-f', 'webm', 'pipe:1']);
+  const records = new RecordingStore(dir, () => {});
+  await records.init();
+  const { id } = await records.create('Fixture');
+  const split = Math.floor(source.length / 2), folder = path.join(dir, id), tail = path.join(folder, '00000001.part');
+  await records.chunk(id, 0, source.subarray(0, split)); await records.chunk(id, 1, source.subarray(split));
+  async function waitForFinalization() {
+    for (let i = 0; i < 200 && records.busy(id); i++) await new Promise(resolve => setTimeout(resolve, 25));
+    assert.equal(records.busy(id), false);
+    return records.list()[0].status;
+  }
+  await fs.rename(tail, tail + '.missing');
+  await records.finish(id, 1000); assert.equal(await waitForFinalization(), 'error');
+  await fs.rename(tail + '.missing', tail);
+  await records.finish(id); assert.equal(await waitForFinalization(), 'complete');
+  execFileSync(ffmpeg!, ['-v', 'error', '-i', records.download(id).path, '-map', '0:v', '-map', '0:a', '-f', 'null', '-']);
+  assert.deepEqual(await fs.readFile(tail), source.subarray(split));
+  assert.ok(!(await fs.readdir(folder)).includes('capture.webm'));
 });

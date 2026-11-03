@@ -175,7 +175,7 @@ test('Multiview inspects channel video/images without activating always-audio or
 
   bank.channelStates.set('slides', { playlistId: 'service', index: 1 });
   view = bank.multiviewView(ids); paintMultiview(canvas, [scene], view);
-  const image = bank.images.get('media/backgrounds/current.png');
+  const image = bank.images.get('media/backgrounds/current.png')?.image;
   assert.ok(image instanceof Image && pictures.includes(image), 'The actual current image is also painted');
   assert.equal(held.pauses, 0); assert.equal(audioNodes, 0);
 

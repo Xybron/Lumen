@@ -29,9 +29,12 @@ test('watch URL is a public HTTPS origin and configuration never returns publish
 test('publisher sends actual segment bytes before the playlist, uses header auth, deduplicates media and ends the current session', async () => {
   const calls: Array<{ url: string; body: Buffer }> = [];
   const f = await fixture(async (req, res) => { assert.equal(req.headers.authorization, `Bearer ${token}`); const parts: Buffer[] = []; for await (const chunk of req) parts.push(chunk); calls.push({ url: req.url ?? '', body: Buffer.concat(parts) }); ok(res, req.url?.endsWith('/sessions') ? { sessionId: '11111111-1111-4111-8111-111111111111' } : {}); });
+  let connections = 0;
+  f.server.on('connection', () => { connections++; });
   try {
     const relay = createBroadcastRelay(f.options); await relay.begin({ epoch: 'fixture-epoch-0001' }); await relay.publish({ directory: f.directory, playlist: 'index.m3u8' }); await relay.publish({ directory: f.directory, playlist: 'index.m3u8' }); await relay.finish();
     assert.deepEqual(calls.map(call => call.url.split('/').at(-1)), ['sessions', 'segment-00000000.ts', 'index.m3u8', 'index.m3u8', 'end']);
+    assert.equal(connections, 1, 'One connection carries the whole publish sequence while the relay supports keep-alive');
     assert.equal(calls[1].body.toString(), 'generated HLS media'); assert.equal(calls[2].body.toString(), manifest); assert.ok(calls.every(call => !call.url.includes(token)));
   } finally { await f.close(); }
 });
@@ -49,6 +52,26 @@ test('publisher blocks remote HLS paths, symlinks, oversized media and concurren
     while (!respond) await new Promise(resolve => setTimeout(resolve, 5));
     await assert.rejects(relay.publish({ directory: f.directory, playlist: 'index.m3u8' }), (error: unknown) => error instanceof WatchRelayError && error.code === 'busy'); controller.abort();
     await assert.rejects(pending, (error: unknown) => error instanceof WatchRelayError && error.code === 'cancelled');
+  } finally { await f.close(); }
+});
+
+test('finish reaches the relay during a stalled upload and closes the session sockets', { timeout: 5000 }, async () => {
+  let onSegment!: () => void, held: http.ServerResponse | undefined, endedWhileUploading = false;
+  const segmentArrived = new Promise<void>(resolve => { onSegment = resolve; });
+  const f = await fixture((req, res) => {
+    req.resume();
+    if (req.url?.endsWith('.ts')) { held = res; onSegment(); return; }
+    if (req.url?.endsWith('/end')) endedWhileUploading = !!held && !held.destroyed;
+    ok(res, req.url?.endsWith('/sessions') ? { sessionId: '11111111-1111-4111-8111-111111111111' } : {});
+  });
+  const closed: Promise<void>[] = [];
+  f.server.on('connection', socket => closed.push(new Promise(resolve => socket.once('close', () => resolve()))));
+  try {
+    const relay = createBroadcastRelay(f.options);
+    await relay.begin({ epoch: 'fixture-epoch-0002' });
+    const abandoned = assert.rejects(relay.publish({ directory: f.directory, playlist: 'index.m3u8' }), WatchRelayError);
+    await segmentArrived; await relay.finish(); await abandoned; await Promise.all(closed);
+    assert.equal(endedWhileUploading, true);
   } finally { await f.close(); }
 });
 

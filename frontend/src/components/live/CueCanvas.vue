@@ -1,21 +1,45 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
 import type { WorshipTheme } from '../../../../shared/worship';
-const props=defineProps<{ text:string; reference?:string; attribution?:string; theme:WorshipTheme }>();
-const root=ref<HTMLElement>(),body=ref<HTMLElement>(),fontSize=ref(32),unit=ref(1);
-let observer:ResizeObserver|undefined;
-async function fit(){
-  await nextTick();if(!root.value||!body.value)return;
-  const width=root.value.clientWidth,height=root.value.clientHeight;
-  unit.value=width/1920;
-  let low=1,high=width*({sm:.026,md:.031,lg:.038,xl:.046,'2xl':.054}[props.theme.size]);
-  const available=height*.65;
-  for(let i=0;i<12;i++){const mid=(low+high)/2;body.value.style.fontSize=`${mid}px`;if(body.value.scrollHeight<=available&&body.value.scrollWidth<=body.value.clientWidth+1)low=mid;else high=mid;}
-  fontSize.value=low;body.value.style.fontSize=`${low}px`;
+
+const props = defineProps<{ text: string; reference?: string; attribution?: string; theme: WorshipTheme }>();
+const root = ref<HTMLElement>(), body = ref<HTMLElement>(), fontSize = ref(32), unit = ref(1);
+let observer: ResizeObserver | undefined;
+
+function fit() {
+  const canvas = root.value, text = body.value;
+  if (!canvas || !text) return;
+  const width = canvas.clientWidth, height = canvas.clientHeight;
+  if (!width || !height) return;
+  unit.value = width / 1920;
+  const maximum = width * ({ sm: .026, md: .031, lg: .038, xl: .046, '2xl': .054 }[props.theme.size]);
+  const fits = (size: number) => {
+    text.style.fontSize = size + 'px';
+    return text.scrollHeight <= height * .65 && text.scrollWidth <= text.clientWidth + 1;
+  };
+
+  // Most cues already fit at the chosen size. Only squeeze a long cue, and
+  // stop measuring once the remaining difference is under a quarter pixel.
+  let size = maximum;
+  if (!fits(maximum)) {
+    let low = Math.min(1, maximum), high = maximum;
+    while (high - low > .25) {
+      const mid = (low + high) / 2;
+      if (fits(mid)) low = mid;
+      else high = mid;
+    }
+    size = low;
+    text.style.fontSize = size + 'px';
+  }
+  fontSize.value = size;
 }
-watch(()=>[props.text,props.reference,props.attribution,props.theme],fit,{deep:true});
-onMounted(()=>{observer=new ResizeObserver(fit);if(root.value)observer.observe(root.value);void fit();});
-onBeforeUnmount(()=>observer?.disconnect());
+watch([() => props.text, () => props.theme.size], fit, { flush: 'post' });
+onMounted(() => {
+  // The observer supplies the initial size as well as subsequent resizes.
+  observer = new ResizeObserver(fit);
+  if (root.value) observer.observe(root.value);
+});
+onBeforeUnmount(() => observer?.disconnect());
 </script>
 <template>
   <div ref="root" class="cue-canvas" :style="{background:theme.background,color:theme.color,textAlign:theme.align}">

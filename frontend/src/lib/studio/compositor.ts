@@ -3,10 +3,10 @@ import type { Item } from '@/types';
 import { SourceBank, type MediaInput, type SceneSourceBank } from './sources';
 import { blendScenes, sceneSourceWeights, transitionProgress, weightedScene, type SceneWeight } from './transition';
 import { AnimationRunTracker, sampleAnimation } from './animation';
-import { layoutChannelOverlay, type ChannelOverlayLayout } from './channel-overlay';
+import { channelText, layoutChannelOverlay, type ChannelOverlayLayout } from './channel-overlay';
 import { blendProgramPictures, programPictureSources, withProgramInsert, type ProgramPicture } from './program-picture';
 import { outputAudioEnabled, sourceAudioWeight } from './audio-routing';
-import { BroadcastVideoSource } from './broadcast-capture';
+import { BroadcastVideoSource, captureCanvasFrames } from './broadcast-capture';
 import { ProgramFrameTiming } from './program-frame-timing';
 import type { BroadcastProfile } from '../../../../shared/broadcast';
 import { PROGRAM_MONITOR_OUTPUT_ID, PROGRAM_MONITOR_WIDTH, PROGRAM_MONITOR_HEIGHT, PROGRAM_MONITOR_FRAME_RATE } from '../../../../shared/program-monitor.js';
@@ -35,14 +35,49 @@ function textLines(ctx: CanvasRenderingContext2D, text: string, width: number) {
   return lines;
 }
 
-function drawText(ctx: CanvasRenderingContext2D, layer: SceneLayer, w: number, h: number) {
-  ctx.font = `${layer.fontWeight} ${layer.fontSize}px -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif`;
-  ctx.fillStyle = layer.color; ctx.textAlign = layer.align; ctx.textBaseline = 'middle';
-  const lines = textLines(ctx, layer.text, Math.max(1, w - 16));
-  const lineHeight = layer.fontSize * 1.24;
-  const x = layer.align === 'left' ? 8 : layer.align === 'right' ? w - 8 : w / 2;
+type TextStyle = Pick<SceneLayer, 'fontWeight' | 'fontSize' | 'color' | 'align' | 'text'>;
+let wrappedText = new WeakMap<TextStyle, { width: number; font: string; text: string; lines: string[] }>();
+function drawText(ctx: CanvasRenderingContext2D, style: TextStyle, w: number, h: number) {
+  const font = `${style.fontWeight} ${style.fontSize}px -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif`;
+  ctx.font = font;
+  ctx.fillStyle = style.color; ctx.textAlign = style.align; ctx.textBaseline = 'middle';
+  let cached = wrappedText.get(style);
+  if (!cached || cached.width !== w || cached.font !== font || cached.text !== style.text) {
+    cached = { width: w, font, text: style.text, lines: textLines(ctx, style.text, Math.max(1, w - 16)) };
+    wrappedText.set(style, cached);
+  }
+  const { lines } = cached, lineHeight = style.fontSize * 1.24;
+  const x = style.align === 'left' ? 8 : style.align === 'right' ? w - 8 : w / 2;
   const top = Math.max(lineHeight / 2, (h - lines.length * lineHeight) / 2 + lineHeight / 2);
   lines.forEach((line, i) => ctx.fillText(line, x, top + i * lineHeight));
+}
+
+// The source bank supplies a new Item when the channel content changes. Keep
+// the fitted text for that snapshot, independent of its moving background.
+interface SlideText { width: number; height: number; body: TextStyle; reference?: TextStyle; credit?: TextStyle }
+let slideText = new WeakMap<Item, SlideText>();
+function fitSize(ctx: CanvasRenderingContext2D, text: string, width: number, height: number,
+  size: number, weight: number, step: number) {
+  while (size > 4) {
+    ctx.font = `${weight} ${size}px sans-serif`;
+    if (textLines(ctx, text, width).length * size * 1.24 <= height) break;
+    size -= step;
+  }
+  return size;
+}
+function fittedSlideText(ctx: CanvasRenderingContext2D, item: Item, w: number, h: number): SlideText {
+  const cached = slideText.get(item);
+  if (cached && cached.width === w && cached.height === h) return cached;
+  const text = channelText(item);
+  const size = ({ sm: 42, md: 54, lg: 68, xl: 82, '2xl': 100 })[item.typography?.size ?? 'lg'];
+  const style = { fontWeight: item.typography?.weight ?? 500, color: item.color ?? '#ffffff', align: item.typography?.align ?? 'center' };
+  const layout: SlideText = { width: w, height: h, body: { ...style, text, fontSize: fitSize(ctx, text, w * .86, h * .66, size, style.fontWeight, 2) } };
+  if (item.reference) layout.reference = { ...style, text: item.reference, fontSize: 28 };
+  if (item.id.startsWith('cue_') && item.subtitle) {
+    layout.credit = { ...style, text: item.subtitle, fontSize: fitSize(ctx, item.subtitle, w * .84, h * .06, 18, 500, 1) };
+  }
+  slideText.set(item, layout);
+  return layout;
 }
 
 function drawItem(ctx: CanvasRenderingContext2D, item: Item, bank: SceneSourceBank, video: HTMLVideoElement | null, w: number, h: number) {
@@ -58,26 +93,16 @@ function drawItem(ctx: CanvasRenderingContext2D, item: Item, bank: SceneSourceBa
   }
   if (bg?.overlayOpacity) { ctx.fillStyle = `rgba(0,0,0,${bg.overlayOpacity})`; ctx.fillRect(0, 0, w, h); }
   if (['image', 'video'].includes(item.type)) return;
-  const text = item.type === 'lyrics' && item.stanzas?.length ? item.stanzas.map(s => s.lines).join('\n\n') : item.body || item.title || '';
-  let size = ({ sm: 42, md: 54, lg: 68, xl: 82, '2xl': 100 })[item.typography?.size ?? 'lg'];
-  const base = { fontWeight: item.typography?.weight ?? 500, color: item.color ?? '#ffffff', align: item.typography?.align ?? 'center', text };
+  const layout = fittedSlideText(ctx, item, w, h);
   ctx.save(); ctx.translate(w * 0.07, h * 0.14);
-  const tw = w * 0.86, th = h * 0.66;
-  while (size > 4) {
-    ctx.font = `${base.fontWeight} ${size}px sans-serif`;
-    if (textLines(ctx, text, tw).length * size * 1.24 <= th) break;
-    size -= 2;
-  }
-  drawText(ctx, { ...base, fontSize: size } as SceneLayer, tw, th); ctx.restore();
-  if (item.reference) {
+  drawText(ctx, layout.body, w * 0.86, h * 0.66); ctx.restore();
+  if (layout.reference) {
     ctx.save(); ctx.translate(w * 0.08, h * 0.83);
-    drawText(ctx, { ...base, fontSize: 28, text: item.reference } as SceneLayer, w * 0.84, h * 0.06); ctx.restore();
+    drawText(ctx, layout.reference, w * 0.84, h * 0.06); ctx.restore();
   }
-  if (item.id.startsWith('cue_') && item.subtitle) {
+  if (layout.credit) {
     ctx.save(); ctx.translate(w * 0.08, h * 0.92); ctx.globalAlpha *= .65;
-    let creditSize=18;
-    while(creditSize>4){ctx.font=`500 ${creditSize}px sans-serif`;if(textLines(ctx,item.subtitle,w*.84).length*creditSize*1.24<=h*.06)break;creditSize--;}
-    drawText(ctx,{...base,fontSize:creditSize,text:item.subtitle} as SceneLayer,w*.84,h*.06);ctx.restore();
+    drawText(ctx, layout.credit, w * .84, h * .06); ctx.restore();
   }
 }
 
@@ -174,7 +199,12 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: SceneLayer, bank
   ctx.restore();
 }
 
-const overlayLayouts = new WeakMap<Item, Map<string, ChannelOverlayLayout>>();
+let overlayLayouts = new WeakMap<Item, Map<string, ChannelOverlayLayout>>();
+function clearTextLayouts() {
+  wrappedText = new WeakMap();
+  slideText = new WeakMap();
+  overlayLayouts = new WeakMap();
+}
 function drawChannelOverlay(ctx: CanvasRenderingContext2D, item: Item, layer: SceneLayer, bank: SceneSourceBank,
   input: MediaInput, w: number, h: number) {
   if (item.type === 'image' && item.background?.src) { drawFitted(ctx, bank.image(item.background.src), 0, 0, w, h, layer.fit); return; }
@@ -228,6 +258,7 @@ interface Bus {
   routes: Map<string, { gain: GainNode; input: GainNode; target: number }>;
   masterTarget?: number;
   stream: MediaStream;
+  requestFrame?: () => void;
 }
 
 interface ProgramFade {
@@ -263,6 +294,7 @@ export class StudioCompositor {
   private broadcastVideo: BroadcastVideoSource | null = null;
   private broadcastRecovery = 0;
   constructor(private state: ProductionState) {
+    document.fonts.addEventListener('loadingdone', clearTextLayouts);
     this.animationRuns = new AnimationRunTracker(state);
     this.programCanvas.width = this.sceneCanvas.width = 1920;
     this.programCanvas.height = this.sceneCanvas.height = 1080;
@@ -370,9 +402,13 @@ export class StudioCompositor {
       const destination = this.audio.createMediaStreamDestination(), master = this.audio.createGain(), analyser = this.audio.createAnalyser();
       analyser.fftSize = 2048;
       master.connect(analyser); analyser.connect(destination);
-      const stream = canvas.captureStream(30);
+      // Projector tracks should publish the completed screen draw. Program's
+      // recording track and the operator Preview retain their native cadence.
+      const { stream, requestFrame } = id === 'program' || id === 'preview'
+        ? { stream: canvas.captureStream(30), requestFrame: undefined }
+        : captureCanvasFrames(canvas, 30);
       destination.stream.getAudioTracks().forEach(t => stream.addTrack(t));
-      bus = { canvas, destination, master, analyser, routes: new Map(), stream }; this.buses.set(id, bus);
+      bus = { canvas, destination, master, analyser, routes: new Map(), stream, requestFrame }; this.buses.set(id, bus);
     }
     return bus;
   }
@@ -506,6 +542,7 @@ export class StudioCompositor {
         paintScene(bus.canvas, scene, this.bank, output?.blanked, run ? now - run.startedAt : null);
       }
       if (id === 'preview' && painted) this.previewPaintedAt = now;
+      bus.requestFrame?.();
       const audioEnabled = outputAudioEnabled(id, output?.audioEnabled);
       if (!audioEnabled) {
         if (bus.masterTarget !== 0) {
@@ -582,5 +619,5 @@ export class StudioCompositor {
     for (const route of bus.routes.values()) { try { route.input.disconnect(route.gain); } catch { /* removed input */ } route.gain.disconnect(); }
     bus.master.disconnect(); bus.analyser.disconnect(); bus.stream.getTracks().forEach(t => t.stop());
   }
-  close() { clearInterval(this.timer); this.broadcastVideo?.close(); this.broadcastVideo = null; this.releaseProgramMonitor(); this.releaseMultiview(); for (const bus of this.buses.values()) this.dispose(bus); this.bank.close(); void this.audio.close(); }
+  close() { document.fonts.removeEventListener('loadingdone', clearTextLayouts); clearInterval(this.timer); this.broadcastVideo?.close(); this.broadcastVideo = null; this.releaseProgramMonitor(); this.releaseMultiview(); for (const bus of this.buses.values()) this.dispose(bus); this.bank.close(); void this.audio.close(); }
 }

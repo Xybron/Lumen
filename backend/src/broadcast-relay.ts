@@ -80,7 +80,7 @@ function validateOptions(options: WatchRelayOptions): URL {
   return base;
 }
 function relayScope(options: WatchRelayOptions) { return options.workspaceId ? `${options.workspaceId}/${options.slug}` : options.slug; }
-async function request(base: URL, route: string, token: string, options: WatchRelayOptions, body: Buffer, signal?: AbortSignal, method = 'POST'): Promise<Record<string, unknown>> {
+async function request(base: URL, route: string, token: string, options: WatchRelayOptions, body: Buffer, signal?: AbortSignal, method = 'POST', agent: http.Agent | false = false): Promise<Record<string, unknown>> {
   if (signal?.aborted) throw new WatchRelayError('Watch publishing was cancelled.', 'cancelled');
   const controller = new AbortController(), timeout = setTimeout(() => controller.abort(new Error('deadline')), options.timeoutMs ?? 10000);
   const abort = () => controller.abort(signal?.reason); signal?.addEventListener('abort', abort, { once: true }); if (signal?.aborted) abort();
@@ -94,7 +94,7 @@ async function request(base: URL, route: string, token: string, options: WatchRe
     return await new Promise((resolve, reject) => {
       const transport = base.protocol === 'https:' ? https : http;
       const req = transport.request(new URL(route, base), {
-        method, agent: false, family: address.family,
+        method, agent, family: address.family,
         lookup: (_hostname, _options, callback) => callback(null, address.address, address.family),
         signal: controller.signal,
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': route.endsWith('.ts') ? 'video/mp2t' : route.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : 'application/json', 'Content-Length': body.length },
@@ -151,16 +151,25 @@ export function createProtectedOutputRelay(options: ProtectedOutputRelayOptions)
 export function createBroadcastRelay(options: WatchRelayOptions): WatchRelayAdapter {
   const base = validateOptions(options), scope = relayScope(options), route = `/api/push/${scope}`;
   const maxSegment = options.maxSegmentBytes ?? 8 * 1024 * 1024;
-  let session: string | undefined, generation = 0, publishing = false;
+  let session: { id: string; agent: http.Agent } | undefined, generation = 0, publishing = false;
   const uploaded = new Set<string>();
   return {
     configured: true, publicUrl: new URL(`/watch/${scope}`, base).href,
     async begin({ epoch, signal }) {
-      const ownGeneration = ++generation; session = undefined; uploaded.clear();
-      const response = await request(base, `${route}/sessions`, options.token, options, Buffer.from(JSON.stringify({ epoch })), signal);
-      if (ownGeneration !== generation || signal?.aborted) throw new WatchRelayError('Watch publishing was cancelled.', 'cancelled');
-      if (typeof response.sessionId !== 'string' || !SESSION.test(response.sessionId)) throw new WatchRelayError('The watch relay returned an invalid session.', 'rejected');
-      session = response.sessionId;
+      const ownGeneration = ++generation;
+      session?.agent.destroy(); session = undefined; uploaded.clear();
+      // One session, one origin. Reuse its verified connection for segments
+      // and playlists. A server-closed socket is replaced on the next request.
+      const Agent = base.protocol === 'https:' ? https.Agent : http.Agent;
+      // A finish request can preempt an in-flight upload. Steady-state uploads
+      // are serial and retain at most one idle socket.
+      const agent = new Agent({ keepAlive: true, maxSockets: 2, maxFreeSockets: 1, timeout: options.timeoutMs ?? 10000 });
+      try {
+        const response = await request(base, `${route}/sessions`, options.token, options, Buffer.from(JSON.stringify({ epoch })), signal, 'POST', agent);
+        if (ownGeneration !== generation || signal?.aborted) throw new WatchRelayError('Watch publishing was cancelled.', 'cancelled');
+        if (typeof response.sessionId !== 'string' || !SESSION.test(response.sessionId)) throw new WatchRelayError('The watch relay returned an invalid session.', 'rejected');
+        session = { id: response.sessionId, agent };
+      } catch (error) { agent.destroy(); throw error; }
     },
     async publish({ directory, playlist, signal }) {
       if (publishing) throw new WatchRelayError('A watch update is already in progress.', 'busy');
@@ -179,12 +188,12 @@ export function createBroadcastRelay(options: WatchRelayOptions): WatchRelayAdap
           const filename = path.join(folder, name), segmentStat = await fs.lstat(filename);
           if (!segmentStat.isFile() || segmentStat.isSymbolicLink() || segmentStat.size < 1 || segmentStat.size > maxSegment) throw new WatchRelayError('A watch media segment is invalid or too large.', 'media');
           const segment = await fs.readFile(filename); if (segment.length > maxSegment) throw new WatchRelayError('A watch media segment exceeded its limit.', 'media');
-          assertCurrent(); await request(base, `${route}/${ownSession}/${name}`, options.token, options, segment, signal, 'PUT'); assertCurrent(); uploaded.add(name);
+          assertCurrent(); await request(base, `${route}/${ownSession.id}/${name}`, options.token, options, segment, signal, 'PUT', ownSession.agent); assertCurrent(); uploaded.add(name);
         }
         assertCurrent();
         // Even when unchanged, the server must validate the existing live window
         // after a connection failure; it never refreshes freshness for repeats.
-        await request(base, `${route}/${ownSession}/index.m3u8`, options.token, options, bytes, signal, 'PUT'); assertCurrent();
+        await request(base, `${route}/${ownSession.id}/index.m3u8`, options.token, options, bytes, signal, 'PUT', ownSession.agent); assertCurrent();
         // Bound metadata for long services; a removed segment is never needed
         // again in the increasing FFmpeg live window.
         const minimum = BigInt(names[0].slice(8, -3)) - 12n;
@@ -194,7 +203,10 @@ export function createBroadcastRelay(options: WatchRelayOptions): WatchRelayAdap
     },
     async finish({ signal } = {}) {
       const current = session; ++generation; session = undefined; uploaded.clear();
-      if (current) await request(base, `${route}/${current}/end`, options.token, { ...options, timeoutMs: Math.min(options.timeoutMs ?? 10000, 2500) }, Buffer.from('{}'), signal);
+      if (!current) return;
+      try {
+        await request(base, `${route}/${current.id}/end`, options.token, { ...options, timeoutMs: Math.min(options.timeoutMs ?? 10000, 2500) }, Buffer.from('{}'), signal, 'POST', current.agent);
+      } finally { current.agent.destroy(); }
     },
   };
 }

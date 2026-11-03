@@ -11,6 +11,8 @@ interface Peer {
   outputScope?: string;
   outputAudioEnabled?: boolean;
   mobileProgram?: boolean;
+  monitorOnly?: boolean;
+  lastEngineState?: StudioStatus['state'];
 }
 
 // Dedicated signaling channel. Only the renderer can offer an output; only
@@ -40,6 +42,7 @@ export class ProductionHub {
     if (peer.outputScope) {
       const value = message as Record<string, unknown>;
       const snapshot = value.state as ProductionState | undefined;
+      const previousAudio = peer.outputAudioEnabled;
       if (snapshot) {
         const output = snapshot.outputs.find(item => item.id === peer.outputScope);
         if (peer.outputScope !== 'program' && !peer.mobileProgram && !output) { peer.ws.close(1008, 'Output is no longer available'); peer.ws.terminate(); return; }
@@ -47,9 +50,12 @@ export class ProductionHub {
       }
       if (value.t === 'connected' || value.t === 'status' || value.t === 'state') {
         const status = value.status as StudioStatus | undefined;
+        const engineState = status?.state ?? this.status().state;
+        if (value.t !== 'connected' && engineState === peer.lastEngineState && previousAudio === peer.outputAudioEnabled) return;
+        peer.lastEngineState = engineState;
         peer.ws.send(JSON.stringify({ t: value.t === 'connected' ? 'connected' : 'output-status',
           ...(value.t === 'connected' ? { peerId: peer.id } : {}), outputId: peer.outputScope,
-          engineState: status?.state ?? this.status().state, audioEnabled: peer.outputAudioEnabled === true }));
+          engineState, audioEnabled: peer.outputAudioEnabled === true }));
       } else if (value.t === 'signal' && value.key === `out:${peer.outputScope}`) {
         peer.ws.send(JSON.stringify({ t: 'signal', peerId: value.peerId, key: value.key, description: value.description, candidate: value.candidate }));
       }
@@ -59,7 +65,21 @@ export class ProductionHub {
   }
   engineSend(message: unknown) { if (this.engine) this.send(this.engine, message); }
   hasEngine() { return this.engine?.ws.readyState === WebSocket.OPEN; }
-  broadcast(message: unknown) { for (const peer of this.peers.values()) this.send(peer, message); }
+  broadcast(message: { t: string; status?: Partial<StudioStatus>; state?: ProductionState }) {
+    let encoded: string | undefined;
+    for (const peer of this.peers.values()) {
+      if (peer.ws.readyState !== WebSocket.OPEN) continue;
+      if (peer.outputScope) { this.send(peer, message); continue; }
+      if (message.t === 'status') {
+        // The engine produced these meters. Monitor sockets only use the
+        // engine lifecycle; the operator's control socket still gets every mix.
+        if (peer.engine || (peer.monitorOnly && peer.lastEngineState === message.status?.state)) continue;
+        peer.lastEngineState = message.status?.state;
+      }
+      encoded ??= JSON.stringify(message);
+      peer.ws.send(encoded);
+    }
+  }
   /** An already capability-authenticated gateway viewer. Never infer operator
    * authority from cookies/headers on the separate viewer listener. */
   attachOutputViewer(ws: WebSocket, outputId: string) {
@@ -112,6 +132,7 @@ export class ProductionHub {
           const allowed = peer.outputScope ? m.outputId === peer.outputScope : ['preview', 'multiview', PROGRAM_MONITOR_OUTPUT_ID].includes(m.outputId) ? peer.operator :
             m.outputId === 'program' ? peer.signedIn : this.state().outputs.some(o => o.id === m.outputId);
           if (!allowed) return;
+          peer.monitorOnly = m.monitorOnly === true;
           const compactProgram = peer.operator && m.outputId === 'program' && m.compactProgram === true;
           peer.watching.set(m.outputId, compactProgram);
           this.engineSend({ t: 'watch', peerId: peer.id, outputId: m.outputId, key: `out:${m.outputId}`, compactProgram });

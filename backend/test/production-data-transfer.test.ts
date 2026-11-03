@@ -113,7 +113,7 @@ test('recordings and Clips round-trip with fresh IDs, private asset bytes, owner
     assert.equal(draft.recordingId, mapping[recording.id]); assert.equal(draft.timeline!.tracks[0].items[0].source!.id, asset.id);
     assert.notEqual(draft.timeline!.tracks[0].id, 'track_original'); assert.equal(snapshot.data.exports[0].draftId, draft.id);
     const exported = await f.adapter.exportClips([draft.id]); assert.equal(exported.files.length, 2); assert.deepEqual(exported.recordingIds, [mapping[recording.id]]);
-    await assert.rejects(commit(f, tx => tx.clearRecordings([mapping[recording.id]])), /retained clip/);
+    await assert.rejects(commit(f, tx => tx.clearRecordings([mapping[recording.id]])), /still used by a saved project or export/);
     const before = f.clips.transfer.snapshot();
     await assert.rejects(f.adapter.transaction(path.join(f.dir, 'rollback-clear'), async tx => {
       await tx.clearClips([draft.id]); await tx.clearRecordings([mapping[recording.id]]); await tx.prepare(); tx.commitSync(); throw new Error('synthetic clear failure');

@@ -1,23 +1,54 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { onBeforeUnmount, ref, watchEffect } from 'vue';
 
-const props = defineProps<{ progress: number; manual?: boolean }>();
+const props = defineProps<{
+  clock: { elapsedMs: number; receivedAt: number };
+  durationMs: number;
+  playing: boolean;
+  manual?: boolean;
+}>();
+const fill = ref<HTMLElement>(), tipTrack = ref<HTMLElement>();
+let animations: Animation[] = [], duration = 0;
 
-const pct = computed(() => Math.max(0, Math.min(1, props.progress)) * 100);
-const widthPct = computed(() => `${pct.value}%`);
+function clear() {
+  for (const animation of animations) animation.cancel();
+  animations = [];
+  duration = 0;
+}
+watchEffect(() => {
+  if (!fill.value || !tipTrack.value || props.manual || !(props.durationMs > 0)) {
+    clear();
+    return;
+  }
+  if (duration !== props.durationMs) {
+    clear();
+    duration = props.durationMs;
+    const timing = { duration, fill: 'both' as const };
+    animations = [
+      fill.value.animate([{ transform: 'scaleX(0)' }, { transform: 'scaleX(1)' }], timing),
+      tipTrack.value.animate([{ transform: 'translateX(0%)' }, { transform: 'translateX(100%)' }], timing),
+    ];
+  }
+  const { elapsedMs, receivedAt } = props.clock;
+  const position = Math.max(0, Math.min(duration, elapsedMs + (props.playing ? performance.now() - receivedAt : 0)));
+  for (const animation of animations) {
+    if (!props.playing && animation.playState !== 'paused') animation.pause();
+    else if (props.playing && animation.playState === 'paused') animation.play();
+    // Leave a correctly running compositor animation alone between ticks.
+    // A seek, new cue or pause takes effect at the station's sampled position.
+    if (!props.playing || Math.abs(Number(animation.currentTime) - position) > 32) animation.currentTime = position;
+  }
+}, { flush: 'post' });
+onBeforeUnmount(clear);
 </script>
 
 <template>
   <div class="absolute top-0 left-0 right-0 h-[5px] z-30 pointer-events-none">
     <template v-if="!manual">
-      <div
-        class="firey-fill absolute inset-y-0 left-0 will-change-[width]"
-        :style="{ width: widthPct }"
-      />
-      <div
-        class="firey-tip absolute top-1/2 -translate-y-1/2 -translate-x-1/2 will-change-[left]"
-        :style="{ left: widthPct }"
-      />
+      <div ref="fill" class="firey-fill absolute inset-0" />
+      <div ref="tipTrack" class="absolute inset-0">
+        <div class="firey-tip absolute top-1/2 -translate-y-1/2 -translate-x-1/2" />
+      </div>
     </template>
     <div
       v-else
@@ -33,6 +64,8 @@ const widthPct = computed(() => `${pct.value}%`);
  * still reads the heat at viewing distance. */
 .firey-fill {
   height: 100%;
+  transform-origin: left;
+  transform: scaleX(0);
   background: linear-gradient(
     90deg,
     #4a0a05 0%,
@@ -64,6 +97,4 @@ const widthPct = computed(() => `${pct.value}%`);
   pointer-events: none;
 }
 
-/* Width and tip position are driven every animation frame from the parent —
- * no CSS transition needed (and adding one only smears between rAF samples). */
 </style>

@@ -66,8 +66,8 @@ export async function createProduction(rendererOptions: Pick<RendererOriginOptio
   const store = new ProductionStore(DATA_DIR, state => hub.broadcast({ t: 'state', state }), cueGates);
   const recordings = new RecordingStore(path.join(DATA_DIR, 'recordings'), () => publishStatus());
   const snapshot = (): StudioStatus => {
-    const session = broadcast?.snapshot().session;
-    return { ...status, recording: recordings.active(), ...(session ? { broadcast: { id: session.id, state: session.state } } : {}) };
+    const session = broadcast?.sessionStatus();
+    return { ...status, recording: recordings.active(), ...(session ? { broadcast: session } : {}) };
   };
   const hub = new ProductionHub(isEngine, () => store.get(), snapshot);
   function publishStatus() { hub.broadcast({ t: 'status', status: snapshot() }); }
@@ -82,13 +82,13 @@ export async function createProduction(rendererOptions: Pick<RendererOriginOptio
     router.use((_req, res) => res.status(503).json({ error: 'Output sharing is unavailable. Check the private output settings and station storage; existing files were preserved.' }));
     return { router, async close() {} };
   });
-  const broadcasting = () => ['starting', 'live', 'stopping'].includes(broadcast?.snapshot().session?.state ?? '');
+  const broadcasting = () => ['starting', 'live', 'stopping'].includes(broadcast?.sessionStatus()?.state ?? '');
+  const productionBusy = () => !!browser || !!launchTask || recoveryRequests > 0 || status.state === 'starting' || status.state === 'running' || recordings.hasActiveWork();
   const clips = await createClips({
     dir: path.join(DATA_DIR, 'clips'), recordings, isStreaming: broadcasting,
     // Keep heavy post-production work out of the live renderer's resource
     // budget, including startup, a stranded renderer and recording recovery.
-    isLive: () => !!browser || !!launchTask || recoveryRequests > 0 || status.state === 'starting' || status.state === 'running'
-      || recordings.list().some(item => ['starting', 'recording', 'stopping', 'finalizing'].includes(item.status)),
+    isLive: productionBusy,
   }).catch(error => {
     // Post-production is optional to live production. A damaged Clips index or
     // an unavailable export disk must never prevent Studio from starting, nor
@@ -100,13 +100,20 @@ export async function createProduction(rendererOptions: Pick<RendererOriginOptio
     }));
     return { router, pauseForLive: async () => {}, close: async () => {} };
   });
+  let announcedStream: StudioStatus['broadcast'];
   broadcast = await createBroadcast({
     dir: dependencies.broadcastDirectory ?? path.join(DATA_DIR, 'broadcast'), watchRelay: dependencies.watchRelay === undefined ? createWatchRelayFromEnv() : dependencies.watchRelay,
     localWatch: dependencies.localWatch,
     initialConfigPath: dependencies.localWatch ? path.join(DATA_DIR, 'broadcast', 'broadcast-private.json') : undefined,
     spawn: dependencies.broadcastSpawn,
     connectTls: dependencies.broadcastConnectTls,
-    onStatus: () => publishStatus(),
+    onStatus: ({ session }) => {
+      // Studio status includes only the session ID and state. Byte counts and
+      // per-destination updates already have their own Go Live status endpoint.
+      if (announcedStream?.id === session?.id && announcedStream?.state === session?.state) return;
+      announcedStream = session ? { id: session.id, state: session.state } : undefined;
+      publishStatus();
+    },
     onFatal: id => hub.engineSend({ t: 'broadcast-stop', broadcast: { id, profile: broadcast?.snapshot().config.profile ?? '720p' } }),
   }).catch(async error => {
     // Broken broadcast settings must not stop local production or overwrite
@@ -424,9 +431,7 @@ export async function createProduction(rendererOptions: Pick<RendererOriginOptio
     res.status(code).json({ error: error instanceof z.ZodError ? error.issues[0].message : error.message });
   });
   return { router, wss: hub.wss,
-    transfer: new ProductionDataTransfer(store, recordings, 'transfer' in clips ? clips.transfer : undefined,
-      () => !!browser || !!launchTask || recoveryRequests > 0 || status.state === 'starting' || status.state === 'running'
-        || recordings.list().some(item => ['starting', 'recording', 'stopping', 'finalizing'].includes(item.status))),
+    transfer: new ProductionDataTransfer(store, recordings, 'transfer' in clips ? clips.transfer : undefined, productionBusy),
     mobile: {
       get: () => store.get(), status: snapshot,
       attachProgramViewer: (ws: import('ws').WebSocket) => hub.attachMobileProgramViewer(ws),

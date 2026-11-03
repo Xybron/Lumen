@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { spawn } from 'node:child_process';
-import { Writable } from 'node:stream';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { EventEmitter, once } from 'node:events';
+import { PassThrough, Writable } from 'node:stream';
 import { createBroadcast, broadcastDestinationUrl, BroadcastError, type BroadcastWatchRelay } from '../src/broadcast.js';
 import { BROADCAST_SINK_LIMIT, BROADCAST_CHUNK_LIMIT, broadcastEncoderArguments, broadcastHlsArguments, spawnBroadcastProcess, writeBroadcastSink } from '../src/broadcast-process.js';
 import { runClipMedia } from '../src/clip-media.js';
@@ -25,6 +26,41 @@ test('a blocked destination cannot grow beyond its independent queue or backpres
   let accepted = 0; const chunk = Buffer.alloc(64 * 1024);
   while (writeBroadcastSink(blocked, chunk)) accepted += chunk.length;
   assert.equal(accepted, BROADCAST_SINK_LIMIT); assert.ok(blocked.writableLength <= BROADCAST_SINK_LIMIT); blocked.destroy();
+});
+
+test('large writes that drain between frames never trip the stalled-destination watchdog', { timeout: 5000 }, async t => {
+  t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.now() });
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'lumen-broadcast-drain-'));
+  let encoderOutput!: PassThrough, watchInput!: Writable, stall = false;
+  const service = await createBroadcast({ dir,
+    watchRelay: { configured: true, async begin() {}, async publish() {}, async finish() {} },
+    spawn(_file, args) {
+      const encoder = args.at(-1) === 'pipe:1', child = new EventEmitter();
+      const input = new Writable({ highWaterMark: 1, write(_chunk, _encoding, done) {
+        if (encoder || !stall) setImmediate(done);
+      } });
+      const output = new PassThrough(), stderr = new PassThrough(), progress = new PassThrough();
+      if (encoder) encoderOutput = output; else watchInput = input;
+      input.on('finish', () => child.emit('close', 0));
+      return Object.assign(child, { stdin: input, stdout: output, stderr, stdio: [input, output, stderr, progress],
+        kill() { child.emit('close', 1); } }) as unknown as ChildProcess;
+    } });
+  try {
+    await service.configure({ watch: { enabled: true } });
+    const session = await service.start();
+    await service.chunk(session.id, 0, Buffer.from('generated test input'), true);
+    while (!watchInput) await new Promise(resolve => setImmediate(resolve));
+    const frame = Buffer.alloc(8192);
+    for (let second = 0; second < 10; second++) {
+      const drained = once(watchInput, 'drain');
+      encoderOutput.write(frame);
+      await drained;
+      t.mock.timers.tick(1000);
+      assert.equal(service.snapshot().session?.watch.retries, 0, 'A healthy pipe can signal high water on every write');
+    }
+    stall = true; encoderOutput.write(frame); t.mock.timers.tick(9000);
+    assert.equal(service.snapshot().session?.watch.retries, 1, 'A genuinely stalled pipe remains bounded in time');
+  } finally { await service.close(); await fs.rm(dir, { recursive: true, force: true }); }
 });
 test('broadcast configuration is private, secret-free in public snapshots, strict and crash safe', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'lumen-broadcast-config-'));

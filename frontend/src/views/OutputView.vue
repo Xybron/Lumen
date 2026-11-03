@@ -123,7 +123,7 @@ useEventListener(document, 'dblclick', () => {
         </div>
       </Transition>
 
-      <ProgressBar :progress="mirror.progress.value" :manual="mirror.state.value.mode === 'manual'" />
+      <ProgressBar v-if="!mirror.state.value.blanked" :clock="mirror.clock.value" :duration-ms="mirror.state.value.durationMs" :playing="mirror.state.value.playing" :manual="mirror.state.value.mode === 'manual'" />
       <WarningPill :visible="mirror.showWarning.value" :remaining-ms="mirror.remainingMs.value" />
       <CountdownChip
         :visible="mirror.showCountdown.value"

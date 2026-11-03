@@ -68,7 +68,10 @@ test('local Watch clones saved social setup read-only and supports every destina
     assert.equal(spawned.length, 0, 'Restored enabled states and Save setup never start a public stream.');
     assert.doesNotMatch(JSON.stringify(service.snapshot()), /fixture-youtube-private|fixture-facebook-private|fixture-new-youtube|fixture-new-facebook/);
     assert.deepEqual(await fs.readFile(source), original); assert.equal((await fs.stat(source)).mode, mode);
-    await service.start(); const deadline = Date.now() + 3000;
+    const session = await service.start();
+    assert.ok(!spawned.includes('encoder'), 'The shared encoder waits for the first Program media chunk.');
+    await service.chunk(session.id, 0, Buffer.from('fixture worker media'), true);
+    const deadline = Date.now() + 3000;
     while (Date.now() < deadline && spawned.length < 4) await new Promise(resolve => setTimeout(resolve, 10));
     assert.equal(spawned.filter(kind => kind === 'encoder').length, 1); assert.equal(spawned.filter(kind => kind === 'social').length, 2); assert.equal(spawned.filter(kind => kind === 'watch').length, 1);
     await service.stop(); assert.deepEqual(await fs.readFile(source), original);

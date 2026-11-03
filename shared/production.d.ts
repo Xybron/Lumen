@@ -179,6 +179,7 @@ export type StudioSignalMessage = {
   key?: string;
   outputId?: string;
   compactProgram?: boolean;
+  monitorOnly?: boolean;
   sourceId?: string;
   description?: RTCSessionDescriptionInit;
   candidate?: RTCIceCandidateInit;

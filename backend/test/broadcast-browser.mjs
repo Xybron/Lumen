@@ -14,6 +14,8 @@ import ffmpeg from 'ffmpeg-static';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..'), directory = await fs.mkdtemp(path.join(os.tmpdir(), 'lumen-broadcast-browser-'));
 const port = Number(process.env.LUMEN_BROADCAST_TEST_PORT ?? 3470), base = `http://127.0.0.1:${port}`;
+const sampleSeconds = Number(process.env.LUMEN_REHEARSAL_SECONDS ?? 6);
+assert.ok(Number.isInteger(sampleSeconds) && sampleSeconds >= 2 && sampleSeconds <= 300, 'Rehearsal sample must be 2–300 seconds');
 const videoFile = path.join(directory, 'camera.y4m'), toneFile = path.join(directory, 'media', 'music', 'main-tone.wav');
 const errors = [], mutations = [], publicRequests = [], checks = [], privateKey = 'fixture-youtube-key-loopback-only', facebookKey = 'fixture-facebook-key-loopback-only';
 const publicConsole = [];
@@ -102,10 +104,10 @@ async function verifyPlatform(name, number) {
 }
 
 async function verifyCameraMotion(filename, name) {
-  // Sample the moving white bar in two seconds of the actual receiver file.
+  // Sample the moving white bar in the actual receiver file.
   // Repeated frames remain repeats at 30 fps, even if the transport clock runs on.
   const rowWidth = 160;
-  const rows = (await ff(['-hide_banner', '-loglevel', 'error', '-i', filename, '-ss', '1', '-t', '2', '-an',
+  const rows = (await ff(['-hide_banner', '-loglevel', 'error', '-i', filename, '-ss', '1', '-t', String(sampleSeconds), '-an',
     '-vf', 'fps=30,scale=160:90,format=gray,crop=160:1:0:45', '-f', 'rawvideo', '-'])).output;
   let previous = -1, held = 0, longestHold = 0, movingFrames = 0;
   for (let offset = 0; offset + rowWidth <= rows.length; offset += rowWidth) {
@@ -114,8 +116,56 @@ async function verifyCameraMotion(filename, name) {
     else longestHold = Math.max(longestHold, ++held);
     previous = position;
   }
-  assert.ok(movingFrames >= 28 && longestHold < 15, `${name} moving camera: ${movingFrames} distinct updates, longest hold ${longestHold}/30 s`);
+  assert.ok(rows.length >= (sampleSeconds * 30 - 1) * rowWidth, `${name} contains the full motion sample`);
+  assert.ok(movingFrames >= 14 * sampleSeconds && longestHold < 15, `${name} moving camera: ${movingFrames} distinct updates, longest hold ${longestHold}/30 s`);
   return { movingFrames, longestHold };
+}
+async function sampleProjector() {
+  const projector = await admin.newPage();
+  try {
+    await projector.goto(`${base}/studio/output/screen_main`); await projector.bringToFront();
+    const picture = projector.locator('video');
+    await until(() => picture.evaluate(video => video.readyState >= 2 && video.videoWidth > 0 && !video.paused), 'Auditorium decodes Program while live and recording');
+    const rendererSample = async () => {
+      const { renderer } = await json(await admin.request.get(`${base}/api/studio/diagnostics`));
+      const track = (key, type) => renderer.peers.find(peer => peer.key === key)?.stats.find(track => track.kind === 'video' && track.type === type);
+      return { timing: renderer.timing, camera: track('in:program_video', 'inbound-rtp'), sender: track('out:screen_main', 'outbound-rtp') };
+    };
+    const before = await rendererSample();
+    const motion = await picture.evaluate((video, seconds) => new Promise(resolve => {
+      const canvas = document.createElement('canvas'); canvas.width = 160; canvas.height = 1;
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      const start = performance.now(), initial = video.getVideoPlaybackQuality();
+      let last = start, previous = -1, updates = 0, firstUpdateMs = null, longestGapMs = 0, callback;
+      function frame(now) {
+        context.drawImage(video, 0, video.videoHeight / 2, video.videoWidth, 1, 0, 0, 160, 1);
+        const pixels = context.getImageData(0, 0, 160, 1).data;
+        for (let x = 0; x < 160; x++) {
+          if (pixels[x * 4 + 1] < 190) continue;
+          if (previous !== x) {
+            if (firstUpdateMs === null) firstUpdateMs = Math.round(now - start);
+            else longestGapMs = Math.max(longestGapMs, now - last);
+            updates++; last = now; previous = x;
+          }
+          break;
+        }
+        callback = video.requestVideoFrameCallback(frame);
+      }
+      callback = video.requestVideoFrameCallback(frame);
+      setTimeout(() => {
+        video.cancelVideoFrameCallback(callback);
+        const end = performance.now(), final = video.getVideoPlaybackQuality();
+        resolve({ updates, seconds: (end - start) / 1000, firstUpdateMs, longestGapMs: Math.round(Math.max(longestGapMs, end - last)),
+          videoFrames: final.totalVideoFrames - initial.totalVideoFrames, droppedFrames: final.droppedVideoFrames - initial.droppedVideoFrames });
+      }, seconds * 1000);
+    }), sampleSeconds);
+    assert.ok(motion.updates >= 14 * motion.seconds && motion.firstUpdateMs !== null && motion.firstUpdateMs < 800 && motion.longestGapMs < 500, `Audience moving camera: ${JSON.stringify(motion)}`);
+    const after = await rendererSample();
+    return { ...motion, programPauses: after.timing.pauses - before.timing.pauses,
+      cameraFramesDecoded: after.camera.framesDecoded - before.camera.framesDecoded,
+      projectorFramesEncoded: after.sender.framesEncoded - before.sender.framesEncoded,
+      senderLimitation: after.sender.qualityLimitationReason };
+  } finally { await projector.close(); }
 }
 async function processProfile() {
   const stats = await fixtureStats(), diagnostics = await json(await admin.request.get(`${base}/api/studio/diagnostics`));
@@ -144,7 +194,7 @@ try {
   server = spawn(process.execPath, ['backend/test/broadcast-fixture.mjs'], { cwd: root, env: { ...process.env, PORT: String(port), LUMEN_DATA_DIR: directory, LUMEN_BROADCAST_FIXTURE: 'yes' }, stdio: ['ignore', 'pipe', 'pipe'] });
   server.stdout.on('data', value => { logs += value; for (const line of value.toString().split('\n')) { try { const message = JSON.parse(line); if (message.phase === 'broadcast-fixture-ready') relayOrigin = message.relayOrigin; } catch { /* Ordinary fixture startup diagnostics. */ } } }); server.stderr.on('data', value => { logs += value; });
   await until(async () => relayOrigin && (await fetch(`${base}/api/content`, { signal: AbortSignal.timeout(1500) })).ok, 'disposable station and independent loopback relay start');
-  browser = await chromium.launch({ executablePath: process.env.LUMEN_CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true,
+  browser = await chromium.launch({ channel: 'chrome', executablePath: process.env.LUMEN_CHROME_PATH, headless: true,
     args: ['--autoplay-policy=no-user-gesture-required', '--force-color-profile=srgb', '--use-fake-device-for-media-stream', `--use-file-for-fake-video-capture=${videoFile}`] });
   admin = await browser.newContext({ viewport: { width: 1512, height: 982 } }); operator = await browser.newContext({ viewport: { width: 1512, height: 982 } }); viewer = await browser.newContext({ viewport: { width: 1440, height: 1000 } }); anonymous = await browser.newContext();
   await json(await admin.request.post(`${base}/api/auth/login`, { data: { username: 'admin', password: 'admin' } }));
@@ -263,6 +313,7 @@ try {
   await until(async () => await dialog(page).locator('.broadcast-program-monitor video').evaluate(video => video.readyState >= 2 && video.muted && video.videoWidth > 100), 'Reopening Go Live automatically reconnects the muted Program preview');
   watchPage = await viewer.newPage(); watchPage.on('pageerror', error => errors.push(error.message)); watchPage.on('request', request => publicRequests.push(request.url())); watchPage.on('console', message => { if (['error', 'warning'].includes(message.type())) publicConsole.push(message.text()); }); await watchPage.bringToFront(); await watchPage.goto(`${relayOrigin}/watch/live`);
   await publicPixel('red');
+  const projectionMotion = await sampleProjector();
   const profile = await processProfile();
   const platforms = await Promise.all(['youtube', 'facebook'].map(name => verifyPlatform(name, 1)));
   assert.equal(await watchPage.locator('video').evaluate(video => !window.Hls?.isSupported() || video.currentSrc.startsWith('blob:')), true, 'A capable MSE player is preferred over Chromium’s unreliable native HLS maybe claim');
@@ -327,7 +378,7 @@ try {
   assert.ok(publicRequests.every(url => url.startsWith(relayOrigin) || url.startsWith('blob:')), 'Public playback never depends on the station origin or an external CDN'); assert.deepEqual(errors, []);
   assert.equal(await page.evaluate(() => window.__broadcastCaptureRequests), 1, 'Only the explicit camera connection acquires capture');
   assert.equal(await operatorPage.evaluate(() => window.__broadcastCaptureRequests), 0, 'Monitoring and publishing never acquire a camera implicitly');
-  console.log(JSON.stringify({ ok: true, directory, relayOrigin, checks, platforms, encoder: profile.processes.filter(value => value.kind === 'encoder'), recording: { id: recording.id, bytes: recording.bytes, durationMs: recording.durationMs, ...recordedMotion }, errors, publicRequests: publicRequests.length }, null, 2));
+  console.log(JSON.stringify({ ok: true, directory, relayOrigin, checks, projectionMotion, platforms, encoder: profile.processes.filter(value => value.kind === 'encoder'), recording: { id: recording.id, bytes: recording.bytes, durationMs: recording.durationMs, ...recordedMotion }, errors, publicRequests: publicRequests.length }, null, 2));
 } catch (error) {
   for (const [target, name] of [[page, 'broadcast-failure.png'], [operatorPage, 'broadcast-operator-failure.png'], [watchPage, 'broadcast-watch-failure.png']]) if (target && !target.isClosed()) await target.screenshot({ path: path.join(directory, name), fullPage: true }).catch(() => {});
   const publicVideo = watchPage && !watchPage.isClosed() ? await watchPage.locator('video').evaluate(video => ({ paused: video.paused, time: video.currentTime, duration: video.duration, width: video.videoWidth, height: video.videoHeight, ready: video.readyState, network: video.networkState, src: video.currentSrc, visibility: document.visibilityState, native: video.canPlayType('application/vnd.apple.mpegurl'), hls: window.Hls?.isSupported(), error: video.error?.message, buffered: Array.from({ length: video.buffered.length }, (_, index) => [video.buffered.start(index), video.buffered.end(index)]) })).catch(() => null) : null;
