@@ -60,6 +60,7 @@
     "test:studio:audio:status": "npm run build && node backend/test/main-audio-status-browser.mjs",
     "test:studio:screen": "npm run build && node backend/test/screen-share-browser.mjs",
     "test:studio:shortcuts": "npm run build && node backend/test/scene-shortcuts-browser.mjs",
+    "test:studio:scene-sidebar": "npm run build && node backend/test/scene-sidebar-browser.mjs",
     "test:studio:multiview": "npm run build && node backend/test/multiview-browser.mjs",
     "test:studio:media": "npm run build && node backend/test/source-media-browser.mjs",
     "test:worship": "npm run build && node backend/test/worship-browser.mjs",

@@ -5,6 +5,7 @@ import { studioApi } from '@/lib/studio/api';
 import { useContentStore } from '@/stores/content';
 import { StudioPeer, StudioSignal } from '@/lib/studio/signal';
 import { shortId } from '@/lib/ids';
+import { reorderScenes } from '@/lib/studio/scene-order';
 import { animationFromPreset, cloneAnimation } from '@/lib/studio/animation';
 import { openDeviceCapture, type InputSelection } from '@/lib/studio/device-capture';
 import { arrangeLayers, layerAlignment, layerPreset, nudgeLayerGeometry, reorderLayers, type LayerAlignment, type LayerArrangeAction, type LayerPreset } from '@/lib/studio/layer-layout';
@@ -128,6 +129,9 @@ export const useStudioStore = defineStore('studio', () => {
     });
   }
   async function selectScene(id: string) { selectedLayerId.value = null; await edit(d => { d.previewSceneId = id; }); }
+  function reorderScene(id: string, targetId: string, placement: 'before' | 'after') {
+    return edit(draft => { draft.scenes = reorderScenes(draft.scenes, id, targetId, placement); });
+  }
   async function addScene(duplicate = false) {
     const id = shortId('scene'), selected = selectedScene.value;
     const scene: StudioScene = duplicate && selected ? { ...structuredClone(selected), id, name: `${selected.name.slice(0, 95)} copy`, layers: selected.layers.map(l => ({ ...l, id: shortId('layer') })) } :
@@ -379,7 +383,7 @@ export const useStudioStore = defineStore('studio', () => {
     if (captures.size) { e.preventDefault(); e.returnValue = ''; }
   });
   return { state, status, loading, saving, recordings, engineBusy, recordingBusy, selectedLayerId, selectedScene, selectedLayer, connectedSources, animationPresets, reconnect: () => signal.reconnect(),
-    load, edit, command, selectScene, addScene, removeScene, updateScene, addLayer, updateLayer, removeLayer, moveLayer, duplicateLayer, reorderLayer, arrangeLayer, alignLayer, presetLayer, nudgeLayer, addSource, removeSource, updateSource,
+    load, edit, command, selectScene, reorderScene, addScene, removeScene, updateScene, addLayer, updateLayer, removeLayer, moveLayer, duplicateLayer, reorderLayer, arrangeLayer, alignLayer, presetLayer, nudgeLayer, addSource, removeSource, updateSource,
     connectSource, disconnectSource, sourceStream, cameraStreams, inputSelection, saveSourceProperties, setMainAudio, toggleEngine, refreshRecordings, toggleRecord, recoverRecording,
     saveAnimationPreset, renameAnimationPreset, deleteAnimationPreset, applyAnimationPreset };
 });

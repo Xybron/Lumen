@@ -322,7 +322,13 @@
 .scene-view-controls .s-icon { width: 26px; height: 24px; border: 1px solid transparent; }
 .scene-view-controls .s-icon[aria-pressed="true"] { background: var(--surface-3, #25272b); border-color: var(--s-line); color: var(--text-primary); }
 .studio-app .scene-list { padding: 0 8px 10px; overscroll-behavior: contain; }
-.studio-app .scene-card { padding: 6px; margin-bottom: 5px; }
+.studio-app .scene-card { position: relative; padding: 6px; margin-bottom: 5px; }
+.scene-drag-handle { position: absolute; right: 9px; top: 9px; z-index: 2; display: grid; place-items: center; width: 24px; height: 26px; border-radius: 5px; background: #121518b8; color: #d1d8dc; opacity: .6; cursor: grab; touch-action: none; }
+.scene-card:hover .scene-drag-handle, .scene-card:focus-visible .scene-drag-handle, .scene-sort-chosen .scene-drag-handle { opacity: 1; }
+.scene-sort-chosen, .scene-sort-chosen .scene-drag-handle { cursor: grabbing; }
+.studio-app .scene-sort-ghost { background: #7dd3fc12; border: 1px dashed #7dd3fc; }
+.scene-sort-ghost > * { opacity: .2; }
+.scene-list.is-compact .scene-drag-handle { position: static; flex: 0 0 16px; width: 16px; margin-left: -3px; background: transparent; }
 .studio-app .scene-thumbnail { box-shadow: none; }
 .studio-app .scene-label { margin-top: 7px; padding: 0 2px; font-size: 12px; color: var(--text-primary); }
 .scene-meta { min-width: 0; flex: 1; }
@@ -334,6 +340,7 @@
 .scene-list.is-compact .scene-label { margin-top: 0; padding: 0; font-size: 11px; }
 .scene-list.is-compact .scene-card small { display: flex; align-items: center; margin: 5px 0 0; font-size: 9px; }
 .scene-list.is-compact .scene-inline-live { display: inline; }
+@media (pointer: coarse) { .scene-drag-handle { min-width: 32px; min-height: 32px; opacity: .9; }.scene-list.is-compact .scene-drag-handle { flex-basis: 28px; min-width: 28px; } }
 .scene-search-empty { display: flex; align-items: center; flex-direction: column; gap: 9px; padding: 30px 10px; color: var(--s-muted); font-size: 11px; text-align: center; }
 .scene-search-empty b { color: var(--text-primary); font-weight: 500; }
 .scene-search-empty .s-button { margin-top: 5px; padding: 5px 10px; font-size: 11px; }

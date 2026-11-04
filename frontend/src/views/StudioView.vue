@@ -3,9 +3,10 @@ import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router';
 import { toast } from 'vue-sonner';
 import { useResizeObserver } from '@vueuse/core';
+import { VueDraggable } from 'vue-draggable-plus';
 import { Aperture, ArrowRightLeft, Plus, Copy, Trash2, Layers, Camera, Monitor,
   Mic, Image, Film, Music2, Presentation, Lock, Volume2, VolumeX, Circle, Square as StopIcon,
-  FolderOpen, LoaderCircle, Power, ChevronRight, Headphones, CircleHelp, RotateCcw, Play, Pause, Repeat, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Maximize2, Minimize2, AlertCircle, Search, X, LayoutGrid, List, Keyboard, Settings2 } from 'lucide-vue-next';
+  FolderOpen, LoaderCircle, Power, ChevronRight, Headphones, CircleHelp, RotateCcw, Play, Pause, Repeat, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Maximize2, Minimize2, AlertCircle, Search, X, LayoutGrid, List, Keyboard, Settings2, GripVertical } from 'lucide-vue-next';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import LoginGate from '@/components/shell/LoginGate.vue';
 import WorkspaceHeader from '@/components/shell/WorkspaceHeader.vue';
@@ -16,7 +17,7 @@ import ChannelNav from '@/components/shell/ChannelNav.vue';
 import ProgramHealth from '@/components/studio/ProgramHealth.vue';
 import StudioMonitorPanel from '@/components/studio/StudioMonitorPanel.vue';
 import StudioMonitor from '@/components/studio/StudioMonitor.vue';
-import ScenePoster from '@/components/studio/ScenePoster.vue';
+import SceneThumbnail from '@/components/studio/SceneThumbnail.vue';
 import SourceDialog from '@/components/studio/SourceDialog.vue';
 import StudioInspector from '@/components/studio/StudioInspector.vue';
 import StudioPropertyInput from '@/components/studio/StudioPropertyInput.vue';
@@ -69,6 +70,48 @@ const filteredScenes = computed(() => {
   return studio.state?.scenes.filter(scene => !query || scene.name.toLocaleLowerCase().includes(query)) ?? [];
 });
 function sceneNumber(id: string) { return String((studio.state?.scenes.findIndex(scene => scene.id === id) ?? -1) + 1).padStart(2, '0'); }
+const sceneOrderSaving = ref(false), sceneOrderMessage = ref(''), draggingSceneId = ref<string | null>(null);
+let dragSceneOrder: string[] = [], suppressSceneClickUntil = 0;
+function selectScene(id: string) {
+  if (draggingSceneId.value || performance.now() < suppressSceneClickUntil) return;
+  run(studio.selectScene(id));
+}
+async function moveScene(id: string, targetId: string, placement: 'before' | 'after') {
+  if (!canOperate.value || sceneOrderSaving.value || id === targetId) return;
+  sceneOrderSaving.value = true;
+  sceneOrderMessage.value = '';
+  try {
+    await studio.reorderScene(id, targetId, placement);
+    const scenes = studio.state?.scenes ?? [], position = scenes.findIndex(scene => scene.id === id);
+    if (position >= 0) sceneOrderMessage.value = `Moved ${scenes[position].name} to position ${position + 1} of ${scenes.length}.`;
+    await nextTick();
+    document.querySelector<HTMLButtonElement>(`.scene-card[data-scene-id="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
+  } catch { /* The store reports save errors and restores the saved order. */ }
+  finally { sceneOrderSaving.value = false; }
+}
+function startSceneDrag(event: { item: HTMLElement }) {
+  dragSceneOrder = filteredScenes.value.map(scene => scene.id);
+  draggingSceneId.value = event.item.dataset.sceneId ?? null;
+}
+function endSceneDrag(event: { oldDraggableIndex?: number; newDraggableIndex?: number }) {
+  const id = draggingSceneId.value, oldIndex = event.oldDraggableIndex, newIndex = event.newDraggableIndex;
+  draggingSceneId.value = null;
+  // A completed drag is never a Preview selection, including touch's click.
+  suppressSceneClickUntil = performance.now() + 300;
+  if (id && oldIndex !== undefined && newIndex !== undefined && oldIndex !== newIndex) {
+    const targetId = dragSceneOrder[newIndex];
+    if (targetId) void moveScene(id, targetId, oldIndex < newIndex ? 'after' : 'before');
+  }
+  dragSceneOrder = [];
+}
+function sceneOrderKey(event: KeyboardEvent, id: string) {
+  if (!event.altKey || event.ctrlKey || event.metaKey || !['ArrowUp', 'ArrowDown'].includes(event.key)) return;
+  event.preventDefault(); event.stopPropagation();
+  if (event.repeat || draggingSceneId.value) return;
+  const index = filteredScenes.value.findIndex(scene => scene.id === id), step = event.key === 'ArrowUp' ? -1 : 1;
+  const target = filteredScenes.value[index + step];
+  if (target) void moveScene(id, target.id, step < 0 ? 'before' : 'after');
+}
 const scenesCollapsed = ref((() => {
   try { return localStorage.getItem('lumen.studio.scenes-collapsed') === 'true'; } catch { return false; }
 })());
@@ -309,10 +352,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keydown));
         <label class="scene-search"><Search :size="13" /><input v-model="sceneSearch" aria-label="Find a scene" placeholder="Find a scene…" @keydown.esc.stop="sceneSearch = ''" /><button v-if="sceneSearch" class="s-icon" aria-label="Clear scene search" @click="sceneSearch = ''"><X :size="12" /></button></label>
         <div class="scene-view-controls" role="group" aria-label="Scene list appearance"><button class="s-icon" :aria-pressed="sceneView === 'thumbnails'" aria-label="Show scene thumbnails" title="Thumbnail view" @click="sceneView = 'thumbnails'"><LayoutGrid :size="13" /></button><button class="s-icon" :aria-pressed="sceneView === 'list'" aria-label="Show compact scene list" title="Compact list" @click="sceneView = 'list'"><List :size="14" /></button></div>
       </div>
-      <div :class="['scene-list', { 'is-compact': sceneView === 'list' }]"><button v-for="scene in filteredScenes" :key="scene.id" :class="['scene-card', { selected: selected?.id === scene.id }]" :aria-pressed="selected?.id === scene.id" @click="run(studio.selectScene(scene.id))">
-        <div class="scene-thumbnail"><ScenePoster :scene="scene" :sources="studio.state.sources" /><span v-if="isLive(scene)" class="scene-live"><span />PROGRAM</span><span class="scene-number">{{ sceneNumber(scene.id) }}</span></div>
+      <p id="scene-reorder-help" class="sr-only">Drag a scene by its handle to arrange it. With a scene focused, press Alt and the up or down arrow to move it. This does not change Preview or Program.</p>
+      <VueDraggable :model-value="filteredScenes" draggable=".scene-card" handle=".scene-drag-handle" :animation="140" :disabled="!canOperate || sceneOrderSaving" :delay="120" :delay-on-touch-only="true" :touch-start-threshold="5" :fallback-tolerance="5" ghost-class="scene-sort-ghost" chosen-class="scene-sort-chosen" :class="['scene-list', { 'is-compact': sceneView === 'list' }]" aria-label="Scenes" aria-describedby="scene-reorder-help" @start="startSceneDrag" @end="endSceneDrag"><button v-for="scene in filteredScenes" :key="scene.id" :data-scene-id="scene.id" :class="['scene-card', { selected: selected?.id === scene.id }]" :aria-pressed="selected?.id === scene.id" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" @click="selectScene(scene.id)" @keydown="sceneOrderKey($event, scene.id)">
+        <span v-if="canOperate" class="scene-drag-handle" title="Drag to arrange · Alt + ↑ / ↓" aria-hidden="true"><GripVertical :size="14" /></span>
+        <div class="scene-thumbnail" title="Scene preview · updates when channel content changes"><SceneThumbnail :scene="scene" :sources="studio.state.sources" /><span v-if="isLive(scene)" class="scene-live"><span />PROGRAM</span><span class="scene-number">{{ sceneNumber(scene.id) }}</span></div>
         <div class="scene-meta"><div class="scene-label"><span>{{ scene.name }}</span><span v-if="selected?.id === scene.id" class="preview-dot" /></div><small>{{ scene.layers.length }} layers<span v-if="isLive(scene)" class="scene-inline-live">Program</span></small></div>
-      </button><div v-if="!filteredScenes.length" class="scene-search-empty"><Search v-if="sceneSearch.trim()" :size="18" /><Layers v-else :size="18" /><b>{{ sceneSearch.trim() ? 'No matching scenes' : 'No scenes yet' }}</b><span>{{ sceneSearch.trim() ? 'Try a different name.' : 'Start with a scene for your service.' }}</span><button v-if="sceneSearch.trim()" class="s-button" @click="sceneSearch = ''">Clear search</button><button v-else class="s-button" @click="run(studio.addScene())"><Plus :size="12" />New scene</button></div></div>
+      </button><div v-if="!filteredScenes.length" class="scene-search-empty"><Search v-if="sceneSearch.trim()" :size="18" /><Layers v-else :size="18" /><b>{{ sceneSearch.trim() ? 'No matching scenes' : 'No scenes yet' }}</b><span>{{ sceneSearch.trim() ? 'Try a different name.' : 'Start with a scene for your service.' }}</span><button v-if="sceneSearch.trim()" class="s-button" @click="sceneSearch = ''">Clear search</button><button v-else class="s-button" @click="run(studio.addScene())"><Plus :size="12" />New scene</button></div></VueDraggable>
+      <span class="sr-only" role="status">{{ sceneOrderMessage }}</span>
       <div class="scene-sidebar-footer"><button class="s-button" @click="run(studio.addScene())"><Plus :size="13" /> New scene</button><button class="s-icon" title="Duplicate scene" aria-label="Duplicate scene" :disabled="!selected" @click="run(studio.addScene(true))"><Copy :size="14" /></button><button class="s-icon" title="Delete scene" aria-label="Delete scene" :disabled="!selected" @click="deleteScene"><Trash2 :size="14" /></button></div>
     </aside>
 
