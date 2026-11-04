@@ -4,7 +4,29 @@ export type SongSplitMode = 'blank' | 'line';
 
 // Only a whole heading line is metadata. A word like "chorus" in a lyric
 // and brackets within a sung line stay in the text.
-const heading = /^(?:\[([^\]]{1,80})\]|((?:verse|chorus|pre[- ]?chorus|bridge|refrain|intro|outro|interlude|tag)(?:\s+\d+)?):?)$/i;
+const namedHeading = /^((?:verse|chorus|pre[- ]?chorus|bridge|refrain|intro|outro|interlude|tag)(?:\s+\d+)?):?$/i;
+function headingLabel(line: string): string | undefined {
+  const bracketed = line.match(/^\[((?:\\.|[^\\\]])+)\]$/);
+  if (bracketed) {
+    const label = bracketed[1].replace(/\\([\\\]nr])/g, (_, char: string) => char === 'n' ? '\n' : char === 'r' ? '\r' : char).trim();
+    if (label && label.length <= 80) return label;
+  }
+  return line.match(namedHeading)?.[1];
+}
+
+function needsLiteralLine(line: string): boolean {
+  return !line || line !== line.trim() || line.startsWith('\\') || headingLabel(line) !== undefined;
+}
+
+// Reopening a song must preserve its boundaries and names. A leading backslash
+// protects a lyric that looks like a heading or separator from being re-parsed.
+export function formatSongLyrics(sections: readonly SongSection[]): string {
+  return sections.map(section => {
+    const label = section.label.replace(/\\/g, '\\\\').replace(/\]/g, '\\]').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+    const text = section.text.split(/\r\n?|\n/).map(line => needsLiteralLine(line) ? `\\${line}` : line).join('\n');
+    return label ? `[${label}]\n${text}` : text;
+  }).join('\n\n');
+}
 
 export function newSongSectionId(): string {
   // getRandomValues is also available when a station is opened over LAN HTTP.
@@ -19,6 +41,15 @@ export function splitSongLyrics(text: string, mode: SongSplitMode, previous: rea
     lines = [];
   }
   for (const raw of text.split(/\r\n?|\n/)) {
+    if (raw.startsWith('\\') && needsLiteralLine(raw.slice(1))) {
+      const literal = raw.slice(1);
+      if (mode === 'blank' || literal.trim()) {
+        lines.push(literal);
+        hasLyrics = true;
+        if (mode === 'line') finish();
+      }
+      continue;
+    }
     const line = raw.trim();
     if (!line) {
       finish();
@@ -26,10 +57,10 @@ export function splitSongLyrics(text: string, mode: SongSplitMode, previous: rea
       hasLyrics = false;
       continue;
     }
-    const match = line.match(heading);
-    if (match) {
+    const heading = headingLabel(line);
+    if (heading !== undefined) {
       finish();
-      label = (match[1] || match[2]).trim();
+      label = heading;
       hasLyrics = false;
       continue;
     }

@@ -179,18 +179,28 @@ function songMatchLabel(song:Song){
 function editSong(song:Song|null){editingSong.value=song;legacySections.value=[];songOpen.value=true;}
 async function savedSong(song:Song){
   const added=!editingSong.value;
+  rememberSong(song);
+  if(selectedSongId.value===song.id)selectedSongSnapshot.value=song;
   if(added){
     toast.success(`Added “${song.title}” to the song library.`);
     if(!selectedSongId.value){
       selectedSongSnapshot.value=song;
       selectedSongId.value=song.id;
     }
+  }else{
+    toast.success(`Saved “${song.title}”.`);
+    // Refresh only this song's private cue. Its live snapshot and an unrelated
+    // prepared song stay untouched while the library is being edited.
+    const selection=draft.value?.selection;
+    if(selection?.kind==='lyrics'&&selection.songId===song.id){
+      const section=song.sections.find(section=>section.id===selection.sectionId)??song.sections[0];
+      if(section)run(prepare({kind:'lyrics',songId:song.id,sectionId:section.id}));
+    }
   }
   try{
     await loadSongs();
     if(disposed)return;
     await search();
-    if(!added&&!disposed)selectSong(song);
   }catch{
     if(!disposed)toast.error('Your song was saved. Reopen Lyrics to refresh the library.');
   }

@@ -169,6 +169,9 @@ try {
   await screenIs(preview, chorus, 'Response');
   await show.uncheck();
   await screenIs(preview, chorus, '');
+  await dialog.getByText('Credits', { exact: true }).click();
+  await field('Writer / artist').fill('Lumen rehearsal team');
+  await field('Copyright / licence credit').fill('Original rehearsal lyrics');
   const colors = (canvas) =>
     canvas.evaluate((el) => ({
       background: getComputedStyle(el).backgroundColor,
@@ -190,6 +193,8 @@ try {
   const saved = (await list()).find((song) => song.title === title);
   assert.ok(saved);
   assert.equal(saved.showSectionLabels, false);
+  assert.equal(saved.author, 'Lumen rehearsal team');
+  assert.equal(saved.copyright, 'Original rehearsal lyrics');
   assert.deepEqual(
     saved.sections.map((s) => [s.label, s.text]),
     [
@@ -217,23 +222,125 @@ try {
   assert.deepEqual(firstTake.setlist, initial.setlist);
   assert.equal(commands.length, 1);
 
-  await page.getByRole('button', { name: 'Edit selected song', exact: true }).click();
+  const editBaseline = await command({ type: 'setlist', songIds: [old.id, saved.id] });
+  const edit = async () => {
+    await page.getByRole('button', { name: 'Edit selected song', exact: true }).click();
+    await dialog.waitFor();
+  };
+  const checkEditPrivate = async () => {
+    assert.equal(commands.length, 1, 'Editing cannot send a channel command');
+    assert.deepEqual(await workspace(), editBaseline, 'Editing preserves the setlist and the song’s current live snapshot');
+    await screenIs(audience, chorus, '');
+  };
+
+  await edit();
+  assert.equal(await field('Song title').inputValue(), title);
+  const existingLyrics = await field('Lyrics').inputValue();
+  assert.ok(existingLyrics.includes(verse));
+  assert.ok(existingLyrics.includes(chorus));
+  assert.ok(existingLyrics.includes('One last line'));
+  assert.equal(await split.inputValue(), 'blank');
   assert.equal(await show.isChecked(), false);
+  assert.equal(await field('Section name').inputValue(), 'Verse 1');
+  await screenIs(preview, verse, '');
+  await next.click();
+  assert.equal(await field('Section name').inputValue(), 'Response');
+  await screenIs(preview, chorus, '');
+  await next.click();
+  assert.equal(await field('Section name').inputValue(), '');
+  await screenIs(preview, 'One last line', '');
+  await dialog.getByText('Credits', { exact: true }).click();
+  assert.equal(await field('Writer / artist').inputValue(), saved.author);
+  assert.equal(await field('Copyright / licence credit').inputValue(), saved.copyright);
+  await button('Save song').click();
+  await dialog.waitFor({ state: 'hidden' });
+  const unchanged = await readSong(saved.id);
+  assert.deepEqual(unchanged.sections, saved.sections, 'Opening and saving preserves section boundaries and IDs');
+  assert.equal(unchanged.author, saved.author);
+  assert.equal(unchanged.copyright, saved.copyright);
+  assert.equal(unchanged.showSectionLabels, false);
+  assert.equal(unchanged.revision, saved.revision + 1);
+  await prepared.getByText(chorus, { exact: true }).waitFor();
+  await checkEditPrivate();
+
+  await edit();
+  const revisedChorus = chorus.replace('Evening voices carry', 'Evening voices rise');
+  const lyricsWithRevisedChorus = existingLyrics.replace(chorus, revisedChorus);
+  await field('Lyrics').fill(lyricsWithRevisedChorus);
+  await button('Save song').click();
+  await dialog.waitFor({ state: 'hidden' });
+  const revised = await readSong(saved.id);
+  assert.equal(revised.sections[1].id, saved.sections[1].id, 'Editing a section in place preserves its ID');
+  assert.equal(revised.sections[1].text, revisedChorus);
+  await prepared.getByText(revisedChorus, { exact: true }).waitFor();
+  await checkEditPrivate();
+
+  await edit();
+  await field('Lyrics').fill('Discard this replacement');
+  await split.selectOption({ label: 'Every line' });
+  await page.keyboard.press('Escape');
+  await dialog.waitFor({ state: 'hidden' });
+  assert.deepEqual(await readSong(saved.id), revised, 'Cancelling an edit preserves the stored song');
+  await checkEditPrivate();
+
+  await edit();
+  assert.equal(await field('Lyrics').inputValue(), lyricsWithRevisedChorus);
+  assert.equal(await split.inputValue(), 'blank');
+  const revisedFirstLine = 'Through the open doors together';
+  await field('Lyrics').fill('[Verse 1]\n' + revisedFirstLine + '\nWe gather with our song\n\n[Response]\n' + chorus + '\n\nOne last line');
+  await split.selectOption({ label: 'Every line' });
+  await screenIs(preview, revisedFirstLine, '');
+  await field('Section name').fill('Opening');
   await show.check();
+  await screenIs(preview, revisedFirstLine, 'Opening');
+  await next.click();
+  await screenIs(preview, 'We gather with our song', 'Verse 1');
+  await next.click();
+  await screenIs(preview, 'Evening voices carry', 'Response');
+  await checkEditPrivate();
   await button('Save song').click();
   await dialog.waitFor({ state: 'hidden' });
   const edited = await readSong(saved.id);
+  assert.equal((await list()).length, 2, 'Editing updates the song rather than adding a duplicate');
+  assert.equal(edited.id, saved.id);
+  assert.equal(edited.author, saved.author);
+  assert.equal(edited.copyright, saved.copyright);
   assert.equal(edited.showSectionLabels, true);
-  assert.deepEqual(edited.sections, saved.sections);
-  assert.equal(edited.revision, saved.revision + 1);
-  assert.deepEqual(await workspace(), firstTake, 'Editing a song preserves even its own current live snapshot');
-  await section.click();
+  assert.equal(edited.revision, revised.revision + 1);
+  assert.deepEqual(edited.sections.map((s) => [s.label, s.text]), [
+    ['Opening', revisedFirstLine],
+    ['Verse 1', 'We gather with our song'],
+    ['Response', 'Evening voices carry'],
+    ['Response', 'A quiet song of thanks'],
+    ['', 'One last line'],
+  ]);
+  assert.equal(new Set(edited.sections.map((s) => s.id)).size, 5);
+  await prepared.getByText(revisedFirstLine, { exact: true }).waitFor();
+  await checkEditPrivate();
+
+  // Saved split boundaries are loaded as blocks, so simply reopening and saving
+  // cannot merge two adjacent sections that happen to have the same label.
+  await edit();
+  await screenIs(preview, revisedFirstLine, 'Opening');
+  await next.click();
+  await screenIs(preview, 'We gather with our song', 'Verse 1');
+  await next.click();
+  await screenIs(preview, 'Evening voices carry', 'Response');
+  await next.click();
+  await screenIs(preview, 'A quiet song of thanks', 'Response');
+  await button('Save song').click();
+  await dialog.waitFor({ state: 'hidden' });
+  assert.deepEqual((await readSong(saved.id)).sections, edited.sections);
+  await checkEditPrivate();
+
+  await page.locator('.w-section-cue').filter({ hasText: 'Evening voices carry' }).click();
   await send.click();
-  await screenIs(audience, chorus, 'Response');
+  await screenIs(audience, 'Evening voices carry', 'Response');
   assert.equal(commands.length, 2);
+  assert.deepEqual((await workspace()).setlist, [old.id, saved.id]);
   assert.deepEqual(errors, []);
   console.log(
-    'Passed: cancel, whole-song paste, both split modes, stepping, optional labels, private preview, save/reload, edit and explicit live projection.',
+    'Passed: whole-song paste and edit, split modes, stepping, labels, credits, cancel, stable IDs, setlist and live isolation, reload and explicit live projection.',
   );
   passed = true;
 } catch (error) {

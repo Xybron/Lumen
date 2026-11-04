@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, LockKeyhole, Monitor, Music2, Plus, Trash2 } from 'lucide-vue-next';
+import { ChevronLeft, ChevronRight, LockKeyhole, Monitor, Music2 } from 'lucide-vue-next';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import ContentLayer from '@/components/live/ContentLayer.vue';
 import { worshipRequest } from '@/lib/worship/api';
-import { newSongSectionId, splitSongLyrics, type SongSplitMode } from '@/lib/worship/song-paste';
+import { formatSongLyrics, splitSongLyrics, type SongSplitMode } from '@/lib/worship/song-paste';
 import type { Item } from '@/types';
 import type { Song, SongSection } from '../../../../shared/worship';
 
@@ -17,7 +17,6 @@ const sections = ref<SongSection[]>([]), index = ref(0);
 const lastSplit = new Map<SongSplitMode, SongSection[]>();
 const showSectionLabels = ref(false), busy = ref(false), error = ref('');
 const names = ref(new Map<string, { heading: string; name: string }>());
-const structured = computed(() => !!props.song || !!props.initialSections?.length);
 const active = computed(() => sections.value[index.value]);
 const attribution = computed(() => [author.value.trim(), copyright.value.trim()].filter(Boolean).join(' · '));
 
@@ -44,18 +43,19 @@ watch(open, visible => {
   title.value = song?.title ?? '';
   author.value = song?.author ?? '';
   copyright.value = song?.copyright ?? '';
-  lyrics.value = '';
   splitMode.value = 'blank';
   names.value.clear();
   lastSplit.clear();
   sections.value = (song?.sections ?? props.initialSections ?? []).map(section => ({ ...section }));
-  showSectionLabels.value = song ? song.showSectionLabels !== false : structured.value;
+  lastSplit.set('blank', sections.value);
+  lyrics.value = formatSongLyrics(sections.value);
+  showSectionLabels.value = song ? song.showSectionLabels !== false : !!props.initialSections?.length;
   index.value = 0;
   error.value = '';
 }, { immediate: true });
 
 watch([lyrics, splitMode], ([text, mode]) => {
-  if (!open.value || structured.value) return;
+  if (!open.value) return;
   const previousId = active.value?.id;
   // Switching back to a split restores the names attached to its sections.
   const parsed = splitSongLyrics(text, mode, lastSplit.get(mode) ?? sections.value);
@@ -64,22 +64,6 @@ watch([lyrics, splitMode], ([text, mode]) => {
   sections.value = parsed;
   index.value = retainedIndex >= 0 ? retainedIndex : Math.max(0, Math.min(index.value, parsed.length - 1));
 });
-
-function addSection() {
-  sections.value.push({ id: newSongSectionId(), label: '', text: '' });
-  index.value = sections.value.length - 1;
-}
-function moveSection(i: number, direction: number) {
-  const destination = i + direction;
-  if (destination < 0 || destination >= sections.value.length) return;
-  const [section] = sections.value.splice(i, 1);
-  sections.value.splice(destination, 0, section);
-  index.value = destination;
-}
-function removeSection(i: number) {
-  sections.value.splice(i, 1);
-  index.value = Math.max(0, Math.min(i, sections.value.length - 1));
-}
 
 const limitMessage = computed(() => {
   if (sections.value.length > 100) return 'A song can have up to 100 sections. Combine sections or choose Blank line.';
@@ -132,24 +116,10 @@ async function save() {
         <div class="song-grid">
           <div class="song-entry">
             <label>Song title<input v-model="title" required maxlength="160" placeholder="Song title" :disabled="busy" /></label>
-            <template v-if="!structured">
-              <label>Lyrics<textarea v-model="lyrics" rows="10" placeholder="Paste the whole song here…" :disabled="busy" /></label>
-              <label class="song-split">New section at
-                <select v-model="splitMode" aria-label="New section at" :disabled="busy"><option value="blank">Blank line</option><option value="line">Every line</option></select>
-              </label>
-            </template>
-            <template v-else>
-              <div v-for="(section, i) in sections" :key="section.id" class="w-song-section" @focusin="index = i">
-                <div>
-                  <input v-model="section.label" maxlength="80" :aria-label="`Section ${i + 1} label`" placeholder="Section name (optional)" :disabled="busy" />
-                  <button type="button" class="w-icon" :disabled="busy || i === 0" aria-label="Move section up" @click="moveSection(i, -1)"><ArrowUp :size="14" /></button>
-                  <button type="button" class="w-icon" :disabled="busy || i === sections.length - 1" aria-label="Move section down" @click="moveSection(i, 1)"><ArrowDown :size="14" /></button>
-                  <button type="button" class="w-icon" :disabled="busy || sections.length === 1" aria-label="Delete section" @click="removeSection(i)"><Trash2 :size="14" /></button>
-                </div>
-                <textarea v-model="section.text" required maxlength="4000" rows="3" :aria-label="`Section ${i + 1} lyrics`" placeholder="Lyrics for this section…" :disabled="busy" />
-              </div>
-              <button type="button" class="w-button add-section" :disabled="busy || sections.length >= 100" @click="addSection"><Plus :size="14" />Add section</button>
-            </template>
+            <label>Lyrics<textarea v-model="lyrics" rows="10" placeholder="Paste the whole song here…" :disabled="busy" /></label>
+            <label class="song-split">New section at
+              <select v-model="splitMode" aria-label="New section at" :disabled="busy"><option value="blank">Blank line</option><option value="line">Every line</option></select>
+            </label>
 
             <details class="song-credits">
               <summary>Credits</summary>
@@ -169,7 +139,7 @@ async function save() {
               <span aria-live="polite">{{ active ? `Section ${index + 1} of ${sections.length}` : '0 sections' }}</span>
               <button type="button" class="w-icon" aria-label="Next section" :disabled="index >= sections.length - 1" @click="index++"><ChevronRight :size="16" /></button>
             </div>
-            <label v-if="!structured"><span>Section name <small aria-hidden="true">Optional</small></span>
+            <label><span>Section name <small aria-hidden="true">Optional</small></span>
               <input v-model="selectedName" aria-label="Section name" maxlength="80" placeholder="e.g. Chorus" :disabled="busy || !active" />
             </label>
             <label class="song-label-check"><input v-model="showSectionLabels" type="checkbox" :disabled="busy" />Show section names on screen</label>
@@ -200,7 +170,6 @@ async function save() {
 .song-credits{color:var(--text-muted);font-size:11px}
 .song-credits summary{cursor:pointer}
 .song-credits label{margin-top:10px}
-.add-section{align-self:flex-start}
 .song-review{align-self:start;position:sticky;top:0}
 .song-headline{justify-content:space-between;font-size:12px;font-weight:550}
 .song-headline small,.song-review label small,.song-navigation span,.song-footer>span{font-size:11px;color:var(--text-muted);font-weight:400}
