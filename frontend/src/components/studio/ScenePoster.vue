@@ -6,6 +6,7 @@ import type { Item } from '@/types';
 import type { SceneLayer, StudioScene, StudioSource } from '../../../../shared/production';
 const props = withDefaults(defineProps<{ scene: StudioScene; sources?: StudioSource[]; animationTime?: number | null; animationLayerId?: string | null;
   channels?: Record<string, { item?: Item; textChannel: boolean }>; posterForMedia?: (path: string | undefined, kind: 'image' | 'video') => string | undefined;
+  sourceStills?: Readonly<Record<string, string>>;
   previewMedia?: boolean; streamForSource?: (id: string) => MediaStream | null }>(), { animationTime: null, animationLayerId: null, previewMedia: false });
 const layers = computed(() => props.scene.layers.filter(layer => {
   if (!layer.visible) return false;
@@ -32,6 +33,7 @@ function styleFor(layer: SceneLayer) {
       <span v-if="layer.kind === 'text'">{{ layer.text }}</span>
       <ChannelPoster v-else-if="channelFor(layer.sourceId)?.item" :item="channelFor(layer.sourceId)!.item!" :layer="layer" :overlay="channelFor(layer.sourceId)!.textChannel || layer.channelStyle === 'overlay'" :poster-for-media="posterForMedia" />
       <template v-else-if="channelFor(layer.sourceId)" />
+      <img v-else-if="layer.sourceId && ['camera', 'screen'].includes(sourceFor(layer.sourceId)?.kind ?? '') && sourceStills?.[layer.sourceId]" class="scene-source-still" :data-source-id="layer.sourceId" :src="sourceStills[layer.sourceId]" :style="{ objectFit: layer.fit }" decoding="async" draggable="false" alt="" />
       <img v-else-if="sourceFor(layer.sourceId)?.kind === 'image' && mediaUrl(layer.sourceId)" :src="mediaUrl(layer.sourceId)" :style="{ objectFit: layer.fit }" loading="lazy" decoding="async" draggable="false" alt="" />
       <img v-else-if="!previewMedia && sourceFor(layer.sourceId)?.kind === 'video' && posterForMedia?.(sourceFor(layer.sourceId)?.url, 'video')" :src="posterForMedia(sourceFor(layer.sourceId)?.url, 'video')" :style="{ objectFit: layer.fit }" loading="lazy" decoding="async" draggable="false" alt="" />
       <video v-else-if="previewMedia && sourceFor(layer.sourceId)?.kind === 'video'" :src="mediaUrl(layer.sourceId)" :style="{ objectFit: layer.fit }" muted autoplay loop playsinline />
