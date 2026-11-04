@@ -6,6 +6,7 @@ import { resolveScriptureSearch } from './scripture-search.js';
 import { searchScriptureKeywords } from './scripture-keyword-search.js';
 import { matchScriptureQuote } from './scripture-quote-match.js';
 import { searchLyrics, invalidateLyricsSearch, ensureLyricsSearchIndex, updateLyricsSearchIndex } from './lyrics-search.js';
+import { decodeSong, SongSchema } from './worship-song.js';
 import { ProductionError } from './production-store.js';
 import type { BibleVersion, Verse, Song, CueSelection, LiveCue, WorshipWorkspace, WorshipCommand, ScriptureSelection, ScriptureSearchResult, LyricsSearchHit } from '../../shared/worship.js';
 
@@ -18,11 +19,7 @@ export const BibleImportSchema = z.object({
   verses: z.array(importedVerse).min(1).max(40000),
   replace: z.boolean().default(false),
 });
-export const SongSchema = z.object({
-  id: key.optional(), revision: z.number().int().nonnegative().default(0), title: z.string().trim().min(1).max(160),
-  author: z.string().max(300).default(''), copyright: z.string().max(1500).default(''),
-  sections: z.array(z.object({ id: key, label: z.string().trim().min(1).max(80), text: z.string().trim().min(1).max(4000) })).min(1).max(100),
-}).superRefine((song, ctx) => { if (new Set(song.sections.map(s => s.id)).size !== song.sections.length) ctx.addIssue({ code: 'custom', message: 'Song sections need unique IDs.' }); });
+export { SongSchema };
 export const SelectionSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('scripture'), versionId: key, book: z.number().int().min(1).max(66), chapter: z.number().int().min(1).max(150), verse: z.number().int().min(1).max(200), endVerse: z.number().int().min(1).max(200).optional() }),
   z.object({ kind: z.literal('lyrics'), songId: key, sectionId: key }),
@@ -59,7 +56,7 @@ export class WorshipLibrary {
       CREATE VIRTUAL TABLE IF NOT EXISTS verses_fts USING fts5(text, content='verses', content_rowid='id', prefix='2 3 4');
       CREATE TRIGGER IF NOT EXISTS verse_insert AFTER INSERT ON verses BEGIN INSERT INTO verses_fts(rowid,text) VALUES(new.id,new.text); END;
       CREATE TRIGGER IF NOT EXISTS verse_delete AFTER DELETE ON verses BEGIN INSERT INTO verses_fts(verses_fts,rowid,text) VALUES('delete',old.id,old.text); END;
-      CREATE TABLE IF NOT EXISTS songs (id TEXT PRIMARY KEY, revision INTEGER NOT NULL, title TEXT NOT NULL, author TEXT NOT NULL, copyright TEXT NOT NULL, sections TEXT NOT NULL, updatedAt TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS songs (id TEXT PRIMARY KEY, revision INTEGER NOT NULL, title TEXT NOT NULL, author TEXT NOT NULL, copyright TEXT NOT NULL, sections TEXT NOT NULL, updatedAt TEXT NOT NULL, showSectionLabels INTEGER NOT NULL DEFAULT 1);
       CREATE VIRTUAL TABLE IF NOT EXISTS songs_fts USING fts5(id UNINDEXED,title,body,prefix='2 3 4');
       CREATE VIRTUAL TABLE IF NOT EXISTS songs_vocab USING fts5vocab(songs_fts,'row');
       CREATE TABLE IF NOT EXISTS worship_workspaces (channelId TEXT PRIMARY KEY, state TEXT NOT NULL);
@@ -67,6 +64,7 @@ export class WorshipLibrary {
     `);
     this.db.transaction(() => {
       if (!(this.db.pragma('table_info(verses)') as { name: string }[]).some(column => column.name === 'endVerse')) this.db.exec('ALTER TABLE verses ADD COLUMN endVerse INTEGER');
+      if (!(this.db.pragma('table_info(songs)') as { name: string }[]).some(column => column.name === 'showSectionLabels')) this.db.exec('ALTER TABLE songs ADD COLUMN showSectionLabels INTEGER NOT NULL DEFAULT 1');
     })();
     ensureLyricsSearchIndex(this.db);
   }
@@ -156,21 +154,22 @@ export class WorshipLibrary {
   songs(query = ''): Song[] {
     const q = ftsQuery(query);
     const rows = q ? this.db.prepare('SELECT s.* FROM songs_fts f JOIN songs s ON s.id=f.id WHERE songs_fts MATCH ? ORDER BY rank LIMIT 100').all(q) : this.db.prepare('SELECT * FROM songs ORDER BY title COLLATE NOCASE LIMIT 500').all();
-    return rows.map(row => this.decodeSong(row));
+    return rows.map(decodeSong);
   }
   searchSongs(query=''): LyricsSearchHit[] {
     if(query.trim())return searchLyrics(this.db,query);
     return this.songs().map(song=>({song,match:{kind:'title',sectionId:null,excerpt:'',corrected:false}}));
   }
-  private decodeSong(row: unknown): Song { const r = row as Omit<Song,'sections'> & { sections:string }; return { ...r,sections:JSON.parse(r.sections) }; }
-  song(id: string) { const row = this.db.prepare('SELECT * FROM songs WHERE id=?').get(id); if (!row) throw new ProductionError(404,'Song not found.'); return this.decodeSong(row); }
+  song(id: string) { const row = this.db.prepare('SELECT * FROM songs WHERE id=?').get(id); if (!row) throw new ProductionError(404,'Song not found.'); return decodeSong(row); }
   saveSong(raw: unknown) {
     const input = SongSchema.parse(raw), id = input.id ?? `song_${randomUUID()}`;
     const saved=this.db.transaction(() => {
-      const row = this.db.prepare('SELECT revision FROM songs WHERE id=?').get(id) as { revision:number } | undefined;
+      const row = this.db.prepare('SELECT revision,showSectionLabels FROM songs WHERE id=?').get(id) as { revision:number; showSectionLabels:number } | undefined;
       if (row && row.revision !== input.revision) throw new ProductionError(409,'This song changed on another device. Reopen it before editing.');
-      const song: Song = { ...input,id,revision:(row?.revision ?? 0)+1,updatedAt:new Date().toISOString() };
-      this.db.prepare('INSERT OR REPLACE INTO songs VALUES(?,?,?,?,?,?,?)').run(id,song.revision,song.title,song.author,song.copyright,JSON.stringify(song.sections),song.updatedAt);
+      const showSectionLabels = input.showSectionLabels ?? (row?.showSectionLabels !== 0);
+      const song: Song = { ...input,id,revision:(row?.revision ?? 0)+1,updatedAt:new Date().toISOString(),showSectionLabels };
+      this.db.prepare('INSERT OR REPLACE INTO songs (id,revision,title,author,copyright,sections,updatedAt,showSectionLabels) VALUES(?,?,?,?,?,?,?,?)')
+        .run(id,song.revision,song.title,song.author,song.copyright,JSON.stringify(song.sections),song.updatedAt,Number(showSectionLabels));
       this.db.prepare('DELETE FROM songs_fts WHERE id=?').run(id);
       this.db.prepare('INSERT INTO songs_fts(id,title,body) VALUES(?,?,?)').run(id,song.title,song.sections.map(s=>s.text).join('\n'));
       updateLyricsSearchIndex(this.db,song);
@@ -188,7 +187,7 @@ export class WorshipLibrary {
     }
     const song = this.song(selection.songId), section = song.sections.find(s=>s.id===selection.sectionId);
     if (!section) throw new ProductionError(404,'Song section not found.');
-    return { selection,title:song.title,text:section.text,reference:section.label,attribution:[song.author,song.copyright].filter(Boolean).join(' · '),takenAt:new Date().toISOString() };
+    return { selection,title:song.title,text:section.text,reference:song.showSectionLabels === false ? '' : section.label,attribution:[song.author,song.copyright].filter(Boolean).join(' · '),takenAt:new Date().toISOString() };
   }
   workspace(channelId: string): WorshipWorkspace {
     const row = this.db.prepare('SELECT state FROM worship_workspaces WHERE channelId=?').get(channelId) as { state:string } | undefined;

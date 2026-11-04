@@ -32,6 +32,8 @@ test('selective .lumen roundtrip covers more than 500 songs, source ranges, conf
   try {
     source.library.importBible(sampleBible('SPAN')); source.library.importBible(sampleBible('OTHER'));
     source.library.db.transaction(() => { for (let i = 0; i < 521; i++) source.library.saveSong(sampleSong(`s${i}`)); })();
+    const hidden = source.library.song('s520');
+    source.library.saveSong({ ...hidden, showSectionLabels: false, sections: [...hidden.sections, { id: 'outro', label: '', text: 'An unnamed closing section' }] });
     target.library.saveSong(sampleSong('s0', 'Keep the destination text'));
     target.library.command('lyrics-live', 0, { type: 'take', selection: { kind: 'lyrics', songId: 's0', sectionId: 'v1' } });
     const beforeWorkspace = target.library.workspace('lyrics-live');
@@ -40,11 +42,15 @@ test('selective .lumen roundtrip covers more than 500 songs, source ranges, conf
     const bytes = await source.transfer.export(selection); const payload = unpack(bytes).payload;
     assert.deepEqual(Object.keys(payload).sort(), ['bibles', 'media', 'presentations', 'settings', 'songs']);
     assert.equal(payload.bibles.length, 1); assert.equal(payload.songs.length, 521); assert.equal(payload.settings, null);
+    assert.equal(payload.songs.find((s: {id: string}) => s.id === 's0').showSectionLabels, undefined, 'Default songs retain the older archive shape');
     const preview = await target.transfer.preview(bytes); assert.equal(preview.catalog.songs.find(s => s.id === 's0')?.exists, true);
     const result = await target.transfer.import(preview.archive, selection);
     assert.deepEqual(result.imported, { bibles: 1, songs: 520, presentations: 0, media: 0, settings: 0, scenes: 0, recordings: 0, setlists: 0, clips: 0 });
     assert.equal(result.skipped.songs, 1); assert.equal(target.library.song('s0').sections[0].text, 'Keep the destination text');
     assert.equal(target.library.song('s520').title, 'Song s520'); assert.equal(target.library.versions().find(v => v.id === 'OTHER')?.installed, undefined);
+    assert.equal(target.library.song('s520').showSectionLabels, false);
+    assert.equal(target.library.song('s520').sections[1].label, '');
+    assert.equal(target.library.cue({ kind: 'lyrics', songId: 's520', sectionId: 'v1' }).reference, '');
     const verse = target.library.searchScripture('SPAN', 'Genesis 1:2').verses[0]; assert.equal(verse.verse, 1); assert.equal(verse.endVerse, 3);
     assert.deepEqual(target.library.workspace('lyrics-live'), beforeWorkspace);
     assert.equal((await fs.stat(path.join(result.backupPath, 'worship.db'))).isFile(), true);

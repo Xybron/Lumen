@@ -20,7 +20,7 @@ export interface ScriptureSelection { kind: 'scripture'; versionId: string; book
 export interface LyricSelection { kind: 'lyrics'; songId: string; sectionId: string }
 export type CueSelection = ScriptureSelection | LyricSelection;
 export interface SongSection { id: string; label: string; text: string }
-export interface Song { id: string; revision: number; title: string; author: string; copyright: string; sections: SongSection[]; updatedAt: string }
+export interface Song { id: string; revision: number; title: string; author: string; copyright: string; sections: SongSection[]; showSectionLabels?: boolean; updatedAt: string }
 export interface LyricsSearchHit {
   song: Song;
   match: { kind: 'title' | 'lyrics'; sectionId: string | null; excerpt: string; corrected: boolean };

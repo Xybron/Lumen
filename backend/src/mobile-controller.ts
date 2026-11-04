@@ -257,7 +257,7 @@ export async function createMobileController(options: MobileControllerOptions) {
       if (!channel) throw new ProductionError(404, 'Channel not found.');
       let results: MobileSearchResults['results'];
       if (channel.channel.kind === 'scripture') results = options.worship.search(query.channelId, query.q).scripture().verses.slice(0, 60).map(verse => ({ title: `${verse.bookName} ${verse.chapter}:${verse.verse}`, text: verse.text, selection: { kind: 'scripture', versionId: verse.versionId, book: verse.book, chapter: verse.chapter, verse: verse.verse } }));
-      else if (channel.channel.kind === 'lyrics') results = options.worship.search(query.channelId, query.q).lyrics().slice(0, 30).flatMap(hit => hit.song.sections.map(section => ({ title: `${hit.song.title} · ${section.label}`, text: section.text, selection: { kind: 'lyrics' as const, songId: hit.song.id, sectionId: section.id } }))).slice(0, 100);
+      else if (channel.channel.kind === 'lyrics') results = options.worship.search(query.channelId, query.q).lyrics().slice(0, 30).flatMap(hit => hit.song.sections.map((section, index) => ({ title: `${hit.song.title} · ${section.label || `Section ${index + 1}`}`, text: section.text, selection: { kind: 'lyrics' as const, songId: hit.song.id, sectionId: section.id } }))).slice(0, 100);
       else results = (channel.playlist?.items ?? []).flatMap((item, index) => item.type !== 'section' && `${item.title} ${item.body}`.toLowerCase().includes(query.q.toLowerCase()) ? [{ title: item.title || `Slide ${index + 1}`, text: item.body, selection: { kind: 'presentation' as const, index } }] : []).slice(0, 100);
       res.json({ results });
     }));

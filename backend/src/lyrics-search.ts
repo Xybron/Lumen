@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { LyricsSearchHit, Song } from '../../shared/worship.js';
+import { decodeSong } from './worship-song.js';
 
 // Manual song finding deliberately lives separately from matchLyrics(). Fuzzy
 // operator suggestions must never broaden automatic listening/publication rules.
@@ -28,7 +29,6 @@ interface Vocabulary {
 }
 interface MatchScore { corrected: boolean; distance: number; phrase: number; span: number; positions: number[] }
 interface RankedHit { songId: string; title: string; match: LyricsSearchHit['match']; score: number[] }
-type SongRow = Omit<Song, 'sections'> & { sections: string };
 const vocabularies = new WeakMap<Database.Database, Vocabulary>();
 
 function normalized(value: string) {
@@ -240,13 +240,7 @@ function excerpt(text: string, positions: number[]) {
 export function searchLyrics(db: Database.Database, query: string): LyricsSearchHit[] {
   const tokens = [...new Set(words(query.slice(0, 500)).map(word => word.value))].slice(0, 40);
   if (!tokens.some(token => token.length >= 2)) return [];
-  const decoded = new Map<string, Song>();
-  const decode = (row: SongRow) => {
-    const existing = decoded.get(row.id);
-    if (existing) return existing;
-    const song: Song = { ...row, sections: JSON.parse(row.sections) };
-    decoded.set(song.id, song); return song;
-  };
+  const getSong = db.prepare('SELECT * FROM songs WHERE id=?');
   const find = (alternatives: Alternative[][]) => {
     const quote = (value: string) => `"${value.replace(/"/g, '""')}"`;
     const expression = tokens.map((token, index) => `(${[`${quote(token)}${exactToken(token) ? '' : '*'}`, ...alternatives[index].map(term => quote(term.value))].join(' OR ')})`).join(' AND ');
@@ -274,9 +268,8 @@ export function searchLyrics(db: Database.Database, query: string): LyricsSearch
       ranked.set(section.songId, { songId: section.songId, title: section.title,
         match: { kind: 'lyrics', sectionId: section.sectionId, excerpt: excerpt(section.body, match.positions), corrected: match.corrected }, score: rank });
     }
-    const getSong = db.prepare('SELECT * FROM songs WHERE id=?');
     return [...ranked.values()].sort((left, right) => compareScore(left.score, right.score) || left.title.localeCompare(right.title) || left.songId.localeCompare(right.songId))
-      .slice(0, RESULT_LIMIT).map(result => ({ song: decode(getSong.get(result.songId) as SongRow), match: result.match }));
+      .slice(0, RESULT_LIMIT).map(result => ({ song: decodeSong(getSong.get(result.songId)), match: result.match }));
   };
   const strict = find(tokens.map(() => []));
   if (strict.length) return strict;

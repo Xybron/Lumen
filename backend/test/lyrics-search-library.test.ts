@@ -1,5 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import Database from 'better-sqlite3';
 import { WorshipLibrary } from '../src/worship-library.js';
 import { ListeningSessions } from '../src/listening-session.js';
 
@@ -53,4 +57,37 @@ test('manual typo suggestions cannot broaden Lyrics listening or automatically p
     }
     assert.deepEqual(db.workspace('lyrics'),state);assert.equal(changed.length,0);
   }finally{db.close();}
+});
+
+test('existing labels stay visible after migration while songs can hide or omit their section names', t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'lumen-lyrics-labels-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const file = path.join(directory, 'worship.db'), old = new Database(file);
+  old.exec('CREATE TABLE songs (id TEXT PRIMARY KEY, revision INTEGER, title TEXT, author TEXT, copyright TEXT, sections TEXT, updatedAt TEXT)');
+  old.prepare('INSERT INTO songs VALUES(?,?,?,?,?,?,?)').run('legacy', 1, 'First Light', 'Choir', 'Test credit',
+    JSON.stringify([{ id: 'chorus', label: 'Chorus', text: 'A new day is here' }]), new Date().toISOString());
+  old.close();
+  const db = new WorshipLibrary(file);
+  try {
+    const initial = db.song('legacy');
+    const selection = { kind: 'lyrics' as const, songId: 'legacy', sectionId: 'chorus' };
+    const before = db.command('lyrics', 0, { type: 'take', selection });
+    assert.equal(initial.showSectionLabels, true);
+    assert.equal(before.live!.reference, 'Chorus');
+    const hidden = db.saveSong({ ...initial, showSectionLabels: false, sections: [
+      ...initial.sections, { id: 'end', text: 'An unnamed final section' },
+    ] });
+    assert.equal(hidden.sections[1].label, '');
+    assert.equal(db.songs('new day')[0].showSectionLabels, false);
+    assert.deepEqual(db.searchSongs('unnamed final')[0].song, hidden);
+    assert.equal(db.cue(selection).reference, '');
+    assert.equal(db.cue(selection).attribution, 'Choir · Test credit');
+    assert.deepEqual(db.workspace('lyrics'), before);
+    const { showSectionLabels: _, ...legacyEdit } = hidden;
+    const updated = db.saveSong({ ...legacyEdit, title: 'New Title' });
+    assert.equal(updated.showSectionLabels, false, 'Older clients editing a title preserve visibility');
+    db.saveSong({ ...updated, showSectionLabels: true });
+    assert.equal(db.cue(selection).reference, 'Chorus');
+    assert.equal(db.cue({ ...selection, sectionId: 'end' }).reference, '');
+  } finally { db.close(); }
 });

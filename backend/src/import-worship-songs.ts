@@ -4,9 +4,9 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { SongSchema, WorshipLibrary } from './worship-library.js';
+import { decodeSong } from './worship-song.js';
 
 type ImportSong = z.infer<typeof SongSchema> & { id: string };
-type StoredSong = { id: string; title: string; author: string; copyright: string; sections: string };
 type Conflict = { id: string; title: string };
 export interface SongImportResult {
   mode: 'dry-run' | 'applied';
@@ -31,18 +31,18 @@ export function validateSongImport(raw: unknown): ImportSong[] {
   });
 }
 
-function content(song: Pick<ImportSong, 'title' | 'author' | 'copyright' | 'sections'>) {
-  return JSON.stringify([song.title, song.author, song.copyright, song.sections.map(s => [s.id, s.label, s.text])]);
+function content(song: Pick<ImportSong, 'title' | 'author' | 'copyright' | 'sections' | 'showSectionLabels'>) {
+  return JSON.stringify([song.title, song.author, song.copyright, song.showSectionLabels ?? true, song.sections.map(s => [s.id, s.label, s.text])]);
 }
 
 function plan(db: Database.Database, songs: ImportSong[]) {
-  const get = db.prepare('SELECT id,title,author,copyright,sections FROM songs WHERE id=?');
+  const get = db.prepare('SELECT * FROM songs WHERE id=?');
   const additions: ImportSong[] = [], conflicts: Conflict[] = [];
   let unchanged = 0;
   for (const song of songs) {
-    const stored = get.get(song.id) as StoredSong | undefined;
+    const stored = get.get(song.id);
     if (!stored) additions.push(song);
-    else if (content({ ...stored, sections: JSON.parse(stored.sections) }) === content(song)) unchanged++;
+    else if (content(decodeSong(stored)) === content(song)) unchanged++;
     else conflicts.push({ id: song.id, title: song.title });
   }
   return { additions, conflicts, unchanged };

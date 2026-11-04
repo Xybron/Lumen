@@ -6,6 +6,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { z } from 'zod';
 import { BibleImportSchema, SongSchema, WorshipLibrary } from './worship-library.js';
+import { decodeSong, SongSectionSchema } from './worship-song.js';
 import { BackgroundSchema, ChannelSchema, ContentSchema, ItemSchema, PlaylistSchema, SettingsSchema, type Content } from './schema.js';
 import { ensureChannels } from './migrate-content.js';
 import { withContentLock } from './content-writer.js';
@@ -31,7 +32,7 @@ const item = ItemSchema.extend({
 const playlist = PlaylistSchema.extend({ id: entityId, name: z.string().trim().min(1).max(300), items: z.array(item).max(10_000) }).strict();
 const channel = ChannelSchema.extend({ id: entityId, playlistId: entityId, name: z.string().trim().min(1).max(300) }).strict();
 const settings = SettingsSchema.extend({ fontFamily: z.string().max(300), globalFontScale: z.number().positive().max(20) }).strict();
-const song = z.object({ id: entityId, title: z.string().trim().min(1).max(160), author: z.string().max(300), copyright: z.string().max(1500), sections: z.array(z.object({ id: entityId, label: z.string().trim().min(1).max(80), text: z.string().trim().min(1).max(4000) }).strict()).min(1).max(100) }).strict();
+const song = z.object({ id: entityId, title: z.string().trim().min(1).max(160), author: z.string().max(300), copyright: z.string().max(1500), sections: z.array(SongSectionSchema.strict()).min(1).max(100), showSectionLabels: z.boolean().optional() }).strict();
 const bible = BibleImportSchema.omit({ replace: true }).extend({ version: BibleImportSchema.shape.version.strict() }).strict();
 const asset = z.object({ id: mediaId, bytes: z.number().int().nonnegative().max(MAX_ARCHIVE_BYTES), sha256: z.string().regex(/^[a-f0-9]{64}$/), data: z.string().max(Math.ceil(MAX_ASSET_BYTES / 3) * 4).optional() }).strict();
 const theme = z.object({ background: z.string().regex(/^#[a-f\d]{6}$/i), color: z.string().regex(/^#[a-f\d]{6}$/i), size: z.enum(['sm','md','lg','xl','2xl']), align: z.enum(['left','center','right']) }).strict();
@@ -167,7 +168,10 @@ export class DataTransfer {
     return current;
   }
   private allSongs() {
-    return (this.library.db.prepare('SELECT id,title,author,copyright,sections FROM songs ORDER BY title COLLATE NOCASE,id').all() as { id: string; title: string; author: string; copyright: string; sections: string }[]).map(row => ({ ...row, sections: JSON.parse(row.sections) as z.infer<typeof song>['sections'] }));
+    return this.library.db.prepare('SELECT * FROM songs ORDER BY title COLLATE NOCASE,id').all().map(row => {
+      const { id, title, author, copyright, sections, showSectionLabels } = decodeSong(row);
+      return { id, title, author, copyright, sections, ...(showSectionLabels === false ? { showSectionLabels } : {}) };
+    });
   }
   private async mediaCatalog() {
     const result: TransferCatalog['media'] = [];

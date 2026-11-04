@@ -241,8 +241,10 @@ try{
   await page.getByRole('button',{name:'Worship — lyrics',exact:true}).click();await page.getByRole('heading',{name:'Find a song'}).waitFor();
   await checkChannelHeader();
   await checkContentOnlyControls();
-  await page.getByRole('button',{name:'Add your first song',exact:true}).click();await page.getByLabel('Song title',{exact:true}).fill('A song of welcome');await page.getByLabel('Writer / artist').fill('Lumen test');await page.getByLabel('Section 1 lyrics').fill('Mercy fills this house today\nLet every heart find rest');
-  await page.getByRole('button',{name:'Add section',exact:true}).click();await page.getByLabel('Section 2 lyrics').fill('Let every voice sing out with joy\nTogether in this place');await page.getByRole('button',{name:'Save song',exact:true}).click();await page.getByRole('button',{name:'Pin song to setlist',exact:true}).click();await until(async()=>(await workspace('lyrics')).setlist.length===1,'setlist saved');
+  await page.getByRole('button',{name:'Add your first song',exact:true}).click();await page.getByLabel('Song title',{exact:true}).fill('A song of welcome');
+  await page.getByLabel('Lyrics',{exact:true}).fill('[Verse 1]\nMercy fills this house today\nLet every heart find rest\n\n[Chorus]\nLet every voice sing out with joy\nTogether in this place');
+  await page.getByText('Credits',{exact:true}).click();await page.getByLabel('Writer / artist').fill('Lumen test');
+  await page.getByLabel('Show section names on screen',{exact:true}).check();await page.getByRole('button',{name:'Add to library',exact:true}).click();await page.getByRole('button',{name:'Pin song to setlist',exact:true}).click();await until(async()=>(await workspace('lyrics')).setlist.length===1,'setlist saved');
   const songId=(await workspace('lyrics')).setlist[0];
   const songDetails=await (await request.get(`${base}/api/worship/songs`)).json(),testSong=songDetails.find(song=>song.id===songId);
   assert.equal(testSong.title,'A song of welcome');

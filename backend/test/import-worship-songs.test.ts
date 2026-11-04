@@ -37,9 +37,10 @@ test('apply backs up the open WAL database, indexes songs, and is idempotent wit
     const state = f.library.workspace('lyrics');
     // Prime the other connection's typo vocabulary before the import.
     f.library.searchSongs('lantern');
-    const input = { songs: [song('new', 'Cobalt mountains shimmer beneath the moon')] };
+    const input = { songs: [{ ...song('new', 'Cobalt mountains shimmer beneath the moon'), showSectionLabels: false }] };
     const result = await importWorshipSongs(input, { database: f.database, apply: true, backup: f.backup() });
     assert.equal(result.added, 1); assert.equal(result.conflicts.length, 0);
+    assert.equal(f.library.song('new').showSectionLabels, false);
     assert.equal(f.library.searchSongs('cobalt mountains')[0].song.id, 'new');
     assert.equal(f.library.searchSongs('coblat mountains')[0].song.id, 'new');
     assert.deepEqual(f.library.workspace('lyrics'), state);
@@ -49,6 +50,8 @@ test('apply backs up the open WAL database, indexes songs, and is idempotent wit
     const revision = f.library.song('new').revision;
     const repeated = await importWorshipSongs(input, { database: f.database, apply: true, backup: f.backup('again') });
     assert.equal(repeated.added, 0); assert.equal(repeated.unchanged, 1); assert.equal(f.library.song('new').revision, revision);
+    const changedVisibility = await importWorshipSongs({ songs: [song('new', 'Cobalt mountains shimmer beneath the moon')] }, { database: f.database });
+    assert.equal(changedVisibility.conflicts.length, 1);
     await assert.rejects(importWorshipSongs(input, { database: f.database, apply: true, backup: f.backup() }), { code: 'EEXIST' });
   } finally { await f.close(); }
 });

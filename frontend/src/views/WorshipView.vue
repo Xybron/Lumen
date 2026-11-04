@@ -10,6 +10,7 @@ import { useStudioStore } from '@/stores/studio';
 import { openProjection } from '@/lib/tauri';
 import { worshipRequest } from '@/lib/worship/api';
 import { lyricsViews } from '@/lib/worship/lyrics-view-cache';
+import { newSongSectionId } from '@/lib/worship/song-paste';
 import ChannelCuePreview from '@/components/channel/ChannelCuePreview.vue';
 import BibleLibraryDialog from '@/components/channel/BibleLibraryDialog.vue';
 import SongEditorDialog from '@/components/channel/SongEditorDialog.vue';
@@ -171,12 +172,32 @@ function sendSong(song:Song,sectionId?:string,event?:MouseEvent,fromSearch=false
 function selectSearchSong(song:Song,event?:MouseEvent){if(touchClick(event)||event&&event.detail>1||searching.value||completedSearch.value!==searchKey()||!songs.value.some(result=>result.id===song.id))return;selectSong(song,songMatches.value[song.id]?.sectionId??undefined);}
 function selectSetlistSong(song:Song,event?:MouseEvent){if(touchClick(event)||event&&event.detail>1)return;selectSong(song);}
 function selectSection(song:Song,sectionId:string,event?:MouseEvent){if(touchClick(event)||event&&event.detail>1)return;selectSong(song,sectionId);}
-function songMatchLabel(song:Song){const match=songMatches.value[song.id];return match?.sectionId?song.sections.find(section=>section.id===match.sectionId)?.label??'Lyrics':'Lyrics';}
+function songMatchLabel(song:Song){
+  const index=song.sections.findIndex(section=>section.id===songMatches.value[song.id]?.sectionId);
+  return index>=0 ? song.sections[index].label || `Section ${index+1}` : 'Lyrics';
+}
 function editSong(song:Song|null){editingSong.value=song;legacySections.value=[];songOpen.value=true;}
-async function savedSong(song:Song){await loadSongs();await search();selectSong(song);}
+async function savedSong(song:Song){
+  const added=!editingSong.value;
+  if(added){
+    toast.success(`Added “${song.title}” to the song library.`);
+    if(!selectedSongId.value){
+      selectedSongSnapshot.value=song;
+      selectedSongId.value=song.id;
+    }
+  }
+  try{
+    await loadSongs();
+    if(disposed)return;
+    await search();
+    if(!added&&!disposed)selectSong(song);
+  }catch{
+    if(!disposed)toast.error('Your song was saved. Reopen Lyrics to refresh the library.');
+  }
+}
 function pin(song:Song){rememberSong(song);const ids=state.value.setlist;run(action({type:'setlist',songIds:ids.includes(song.id)?ids.filter(id=>id!==song.id):[...ids,song.id]}));}
 function reorder(i:number,d:number){const ids=[...state.value.setlist];const [id]=ids.splice(i,1);ids.splice(i+d,0,id);run(action({type:'setlist',songIds:ids}));}
-function migrateLyrics(){editingSong.value=null;legacySections.value=legacyItems.value.flatMap(item=>item.stanzas?.length?item.stanzas.map(s=>({id:crypto.randomUUID(),label:s.label??item.title??'Verse',text:s.lines})):item.body?[{id:crypto.randomUUID(),label:item.title??'Verse',text:item.body}]:[]).filter(s=>s.text.trim());songOpen.value=true;}
+function migrateLyrics(){editingSong.value=null;legacySections.value=legacyItems.value.flatMap(item=>item.stanzas?.length?item.stanzas.map(s=>({id:newSongSectionId(),label:s.label??item.title??'Verse',text:s.lines})):item.body?[{id:newSongSectionId(),label:item.title??'Verse',text:item.body}]:[]).filter(s=>s.text.trim());songOpen.value=true;}
 function recentLabel(selection:CueSelection){if(selection.kind==='lyrics')return allSongs.value.find(s=>s.id===selection.songId)?.title??'Song';return `${books.value.find(b=>b.book===selection.book)?.name??'Book '+selection.book} ${selection.chapter}:${selection.verse}${selection.endVerse?'–'+selection.endVerse:''}`;}
 function versionChanged(e:Event){const id=(e.target as HTMLSelectElement).value;run(action({type:'version',versionId:id}));}
 function take(){if(canSend.value)run(store.take(props.channel.id));}
@@ -271,13 +292,13 @@ onBeforeUnmount(()=>{
 
       <section v-if="!scripture" class="w-song-panel panel" aria-label="Selected song">
         <div class="w-song-heading"><div><span class="w-song-eyebrow">{{selectedSong?'SELECTED SONG':'SONG SECTIONS'}}</span><h2>{{selectedSong?.title||'Choose a song'}}</h2><p v-if="selectedSong">{{selectedSong.sections.length}} {{selectedSong.sections.length===1?'section':'sections'}}<template v-if="selectedSong.author"> · {{selectedSong.author}}</template></p><p v-else>Its sections will appear here.</p></div><div v-if="selectedSong" class="w-song-actions"><button class="w-icon" :class="{pinned:state.setlist.includes(selectedSong.id)}" :disabled="!canOperate" :aria-label="state.setlist.includes(selectedSong.id)?'Unpin selected song':'Pin selected song to setlist'" @click="pin(selectedSong)"><Check v-if="state.setlist.includes(selectedSong.id)" :size="15" /><Pin v-else :size="15" /></button><button class="w-icon" :disabled="!canLibrary" aria-label="Edit selected song" @click="editSong(selectedSong)"><Pencil :size="14" /></button></div></div>
-        <div v-if="selectedSong" ref="songCues" class="w-song-cues" aria-label="Song sections"><button v-for="(section,i) in selectedSong.sections" :key="`${selectedSong.id}-${section.id}`" class="w-section-cue" data-channel-prepare title="Tap to preview · Double-tap to send live" :class="{selected:draft?.selection.kind==='lyrics'&&draft.selection.songId===selectedSong.id&&draft.selection.sectionId===section.id}" @pointerdown="lyricsPointerDown" @pointerup="lyricsPointerUp($event,selectedSong,section.id)" @click="selectSection(selectedSong,section.id,$event)" @dblclick.prevent.stop="sendSong(selectedSong,section.id,$event)"><span>{{String(i+1).padStart(2,'0')}}</span><div><b>{{section.label}}</b><p>{{section.text}}</p></div><ArrowRight :size="14" /></button></div>
+        <div v-if="selectedSong" ref="songCues" class="w-song-cues" aria-label="Song sections"><button v-for="(section,i) in selectedSong.sections" :key="`${selectedSong.id}-${section.id}`" class="w-section-cue" data-channel-prepare title="Tap to preview · Double-tap to send live" :class="{selected:draft?.selection.kind==='lyrics'&&draft.selection.songId===selectedSong.id&&draft.selection.sectionId===section.id}" @pointerdown="lyricsPointerDown" @pointerup="lyricsPointerUp($event,selectedSong,section.id)" @click="selectSection(selectedSong,section.id,$event)" @dblclick.prevent.stop="sendSong(selectedSong,section.id,$event)"><span>{{String(i+1).padStart(2,'0')}}</span><div><b>{{section.label || `Section ${i+1}`}}</b><p>{{section.text}}</p></div><ArrowRight :size="14" /></button></div>
         <div v-else class="w-empty w-song-empty"><Music2 :size="28" :stroke-width="1.5" /><p>Select a song from the library or service setlist, then choose a section to prepare.</p></div>
       </section>
 
       <aside class="w-cue-panel panel"><section class="w-cue-group" aria-label="Prepared cue"><div class="w-section-heading"><h2><span class="w-preview-dot" />Prepared</h2><span class="w-pill">PREVIEW ONLY</span></div>
         <div class="w-preview w-content-preview" data-testid="prepared-cue" :aria-busy="preparing"><ChannelCuePreview v-if="draft" :text="draft.text" :reference="draft.reference" :attribution="draft.attribution" /><div v-else class="w-preview-empty"><component :is="scripture?BookOpen:Music2" :size="28" :stroke-width="1" /><span>{{preparing?'Preparing content…':scripture?'Choose a verse to prepare':'Choose a song section'}}</span></div></div>
-        <div class="w-cue-caption"><b>{{draft?.title||'Nothing prepared'}}</b><span>{{draft?.reference||'Your live output stays unchanged.'}}</span></div>
+        <div class="w-cue-caption"><b>{{draft?.title||'Nothing prepared'}}</b><span v-if="draft?.reference">{{draft.reference}}</span><span v-else-if="!draft">Choose a section or verse to preview.</span></div>
         <div v-if="draft?.selection.kind==='scripture'" class="w-range"><span>Verse {{draft.selection.verse}} through</span><input v-model.number="rangeEnd" type="number" :min="draft.selection.verse" :max="draft.selection.verse+11" aria-label="Passage end verse" /><button class="w-button" data-channel-prepare @click="prepare({...draft.selection,endVerse:rangeEnd})">Prepare</button></div>
         <button class="w-take" data-testid="channel-send-live" aria-keyshortcuts="Meta+Enter Control+Enter" :disabled="!canSend" :title="preparing?'Preparing the selected content…':'Publish this content to the channel. Choose the scene on Program in Studio.'" @click="take"><LoaderCircle v-if="sending||preparing" :size="15" class="w-spin" /><span>Send live</span><ArrowRight :size="16" /><kbd aria-hidden="true">⌘ ↵</kbd></button>
         <small class="w-shortcut">⌘ / Ctrl + Enter · manual control disarms listening</small></section>

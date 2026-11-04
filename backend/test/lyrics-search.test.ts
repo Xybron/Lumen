@@ -188,7 +188,7 @@ test('external commits refresh vocabulary while cue changes do not rebuild the c
 test('thousands of songs retain quick indexed lookup and bounded warm typo search', () => {
   const { library: db } = library();
   try {
-    const insert = db.db.prepare('INSERT INTO songs VALUES(?,?,?,?,?,?,?)');
+    const insert = db.db.prepare('INSERT INTO songs (id,revision,title,author,copyright,sections,updatedAt) VALUES(?,?,?,?,?,?,?)');
     const fts = db.db.prepare('INSERT INTO songs_fts VALUES(?,?,?)');
     const sectionFts = db.db.prepare('INSERT INTO song_sections_fts VALUES(?,?,?)');
     const now = new Date().toISOString();
