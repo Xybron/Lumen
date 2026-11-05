@@ -36,6 +36,7 @@ import { useStudioTransitions } from '@/composables/useStudioTransitions';
 import { useConfirmation } from '@/composables/useConfirmation';
 import { useAppFullscreen } from '@/composables/useAppFullscreen';
 import { animationTotalMs } from '@/lib/studio/animation';
+import { sceneShortcutSurfaceBlocked } from '@/lib/studio/scene-shortcuts';
 import { describeMainAudioStatus } from '@/lib/studio/main-audio-status';
 import { audioMeterPercent } from '@/lib/studio/audio-meter';
 import type { StudioSource, StudioScene } from '../../../shared/production';
@@ -301,6 +302,33 @@ async function removeOutput(id: string) {
   })) return;
   if (canOperate.value && studio.state?.outputs.some(item => item.id === id)) run(studio.edit(d => { d.outputs = d.outputs.filter(o => o.id !== id); }));
 }
+function canUseLayerClipboard(key: string, target: Element | null) {
+  if (!canOperate.value) return false;
+  if (sceneShortcutSurfaceBlocked(target, document, motion.elapsedMs.value !== null) ||
+    document.querySelector('.studio-canvas.is-interacting') ||
+    document.fullscreenElement?.classList.contains('monitor-panel') ||
+    (key === 'c' && window.getSelection()?.toString())) return false;
+  return key === 'c' ? !!studio.selectedLayer : !!studio.selectedScene && studio.canPasteLayer;
+}
+function useLayerClipboard(key: string) {
+  run(key === 'c' ? studio.copyLayer(studio.selectedLayer!.id) : studio.pasteLayer());
+}
+function clipboardKeydown(event: KeyboardEvent) {
+  const key = event.key.toLowerCase();
+  if (event.defaultPrevented || event.isComposing ||
+    !(event.ctrlKey || event.metaKey) || (event.ctrlKey && event.metaKey) || event.altKey || event.shiftKey ||
+    !['c', 'v'].includes(key) || !canUseLayerClipboard(key, event.target instanceof Element ? event.target : null)) return;
+  event.preventDefault(); event.stopPropagation();
+  if (!event.repeat) useLayerClipboard(key);
+}
+function clipboardEvent(event: ClipboardEvent) {
+  // Desktop Edit-menu actions can arrive without a keydown. Keep them local
+  // to scene editing; text fields still use the normal system clipboard.
+  const key = event.type === 'copy' ? 'c' : 'v';
+  if (event.defaultPrevented || !canUseLayerClipboard(key, event.target instanceof Element ? event.target : null)) return;
+  event.preventDefault(); event.stopPropagation();
+  useLayerClipboard(key);
+}
 function keydown(e: KeyboardEvent) {
   if (document.fullscreenElement?.classList.contains('monitor-panel')) return;
   const target = e.target instanceof Element ? e.target : null;
@@ -330,7 +358,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keydown));
   <LoginGate v-if="identity.ready && !identity.isAuthenticated" />
   <div v-else-if="!identity.ready || studio.loading && !studio.state" class="studio-loading"><Aperture :size="30" /><span>Preparing your studio…</span></div>
   <div v-else-if="!canOperate" class="studio-loading"><h1>Studio access</h1><p>Your account needs an author or owner role for all channels.</p><button class="s-button" @click="router.push('/')">Back to Present</button></div>
-  <div v-else-if="studio.state" class="studio-app" :class="{ 'inspector-collapsed': inspectorCollapsed, 'scenes-collapsed': scenesCollapsed }" :style="{ '--studio-header-height': headerHeight + 'px' }">
+  <div v-else-if="studio.state" class="studio-app" :class="{ 'inspector-collapsed': inspectorCollapsed, 'scenes-collapsed': scenesCollapsed }" :style="{ '--studio-header-height': headerHeight + 'px' }" @keydown.capture="clipboardKeydown" @copy.capture="clipboardEvent" @paste.capture="clipboardEvent">
     <WorkspaceHeader ref="studioHeader">
       <div class="engine-indicator"><span :class="['status-dot', { online: engineRunning, fault: studio.status.state === 'error' }]" /><span>{{ engineRunning ? 'Engine running' : studio.status.state === 'starting' ? 'Starting engine' : studio.status.state === 'error' ? 'Engine unavailable' : 'Engine offline' }}</span><small v-if="engineRunning">{{ studio.status.fps }} fps</small></div>
       <div class="header-actions">

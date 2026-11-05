@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
-import { Layers, Type, Square, Film, Plus, Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowUp, ArrowDown, SlidersHorizontal, GripVertical, Camera, Monitor, Image, Presentation } from 'lucide-vue-next';
+import { Layers, Type, Square, Film, Plus, Eye, EyeOff, Lock, Unlock, Copy, CopyPlus, ClipboardPaste, Trash2, ArrowUp, ArrowDown, SlidersHorizontal, GripVertical, Camera, Monitor, Image, Presentation } from 'lucide-vue-next';
 import { useStudioStore } from '@/stores/studio';
 import LayerContextMenu from './LayerContextMenu.vue';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -116,7 +116,9 @@ function rowKey(event: KeyboardEvent, id: string) {
         <button class="s-icon" aria-label="Move layer backward" title="Move layer backward · ⌥↓" :disabled="!studio.selectedLayer || studio.selectedLayer.locked || selectedIndex >= layers.length - 1" @click="studio.selectedLayer && run(studio.arrangeLayer(studio.selectedLayer.id, 'backward'))"><ArrowDown :size="13" /></button>
         <span class="layer-action-divider" />
         <button class="s-icon" aria-label="Layer properties" title="Layer properties" :disabled="!studio.selectedLayer" @click="emit('inspect')"><SlidersHorizontal :size="13" /></button>
-        <button class="s-icon" aria-label="Duplicate layer" title="Duplicate layer" :disabled="!studio.selectedLayer" @click="studio.selectedLayer && run(studio.duplicateLayer(studio.selectedLayer.id))"><Copy :size="13" /></button>
+        <button class="s-icon" aria-label="Copy layer" title="Copy layer · Ctrl/⌘ C" aria-keyshortcuts="Control+C Meta+C" :disabled="!studio.selectedLayer" @click="studio.selectedLayer && run(studio.copyLayer(studio.selectedLayer.id))"><Copy :size="13" /></button>
+        <button class="s-icon" aria-label="Paste layer" :title="studio.copiedLayerName ? 'Paste ' + studio.copiedLayerName + ' · Ctrl/⌘ V' : 'Copy a layer to paste it here'" aria-keyshortcuts="Control+V Meta+V" :disabled="!studio.selectedScene || !studio.canPasteLayer" @click="run(studio.pasteLayer())"><ClipboardPaste :size="13" /></button>
+        <button class="s-icon" aria-label="Duplicate layer" title="Duplicate layer" :disabled="!studio.selectedLayer" @click="studio.selectedLayer && run(studio.duplicateLayer(studio.selectedLayer.id))"><CopyPlus :size="13" /></button>
         <button class="s-icon layer-delete-action" aria-label="Delete layer" title="Delete layer" :disabled="!studio.selectedLayer || studio.selectedLayer.locked" @click="studio.selectedLayer && run(studio.removeLayer(studio.selectedLayer.id))"><Trash2 :size="13" /></button>
       </div>
     </div>

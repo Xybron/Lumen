@@ -28,6 +28,15 @@ export const useStudioStore = defineStore('studio', () => {
   const signal = new StudioSignal();
   const selectedScene = computed(() => state.value?.scenes.find(s => s.id === state.value?.previewSceneId) ?? null);
   const selectedLayer = computed(() => selectedScene.value?.layers.find(l => l.id === selectedLayerId.value) ?? null);
+  // A session-only layer clipboard. Each Copy owns a separate entry so a
+  // later Copy cannot replace the contents of a Paste already in the queue.
+  type LayerClipboardEntry = { layer: SceneLayer | null; pending: boolean; error?: string };
+  const layerClipboard = shallowRef<LayerClipboardEntry | null>(null);
+  const canPasteLayer = computed(() => !!layerClipboard.value && (layerClipboard.value.pending || !!layerClipboard.value.layer));
+  const copiedLayerName = computed(() => layerClipboard.value?.layer?.name ?? '');
+  // A scene selection can be waiting behind a save. Paste follows the scene
+  // the operator just chose, without changing Preview before its queued edit.
+  let pendingPreviewSelection: { id: string } | null = null;
   // Preview can change through a server-side bus swap or another operator,
   // not just selectScene(). Never leave the outgoing scene's layer selected.
   watch(() => state.value?.previewSceneId, () => { selectedLayerId.value = null; });
@@ -128,7 +137,13 @@ export const useStudioStore = defineStore('studio', () => {
       layer.animation = animationFromPreset(preset);
     });
   }
-  async function selectScene(id: string) { selectedLayerId.value = null; await edit(d => { d.previewSceneId = id; }); }
+  async function selectScene(id: string) {
+    const selection = { id };
+    pendingPreviewSelection = selection;
+    selectedLayerId.value = null;
+    try { await edit(d => { d.previewSceneId = id; }); }
+    finally { if (pendingPreviewSelection === selection) pendingPreviewSelection = null; }
+  }
   function reorderScene(id: string, targetId: string, placement: 'before' | 'after') {
     return edit(draft => { draft.scenes = reorderScenes(draft.scenes, id, targetId, placement); });
   }
@@ -136,7 +151,12 @@ export const useStudioStore = defineStore('studio', () => {
     const id = shortId('scene'), selected = selectedScene.value;
     const scene: StudioScene = duplicate && selected ? { ...structuredClone(selected), id, name: `${selected.name.slice(0, 95)} copy`, layers: selected.layers.map(l => ({ ...l, id: shortId('layer') })) } :
       { id, name: 'Untitled scene', background: '#141b21', layers: [] };
-    await edit(d => { d.scenes.push(scene); d.previewSceneId = id; }); selectedLayerId.value = null;
+    const selection = { id };
+    pendingPreviewSelection = selection;
+    try {
+      await edit(d => { d.scenes.push(scene); d.previewSceneId = id; });
+      selectedLayerId.value = null;
+    } finally { if (pendingPreviewSelection === selection) pendingPreviewSelection = null; }
   }
   async function removeScene(id: string) {
     await edit(d => { d.scenes = d.scenes.filter(s => s.id !== id); if (d.previewSceneId === id) d.previewSceneId = d.scenes[0]?.id ?? null; });
@@ -197,6 +217,49 @@ export const useStudioStore = defineStore('studio', () => {
   }
   function moveLayer(id: string, step: number) {
     return arrangeLayer(id, step > 0 ? 'forward' : 'backward');
+  }
+  function copyLayer(id: string, sceneId = selectedScene.value?.id) {
+    const entry: LayerClipboardEntry = { layer: null, pending: true };
+    layerClipboard.value = entry;
+    // Copy is a read barrier: a subsequent live control edit must not be
+    // coalesced across it and change what the user chose to copy.
+    pendingEdits.clear();
+    return enqueue(async () => {
+      const scene = state.value?.scenes.find(item => item.id === sceneId);
+      const layer = scene?.layers.find(item => item.id === id);
+      entry.pending = false;
+      if (!layer) {
+        entry.error = scene ? 'This layer was removed. Choose another layer to copy.' : 'This scene was removed. Choose another scene to copy from.';
+        if (layerClipboard.value === entry) layerClipboard.value = { ...entry };
+        throw new Error(entry.error);
+      }
+      entry.layer = structuredClone(layer);
+      if (layerClipboard.value === entry) {
+        layerClipboard.value = { ...entry };
+        toast.success('Layer copied. Choose a scene and paste.');
+      }
+    });
+  }
+  async function pasteLayer(sceneId = pendingPreviewSelection?.id ?? selectedScene.value?.id) {
+    const entry = layerClipboard.value;
+    // Ready copies are frozen at invocation. A pending copy is read only when
+    // its preceding queued operation has completed; later copies cannot win.
+    const snapshot = entry?.layer ? structuredClone(entry.layer) : null;
+    const pastedId = shortId('layer');
+    let pasted = false;
+    await edit(draft => {
+      const copied = snapshot ?? entry?.layer;
+      if (!copied) throw new Error(entry?.error ? 'That layer could not be copied. Copy it again before pasting.' : 'Copy a layer first, then choose a scene and paste.');
+      const scene = draft.scenes.find(item => item.id === sceneId);
+      if (!scene) throw new Error('This scene is no longer available. Choose another scene before pasting.');
+      if (scene.layers.length >= 40) throw new Error('This scene already has 40 layers. Remove a layer or choose another scene.');
+      if (copied.kind === 'source' && !draft.sources.some(source => source.id === copied.sourceId)) {
+        throw new Error('The copied layer’s source was removed. Add the source again, then copy its layer.');
+      }
+      scene.layers.push({ ...structuredClone(copied), id: pastedId });
+      pasted = true;
+    });
+    if (pasted && state.value?.previewSceneId === sceneId) selectedLayerId.value = pastedId;
   }
   async function duplicateLayer(id: string) {
     const sceneId = selectedScene.value?.id;
@@ -398,8 +461,8 @@ export const useStudioStore = defineStore('studio', () => {
   window.addEventListener('beforeunload', e => {
     if (captures.size) { e.preventDefault(); e.returnValue = ''; }
   });
-  return { state, status, loading, saving, recordings, engineBusy, recordingBusy, selectedLayerId, selectedScene, selectedLayer, connectedSources, animationPresets, reconnect: () => signal.reconnect(),
-    load, edit, command, selectScene, reorderScene, addScene, removeScene, updateScene, addLayer, updateLayer, updateLayerMediaBackground, updateLayerTextEffect, removeLayer, moveLayer, duplicateLayer, reorderLayer, arrangeLayer, alignLayer, presetLayer, nudgeLayer, addSource, removeSource, updateSource,
+  return { state, status, loading, saving, recordings, engineBusy, recordingBusy, selectedLayerId, selectedScene, selectedLayer, connectedSources, animationPresets, canPasteLayer, copiedLayerName, reconnect: () => signal.reconnect(),
+    load, edit, command, selectScene, reorderScene, addScene, removeScene, updateScene, addLayer, updateLayer, updateLayerMediaBackground, updateLayerTextEffect, removeLayer, moveLayer, copyLayer, pasteLayer, duplicateLayer, reorderLayer, arrangeLayer, alignLayer, presetLayer, nudgeLayer, addSource, removeSource, updateSource,
     connectSource, disconnectSource, sourceStream, cameraStreams, inputSelection, saveSourceProperties, setMainAudio, toggleEngine, refreshRecordings, toggleRecord, recoverRecording,
     saveAnimationPreset, renameAnimationPreset, deleteAnimationPreset, applyAnimationPreset };
 });

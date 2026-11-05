@@ -353,6 +353,13 @@ Scripture and Lyrics supply live text, not designs or Program routes:
    horizontal/vertical alignment, line height and letter spacing. Expand
    **Text effects** for an outline or shadow. These settings also work on text
    layers, stay in Preview until a Take, and persist in saved scenes and exports.
+   To reuse a styled layer, choose **Copy layer** from its right-click menu or
+   the Scene layers toolbar, select another scene, then **Paste layer**.
+   Ctrl+C / Ctrl+V (Windows) or ⌘C / ⌘V (Mac) also work outside text fields.
+   Paste keeps the exact position, size, text styling, media background,
+   animation, visibility and lock state, with a new independent layer ID.
+   Camera and channel layers reuse the original source. The layer clipboard
+   lasts in the current window until reload; pasted layers are saved with the scene.
 4. **Cut/Fade** that scene to Program, or use its configured scene shortcut
    directly from the channel workspace. Publishing itself never switches scenes.
 
@@ -896,6 +903,7 @@ npm run test:scripture:focus # build + Scripture entry autofocus, navigation and
 npm run test:lyrics:search # build + title/lyric fragments, typo matching, exact section preparation and keyboard/live safeguards
 npm run test:lyrics:background # build + media popover, scene isolation, persistence and upload cancellation
 npm run test:lyrics:typography # build + long filename layout, text styling, persistence and Program isolation
+npm run test:studio:clipboard # build + layer copy/paste, keyboard safety and Program isolation
 npm run test:presentation # build + presentation navigation, creation and isolated editing destinations
 npm run test:channel-workflow # build + channel-only publication, real text output, camera and scene isolation
 npm run test:studio:audio # build + persistent audio, ICE/RTP output connections, engine reconnect and recording regression

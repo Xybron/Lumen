@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { ContextMenuRoot, ContextMenuTrigger, ContextMenuPortal, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuSub, ContextMenuSubTrigger, ContextMenuSubContent, ContextMenuLabel } from 'reka-ui';
-import { ChevronRight, SlidersHorizontal, Pencil, Copy, Eye, EyeOff, Lock, Unlock, Trash2, Layers, AlignHorizontalJustifyCenter, LayoutTemplate } from 'lucide-vue-next';
+import { ChevronRight, SlidersHorizontal, Pencil, Copy, CopyPlus, ClipboardPaste, Eye, EyeOff, Lock, Unlock, Trash2, Layers, AlignHorizontalJustifyCenter, LayoutTemplate } from 'lucide-vue-next';
 import { useStudioStore } from '@/stores/studio';
 import type { LayerAlignment, LayerArrangeAction, LayerPreset } from '@/lib/studio/layer-layout';
 
@@ -21,6 +21,11 @@ const presets: { value: LayerPreset; label: string }[] = [
   { value: 'upper-third', label: 'Upper third' },
 ];
 function run(operation: Promise<unknown>) { void operation.catch(() => {}); }
+function menuKeydown(event: KeyboardEvent) {
+  // Reka dismisses the menu from its document Escape listener. Other keys
+  // stay inside this menu instead of triggering Studio actions.
+  if (event.key !== 'Escape') event.stopPropagation();
+}
 function onOpen(open: boolean) {
   if (open && layer.value) studio.selectedLayerId = layer.value.id;
   emit('open-change', open);
@@ -32,15 +37,17 @@ function arrange(action: LayerArrangeAction) { if (layer.value) run(studio.arran
   <ContextMenuRoot @update:open="onOpen">
     <ContextMenuTrigger as-child :disabled="!layer"><slot /></ContextMenuTrigger>
     <ContextMenuPortal>
-      <ContextMenuContent v-if="layer" class="studio-layer-menu" data-studio-layer-menu :collision-padding="8" :loop="true" @keydown.stop>
+      <ContextMenuContent v-if="layer" class="studio-layer-menu" data-studio-layer-menu :collision-padding="8" :loop="true" @keydown="menuKeydown">
         <ContextMenuLabel class="layer-menu-label">{{ layer.name }}</ContextMenuLabel>
         <ContextMenuItem class="layer-menu-item" @select="emit('inspect')"><SlidersHorizontal :size="13" />Edit properties</ContextMenuItem>
         <ContextMenuItem class="layer-menu-item" @select="emit('rename')"><Pencil :size="13" />Rename<kbd>F2</kbd></ContextMenuItem>
-        <ContextMenuItem class="layer-menu-item" @select="run(studio.duplicateLayer(layer.id))"><Copy :size="13" />Duplicate</ContextMenuItem>
+        <ContextMenuItem class="layer-menu-item" @select="run(studio.copyLayer(layer.id))"><Copy :size="13" />Copy layer<kbd>Ctrl/⌘ C</kbd></ContextMenuItem>
+        <ContextMenuItem class="layer-menu-item" :disabled="!studio.canPasteLayer" @select="run(studio.pasteLayer())"><ClipboardPaste :size="13" />Paste layer<kbd>Ctrl/⌘ V</kbd></ContextMenuItem>
+        <ContextMenuItem class="layer-menu-item" @select="run(studio.duplicateLayer(layer.id))"><CopyPlus :size="13" />Duplicate</ContextMenuItem>
         <ContextMenuSeparator class="layer-menu-separator" />
         <ContextMenuSub>
           <ContextMenuSubTrigger class="layer-menu-item" :disabled="layer.locked"><Layers :size="13" />Arrange<ChevronRight class="layer-menu-chevron" :size="13" /></ContextMenuSubTrigger>
-          <ContextMenuPortal><ContextMenuSubContent class="studio-layer-menu" data-studio-layer-menu :side-offset="4" :collision-padding="8" @keydown.stop>
+          <ContextMenuPortal><ContextMenuSubContent class="studio-layer-menu" data-studio-layer-menu :side-offset="4" :collision-padding="8" @keydown="menuKeydown">
             <ContextMenuItem class="layer-menu-item" :disabled="atFront" @select="arrange('forward')">Bring forward</ContextMenuItem>
             <ContextMenuItem class="layer-menu-item" :disabled="atBack" @select="arrange('backward')">Send backward</ContextMenuItem>
             <ContextMenuSeparator class="layer-menu-separator" />
@@ -50,13 +57,13 @@ function arrange(action: LayerArrangeAction) { if (layer.value) run(studio.arran
         </ContextMenuSub>
         <ContextMenuSub>
           <ContextMenuSubTrigger class="layer-menu-item" :disabled="layer.locked"><AlignHorizontalJustifyCenter :size="13" />Align to canvas<ChevronRight class="layer-menu-chevron" :size="13" /></ContextMenuSubTrigger>
-          <ContextMenuPortal><ContextMenuSubContent class="studio-layer-menu" data-studio-layer-menu :side-offset="4" :collision-padding="8" @keydown.stop>
+          <ContextMenuPortal><ContextMenuSubContent class="studio-layer-menu" data-studio-layer-menu :side-offset="4" :collision-padding="8" @keydown="menuKeydown">
             <ContextMenuItem v-for="alignment in alignments" :key="alignment.value" class="layer-menu-item" @select="run(studio.alignLayer(layer.id, alignment.value))">{{ alignment.label }}</ContextMenuItem>
           </ContextMenuSubContent></ContextMenuPortal>
         </ContextMenuSub>
         <ContextMenuSub>
           <ContextMenuSubTrigger class="layer-menu-item" :disabled="layer.locked"><LayoutTemplate :size="13" />Placement presets<ChevronRight class="layer-menu-chevron" :size="13" /></ContextMenuSubTrigger>
-          <ContextMenuPortal><ContextMenuSubContent class="studio-layer-menu" data-studio-layer-menu :side-offset="4" :collision-padding="8" @keydown.stop>
+          <ContextMenuPortal><ContextMenuSubContent class="studio-layer-menu" data-studio-layer-menu :side-offset="4" :collision-padding="8" @keydown="menuKeydown">
             <ContextMenuItem v-for="preset in presets" :key="preset.value" class="layer-menu-item" @select="run(studio.presetLayer(layer.id, preset.value))">{{ preset.label }}</ContextMenuItem>
           </ContextMenuSubContent></ContextMenuPortal>
         </ContextMenuSub>
