@@ -1,17 +1,18 @@
 <script setup lang="ts">
 import { ref,computed,onMounted,watch } from 'vue';
-import { AudioLines,Mic,Square,ShieldCheck,LoaderCircle,Settings2,ChevronDown,RefreshCw,Headphones,AlertCircle,Check } from 'lucide-vue-next';
+import { AudioLines,Mic,Square,ShieldCheck,LoaderCircle,Settings2,ChevronDown,RefreshCw,Headphones,AlertCircle,Check,X } from 'lucide-vue-next';
 import { Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription } from '@/components/ui/dialog';
+import { Popover,PopoverContent,PopoverTrigger } from '@/components/ui/popover';
 import { useWorshipStore } from '@/stores/worship';
 import { useIdentityStore } from '@/stores/identity';
 import { useListeningInput } from '@/composables/useListeningInput';
 import { useConfirmation } from '@/composables/useConfirmation';
 import type { ListeningDecision } from '../../../../shared/worship';
 
-const props=defineProps<{channelId:string;kind:string;canOperate:boolean;compact?:boolean}>(),store=useWorshipStore(),identity=useIdentityStore();
+const props=defineProps<{channelId:string;kind:string;canOperate:boolean;compact?:boolean;popover?:boolean}>(),store=useWorshipStore(),identity=useIdentityStore();
 const {confirmAction}=useConfirmation();
 const {devices,deviceId,processing,permission,error:inputError,refreshing,testing,level:testLevel,clipping:testClipping,selectedLabel,missing,canUse,refreshDevices,startTest,stopTest,syncCaptureInfo}=useListeningInput();
-const settingsOpen=ref(false),modelChoice=ref(''),modelBusy=ref(false),modelError=ref('');
+const settingsOpen=ref(false),popoverOpen=ref(false),modelChoice=ref(''),modelBusy=ref(false),modelError=ref('');
 const view=computed(()=>store.listening[props.channelId]),active=computed(()=>!!view.value?.session||!!view.value?.starting);
 const controls=computed(()=>store.listeningControlsFor(props.channelId));
 // The active session is authoritative. Merely returning to a channel must
@@ -30,6 +31,9 @@ const signalLabel=computed(()=>clipping.value?'Input is clipping — lower the s
 const modelCommand=computed(()=>`npm run setup:ai -- --model=${chosenModel.value?.id||'small.en'}`);
 const decisionLabels:Record<ListeningDecision,string>={listening:'Listening for a match',prepared:'Prepared', 'sent-live':'Sent live','already-live':'Already live',partial:'Waiting for a verse',review:'Needs review',conflict:'Conflicting references',unavailable:'Passage unavailable',cooldown:'Holding briefly',stale:'Result ignored'};
 const decisionLabel=computed(()=>view.value?.result?decisionLabels[view.value.result.decision]??'Listening for a match':'');
+const needsAttention=computed(()=>!!view.value?.error||!!inputError.value||missing.value||permission.value==='denied'||!canUse.value||!available.value);
+const triggerLabel=computed(()=>view.value?.starting?'Starting…':active.value?mode.value==='automatic'?'Listening · Auto':'Listening on':needsAttention.value?'Check listening':'Listening');
+const triggerDescription=computed(()=>view.value?.error||inputError.value||(!available.value?'Set up a local speech model.':active.value?`${mode.value==='automatic'?'Auto publish':'Prepare only'}. ${signalLabel.value}. Open listening controls for details.`:'Open microphone and listening controls.'));
 
 onMounted(()=>{void store.refreshAi().catch(()=>{});});
 watch(()=>store.aiStatus?.modelId,id=>{modelChoice.value=id??'';},{immediate:true});
@@ -38,8 +42,8 @@ watch(()=>view.value?.session,()=>void refreshDevices());
 watch(()=>props.canOperate,value=>{if(!value&&active.value)void store.stopListening(props.channelId);});
 watch([missing,permission],([disconnected,access])=>{if((disconnected||access==='denied')&&active.value)void store.stopListening(props.channelId);});
 watch(settingsOpen,open=>{
-  if(open){modelError.value='';void refreshDevices();void store.refreshAi().catch(()=>{});}
-  else stopTest();
+  if(open){popoverOpen.value=false;modelError.value='';void refreshDevices();void store.refreshAi().catch(()=>{});}
+  else {stopTest();if(props.popover)popoverOpen.value=true;}
 });
 async function toggle(){
   if(active.value){await store.stopListening(props.channelId);return;}
@@ -69,28 +73,46 @@ async function checkModels(){
 </script>
 
 <template>
-  <section class="w-listener panel-soft" :class="{armed:view?.session?.mode==='automatic','is-listening':active,'w-listener-compact':compact}" aria-label="Local listening">
+  <Popover v-model:open="popoverOpen">
+    <div v-if="popover" class="w-listening-control">
+      <PopoverTrigger as-child><button class="w-button w-listening-trigger" :class="{'is-listening':active,armed:active&&mode==='automatic','needs-attention':needsAttention}" aria-label="Open listening controls" :aria-description="triggerDescription" :title="triggerDescription"><LoaderCircle v-if="view?.starting" :size="14" class="w-spin" /><AlertCircle v-else-if="needsAttention" :size="14" /><span v-else-if="active" class="w-listening-dot" /><AudioLines v-else :size="15" /><span role="status">{{triggerLabel}}</span></button></PopoverTrigger>
+      <button v-if="active&&!popoverOpen" class="w-button w-listening-stop" :aria-label="view?.starting?'Cancel start':'Stop listening'" @click="store.stopListening(channelId)"><Square :size="11" />{{view?.starting?'Cancel':'Stop'}}</button>
+    </div>
+    <!-- Only the controls close. The input/controller above stays mounted, so
+         dismissing a popover never tears down listening or requests a new mic. -->
+    <component :is="popover?PopoverContent:'section'" class="w-listener" :class="[popover?'w-listener-popover':'panel-soft',{armed:view?.session?.mode==='automatic','is-listening':active,'w-listener-compact':compact}]" v-bind="popover?{align:'end',sideOffset:8,collisionPadding:12}:{}" aria-label="Local listening" @close-auto-focus="settingsOpen&&$event.preventDefault()">
     <div class="w-listener-title">
-      <span class="w-ai-icon"><AudioLines :size="17" /></span>
-      <div><h3>Local listening <span v-if="view?.session" class="w-pill">{{view.session.mode==='automatic'?'AUTO ARMED':'PREPARE ONLY'}}</span></h3><p>{{view?.starting?'Starting local recognition…':active?'Listening. Manual changes stop listening.':kind==='lyrics'?'Find the right song section as it is sung.':'Prepare Scripture as the speaker quotes it.'}}</p></div>
-      <span class="w-local"><ShieldCheck :size="12" />Local</span>
-      <button class="w-icon w-listener-settings" aria-label="Listening settings" title="Microphone and recognition settings" @click="settingsOpen=true"><Settings2 :size="16" /></button>
+      <span v-if="!popover" class="w-ai-icon"><AudioLines :size="17" /></span>
+      <div><h3><AudioLines v-if="popover" :size="16" />Local listening <span v-if="view?.session" class="w-pill">{{view.session.mode==='automatic'?'AUTO ARMED':'PREPARE ONLY'}}</span></h3><p v-if="!popover">{{view?.starting?'Starting local recognition…':active?'Listening. Manual changes stop listening.':kind==='lyrics'?'Find the right song section as it is sung.':'Prepare Scripture as the speaker quotes it.'}}</p></div>
+      <span v-if="!popover" class="w-local"><ShieldCheck :size="12" />Local</span>
+      <button v-if="!popover" class="w-icon w-listener-settings" aria-label="Listening settings" title="Microphone and recognition settings" @click="settingsOpen=true"><Settings2 :size="16" /></button>
+      <button v-else class="w-icon w-listener-close" aria-label="Close listening controls" @click="popoverOpen=false"><X :size="16" /></button>
     </div>
     <div class="w-listener-transport">
-      <button class="w-listener-device" aria-label="Configure listening input" :class="{'has-input-error':missing||permission==='denied'}" @click="settingsOpen=true"><Mic :size="15" /><span><small>Audio input</small><b>{{active&&view?.inputInfo?view.inputInfo.label:selectedLabel}}</b></span><ChevronDown :size="14" /></button>
-      <select v-model="mode" :disabled="active" aria-label="Listening mode"><option value="assisted">Prepare only</option><option value="automatic">Auto publish</option></select>
+      <template v-if="popover">
+        <label class="w-listener-field"><span>Audio input</span><select v-model="deviceId" :disabled="active||testing" aria-label="Listening audio input"><option value="">System default microphone</option><option v-if="missing" :value="deviceId" disabled>{{selectedLabel}} — disconnected</option><option v-for="(device,i) in devices" :key="device.deviceId||i" :value="device.deviceId">{{device.label||`Audio input ${i+1} — allow access to identify`}}</option></select></label>
+        <button v-if="permission!=='granted'" class="w-text-button w-listener-access" :disabled="refreshing||active||testing||permission==='unsupported'" @click="refreshDevices(true)"><Mic :size="13" />Allow microphone access</button>
+        <label class="w-listener-field"><span>Mode</span><select v-model="mode" :disabled="active" aria-label="Listening mode"><option value="assisted">Prepare only</option><option value="automatic">Auto publish</option></select></label>
+      </template>
+      <template v-else>
+        <button class="w-listener-device" aria-label="Configure listening input" :class="{'has-input-error':missing||permission==='denied'}" @click="settingsOpen=true"><Mic :size="15" /><span><small>Audio input</small><b>{{active&&view?.inputInfo?view.inputInfo.label:selectedLabel}}</b></span><ChevronDown :size="14" /></button>
+        <select v-model="mode" :disabled="active" aria-label="Listening mode"><option value="assisted">Prepare only</option><option value="automatic">Auto publish</option></select>
+      </template>
       <button class="w-button w-listener-start" :class="{primary:!active}" :disabled="!active&&(!canOperate||!canUse||!available)" @click="toggle"><LoaderCircle v-if="view?.starting" :size="14" class="w-spin" /><Square v-else-if="active" :size="12" /><Mic v-else :size="14" />{{view?.starting?'Cancel start':active?'Stop listening':'Listen'}}</button>
     </div>
     <label v-if="mode==='automatic'" class="w-check"><input v-model="commands" type="checkbox" :disabled="active" />Enable “Lumen next / previous” voice commands</label>
-    <div class="w-listener-signal"><div class="w-listener-meter" data-testid="listening-level-meter" role="meter" aria-label="Listening input level" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="Math.round(meterPercent)" :class="{clipping}"><span :style="{width:meterPercent+'%'}" /></div><span :class="{'w-error':missing||clipping||permission==='denied'}">{{signalLabel}}</span><button v-if="!active" class="w-text-button" @click="settingsOpen=true">Configure</button></div>
+    <div class="w-listener-signal"><div class="w-listener-meter" data-testid="listening-level-meter" role="meter" aria-label="Listening input level" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="Math.round(meterPercent)" :class="{clipping}"><span :style="{width:meterPercent+'%'}" /></div><span :class="{'w-error':missing||clipping||permission==='denied'}">{{signalLabel}}</span><button v-if="!active&&!popover" class="w-text-button" @click="settingsOpen=true">Configure</button></div>
+    <p v-if="popover" class="w-listener-note">{{active?'Manual content changes stop listening.':mode==='automatic'?'Matched passages can go live automatically.':'You choose when a verse goes live.'}}</p>
     <div v-if="view?.result" class="w-transcript"><span>HEARD <small>{{view.result.elapsedMs}} ms · {{view.busy?'Processing…':'English'}}</small></span><p>{{view.result.transcript||'No clear speech detected'}}</p></div>
     <div v-if="view?.result" class="w-listener-decision" :data-decision="view.result.decision" data-testid="listening-decision" role="status"><div><span class="w-decision-dot" /><b>{{decisionLabel}}</b><span v-if="view.result.candidate">{{view.result.candidate.reference}}</span></div><p>{{view.result.reason}}</p></div>
     <p v-if="view?.error||inputError" class="w-error" role="alert">{{view?.error||inputError}}</p>
     <p v-else-if="!available" class="w-listener-note"><button class="w-text-button" @click="settingsOpen=true">Set up a local speech model<ChevronDown :size="12" /></button></p>
-    <p v-else class="w-listener-note">{{currentModel?.label||store.aiStatus?.model||'Local speech model'}} · English recognition · {{kind==='lyrics'?'Matches your service setlist.':'Exact Bible text from your library.'}}</p>
-  </section>
+    <p v-else-if="!popover" class="w-listener-note">{{currentModel?.label||store.aiStatus?.model||'Local speech model'}} · English recognition · {{kind==='lyrics'?'Matches your service setlist.':'Exact Bible text from your library.'}}</p>
+    <div v-if="popover" class="w-listener-popover-footer"><button class="w-text-button" aria-label="Listening settings" @click="settingsOpen=true"><Settings2 :size="14" />Settings</button><span class="w-local"><ShieldCheck :size="12" />Local</span></div>
+    </component>
+  </Popover>
 
-  <Dialog v-model:open="settingsOpen"><DialogContent class="w-dialog listening-settings-dialog"><DialogHeader><DialogTitle>Listening settings</DialogTitle><DialogDescription>Choose what Lumen hears. This input is separate from Studio’s main audio.</DialogDescription></DialogHeader>
+  <Dialog v-model:open="settingsOpen"><DialogContent class="w-dialog listening-settings-dialog" @close-auto-focus="popover&&$event.preventDefault()"><DialogHeader><DialogTitle>Listening settings</DialogTitle><DialogDescription>Choose what Lumen hears. This input is separate from Studio’s main audio.</DialogDescription></DialogHeader>
     <div class="listening-settings-grid">
       <section class="listening-settings-section"><div class="listening-settings-heading"><Mic :size="16" /><h3>Audio input</h3><button class="w-icon" aria-label="Refresh devices" :disabled="refreshing" @click="refreshDevices()"><RefreshCw :size="14" :class="{'w-spin':refreshing}" /></button></div>
         <label class="w-label" for="listening-input-device">MICROPHONE OR AUDIO INTERFACE</label>

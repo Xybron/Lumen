@@ -204,8 +204,17 @@ try {
       for (const collapsed of [false, true]) {
         if (collapsed) await dock.getByRole('button', { name: 'Collapse toolbar', exact: true }).click();
         const label = `${kind} ${size.width}×${size.height}, toolbar ${collapsed ? 'collapsed' : 'expanded'}`;
+        if (kind === 'scripture') {
+          const trigger = page.getByRole('button', { name: 'Open listening controls', exact: true });
+          await reachable(trigger, `${label}: Listening controls`);
+          await trigger.click(); await page.getByRole('dialog', { name: 'Open listening controls', exact: true }).waitFor();
+        }
         await reachable(page.getByRole('button', { name: 'Listen', exact: true }), `${label}: Listen`);
         await reachable(page.getByLabel('Listening mode', { exact: true }), `${label}: Listening mode`);
+        if (kind === 'scripture') {
+          await page.getByRole('button', { name: 'Close listening controls', exact: true }).click();
+          await page.getByRole('dialog', { name: 'Open listening controls', exact: true }).waitFor({ state: 'hidden' });
+        }
         await reachable(page.getByRole('button', { name: 'Send live', exact: true }), `${label}: Send live`);
         await reachable(page.getByRole('button', { name: 'Next', exact: true }), `${label}: Next`);
         await reachable(page.getByRole('button', { name: kind === 'scripture' ? 'Manage versions' : 'Add a song', exact: true }), `${label}: Library action`);

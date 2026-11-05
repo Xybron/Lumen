@@ -134,15 +134,53 @@ try {
   checks.push('Opening a content channel does not acquire microphone permission or capture');
 
   const settings = () => page.getByRole('button', { name: 'Listening settings', exact: true });
+  const controlsTrigger = () => page.getByRole('button', { name: 'Open listening controls', exact: true });
+  // Reka names its nonmodal popover from the invoking trigger.
+  const controls = () => page.getByRole('dialog', { name: 'Open listening controls', exact: true });
   const dialog = () => page.getByRole('dialog', { name: 'Listening settings', exact: true });
   const input = () => dialog().getByLabel('Listening input', { exact: true });
   const processing = () => dialog().getByLabel('Input processing', { exact: true });
   const model = () => dialog().getByLabel('Local speech model', { exact: true });
-  const listen = () => page.getByRole('button', { name: 'Listen', exact: true });
+  const listen = () => page.getByRole('button', { name: /^(?:Listen|Start listening)$/ });
   const stop = () => page.getByRole('button', { name: 'Stop listening', exact: true });
   const settle = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  async function openSettings() { await settings().click(); await dialog().waitFor(); await until(() => model().locator('option[value="base.en"]').count(), 'speech profiles render'); }
-  async function closeSettings() { await dialog().getByRole('button', { name: 'Done', exact: true }).click(); await dialog().waitFor({ state: 'hidden' }); await settle(); }
+  async function openControls() {
+    // Lyrics retains its inline panel; only Scripture has the compact trigger.
+    if (await controlsTrigger().count() && !await controls().isVisible()) {
+      await controlsTrigger().click(); await controls().waitFor();
+    }
+  }
+  async function closeControls() { if (await controls().isVisible()) await controls().getByRole('button', { name: 'Close listening controls', exact: true }).click(); await controls().waitFor({ state: 'hidden' }); await settle(); }
+  async function openSettings() { await openControls(); await settings().click(); await dialog().waitFor(); await until(() => model().locator('option[value="base.en"]').count(), 'speech profiles render'); }
+  async function settingsDismissed() {
+    await dialog().waitFor({ state: 'hidden' }); await settle(); await openControls();
+    if (await controlsTrigger().count()) await until(() => controls().evaluate(element => element.contains(document.activeElement)), 'closing settings returns keyboard focus inside the reopened listening controls');
+  }
+  async function closeSettings() { await dialog().getByRole('button', { name: 'Done', exact: true }).click(); await settingsDismissed(); }
+
+  assert.equal(await controls().isVisible(), false, 'Scripture starts with its listening controls tucked away');
+  assert.equal(await page.locator('.w-search-heading').getByRole('button', { name: 'Open listening controls', exact: true }).count(), 1, 'Listening is available beside Find a passage');
+  const resultsBeforeOpening = await page.locator('.w-results').boundingBox();
+  await page.screenshot({ path: path.join(dir, 'listening-popover-closed.png'), fullPage: true });
+  await openControls();
+  const resultsWhileOpen = await page.locator('.w-results').boundingBox();
+  assert.deepEqual(resultsWhileOpen, resultsBeforeOpening, 'The popover overlays controls without consuming passage-results space');
+  assert.equal((await media()).calls.length, 0, 'Opening the popover never starts capture');
+  assert.equal(sessionRequests().length, 0);
+  await page.screenshot({ path: path.join(dir, 'listening-popover-open.png'), fullPage: true });
+  await page.keyboard.press('Escape'); await controls().waitFor({ state: 'hidden' });
+  await until(() => controlsTrigger().evaluate(element => element === document.activeElement), 'Escape returns focus to the Listening button');
+  await openControls(); await page.getByRole('heading', { name: 'Find a passage', exact: true }).click();
+  await controls().waitFor({ state: 'hidden' });
+  await openControls();
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 }); await settle();
+    await until(() => controls().evaluate(element => { const r = element.getBoundingClientRect(); return r.left >= -1 && r.right <= innerWidth + 1 && r.top >= -1 && r.bottom <= innerHeight + 1; }), `Listening popover fits ${width}px viewport`);
+  }
+  await page.screenshot({ path: path.join(dir, 'listening-popover-narrow.png'), fullPage: true });
+  await closeControls(); await page.setViewportSize({ width: 1512, height: 982 });
+  assert.equal((await media()).calls.length, 0, 'Opening, dismissing and resizing the controls never acquires a microphone');
+  checks.push('Scripture listening starts collapsed beside Find a passage; its popover preserves result space, fits desktop/mobile, dismisses outside/on Escape with restored focus, and opens without acquiring audio');
 
   // Retain a prepared cue so the new modal proves it consumes publication
   // shortcuts as well as presentation/Multiview space shortcuts.
@@ -155,6 +193,8 @@ try {
   await settle();
   assert.equal(calls.filter(call => /\/command$/.test(call.path)).length, 0, 'Listening settings shields a prepared verse and Studio against live shortcuts');
   checks.push('The settings dialog does not acquire audio and preserves the existing live-shortcut safeguards');
+  await page.keyboard.press('Escape'); await settingsDismissed();
+  await openSettings();
 
   await page.evaluate(() => window.__listeningMedia.denied(true));
   await dialog().getByRole('button', { name: 'Allow microphone access', exact: true }).click();
@@ -207,6 +247,7 @@ try {
   await closeSettings(); await page.setViewportSize({ width: 1512, height: 982 });
   await page.reload(); await page.getByRole('heading', { name: 'Find a passage', exact: true }).waitFor();
   assert.equal((await media()).calls.length, 0, 'Reloading saved preferences never rearms a microphone');
+  assert.equal(await controls().isVisible(), false, 'Reload restores the compact closed state'); await openControls();
   assert.equal(await page.getByLabel('Listening mode', { exact: true }).inputValue(), 'assisted', 'Automatic publishing is not a persisted preference');
   await openSettings(); assert.equal(await input().inputValue(), 'usb-desk'); assert.equal(await processing().inputValue(), 'mixer'); assert.equal(await model().inputValue(), 'small.en');
   await closeSettings();
@@ -215,6 +256,7 @@ try {
   const beforeRemoval = (await media()).calls.length;
   await page.evaluate(() => window.__listeningMedia.remove('usb-desk'));
   await until(() => listen().isDisabled(), 'unplugged persisted device disables Listen instead of falling back');
+  await closeControls(); assert.match(await controlsTrigger().innerText(), /Check listening/, 'A disconnected microphone stays visible as a warning when controls are closed');
   await openSettings(); assert.equal(await input().inputValue(), 'usb-desk');
   assert.match(await input().locator('option:checked').innerText(), /disconnected/);
   await dialog().getByRole('button', { name: 'Refresh devices', exact: true }).click(); await settle();
@@ -233,8 +275,11 @@ try {
   await until(() => sessionRequests().length === pendingSessions + 1, 'startup request reaches the backend while its local worker is held warming');
   await until(async () => (await (await request.get(`${base}/api/worship/listening/status`)).json()).state === 'starting', 'the backend is genuinely inside worker warmup before cancellation');
   const cancelledLease = page.waitForResponse(response => response.request().method() === 'DELETE' && new URL(response.url()).pathname === '/api/worship/channels/scripture/listening');
+  await closeControls();
+  assert.match(await controlsTrigger().innerText(), /Starting/, 'Startup remains visible after the controls are dismissed');
   await page.getByRole('button', { name: 'Cancel start', exact: true }).click();
   assert.equal((await cancelledLease).status(), 200);
+  await openControls();
   await until(async () => (await media()).live.length === 0 && await listen().isEnabled(), 'cancelled startup stops capture immediately');
   await fs.writeFile(workerReady, 'release deterministic worker warmup');
   await until(async () => (await (await request.get(`${base}/api/worship/listening/status`)).json()).state === 'ready', 'previous pending warmup finishes without rearming the cancelled browser');
@@ -257,6 +302,20 @@ try {
   assert.equal(wav.riff, true); assert.equal(wav.rate, 16000); assert.equal(wav.channels, 1); assert.equal(wav.bits, 16);
   assert.ok(wav.bytes > 3244 && wav.bytes <= 384044);
   assert.ok((await page.evaluate(() => window.__listeningMedia.outputPeaks())).every(peak => peak < 1e-7), 'Listening also never monitors audio to speakers');
+  const beforeCollapse = { media: await media(), starts: sessionRequests().length, ends: calls.filter(call => call.method === 'DELETE' && /\/listening$/.test(call.path)).length, windows: audioRequests().length, session: audioRequests().at(-1).session };
+  await closeControls();
+  assert.match(await controlsTrigger().innerText(), /Listening on/, 'The closed trigger clearly identifies active listening');
+  await stop().waitFor();
+  await until(() => audioRequests().length > beforeCollapse.windows, 'the same listener continues sending WAV windows with its popover closed');
+  assert.deepEqual((await media()).live, ['usb-desk']);
+  assert.equal((await media()).calls.length, beforeCollapse.media.calls.length, 'Closing the popover does not reopen the input');
+  assert.deepEqual((await media()).stops, beforeCollapse.media.stops, 'Closing the popover does not stop the borrowed capture');
+  assert.equal(sessionRequests().length, beforeCollapse.starts, 'Closing the popover does not create a replacement session');
+  assert.equal(calls.filter(call => call.method === 'DELETE' && /\/listening$/.test(call.path)).length, beforeCollapse.ends, 'Closing the popover does not cancel the live session');
+  assert.ok(audioRequests().slice(beforeCollapse.windows).every(call => call.session === beforeCollapse.session));
+  await page.screenshot({ path: path.join(dir, 'listening-popover-active-closed.png'), fullPage: true });
+  await openControls();
+  checks.push('Closing active listening preserves the same microphone and session, continues actual WAV delivery, and keeps Listening on plus an immediate Stop action visible');
   await openSettings(); assert.equal(await input().isDisabled(), true); assert.equal(await processing().isDisabled(), true); assert.equal(await model().isDisabled(), true);
   const busyModel = await request.post(`${base}/api/worship/listening/model`, { data: { modelId: 'base.en' } }); assert.equal(busyModel.status(), 409, await busyModel.text());
   await closeSettings();
@@ -272,11 +331,13 @@ try {
   await page.getByLabel('Search scripture', { exact: true }).fill('jn3 16');
   await page.locator('.w-verse-result').first().click();
   await until(() => page.getByRole('button', { name: 'Send live', exact: true }).isEnabled(), 'a prepared verse makes the Auto publish dialog’s shortcut guard meaningful');
+  await openControls();
   await page.getByLabel('Listening mode', { exact: true }).selectOption('automatic');
   const beforeCancel = (await media()).calls.length, sessionsBeforeCancel = sessionRequests().length;
   const armDialog = () => page.getByRole('dialog', { name: 'Enable Auto publish?', exact: true });
   let armConfirmations = 0;
   async function openArmConfirmation() {
+    await openControls();
     await listen().click(); await armDialog().waitFor(); armConfirmations += 1;
     await until(() => armDialog().getByRole('button', { name: 'Cancel', exact: true }).evaluate(element => element === document.activeElement), 'automatic-publication confirmation initially focuses its safe Cancel action');
     await settle();
@@ -321,6 +382,7 @@ try {
   await armDialog().waitFor({ state: 'hidden' }); await assertNotArmed('Leaving the requesting channel');
   await page.getByRole('button', { name: 'Scripture — scripture', exact: true }).click();
   await page.getByRole('heading', { name: 'Find a passage', exact: true }).waitFor();
+  await openControls();
   assert.equal(await page.getByLabel('Listening mode', { exact: true }).inputValue(), 'automatic', 'Cancelling a request does not rewrite the channel’s selected mode');
   checks.push('The styled Auto publish dialog has safe initial focus, fits desktop/mobile, blocks live shortcuts, and Cancel/Escape/backdrop/navigation acquire no audio or session');
 
@@ -355,6 +417,8 @@ try {
     }
     await page.getByRole('button', { name: 'Scripture — scripture', exact: true }).click();
     await page.getByRole('heading', { name: 'Find a passage', exact: true }).waitFor();
+    assert.match(await controlsTrigger().innerText(), /Auto/, 'The closed trigger preserves an unmistakable automatic-listening status');
+    await openControls();
     assert.equal(await page.getByLabel('Listening mode', { exact: true }).inputValue(), 'automatic', 'Returning to Scripture reflects its actual armed mode');
     assert.equal(await page.getByLabel('Listening mode', { exact: true }).isDisabled(), true);
     assert.equal(await voiceCommands().isChecked(), true, 'Returning to Scripture preserves its armed voice commands');
@@ -370,8 +434,10 @@ try {
   assert.equal(await armDialog().count(), 0);
   await page.screenshot({ path: path.join(dir, 'listening-auto-after-navigation.png'), fullPage: true });
 
+  await closeControls(); assert.match(await controlsTrigger().innerText(), /Auto/);
   const automaticStop = page.waitForResponse(response => response.request().method() === 'DELETE' && new URL(response.url()).pathname === '/api/worship/channels/scripture/listening');
   await stop().click(); assert.equal((await automaticStop).status(), 200);
+  await openControls();
   await until(async () => (await media()).live.length === 0 && await listen().isEnabled(), 'explicit stop releases the preserved automatic session');
   assert.equal(await page.getByLabel('Listening mode', { exact: true }).inputValue(), 'automatic', 'Stopping keeps this channel’s chosen mode without leaving it armed');
   assert.equal(await voiceCommands().isChecked(), true);
@@ -385,6 +451,7 @@ try {
   checks.push('An armed Scripture Auto publish session, voice commands and status survive repeated Studio/channel navigation with the same session and capture; Lyrics stays independent, and restarting still requires explicit confirmation');
 
   await page.reload(); await page.getByRole('heading', { name: 'Find a passage', exact: true }).waitFor();
+  await openControls();
   assert.equal(await page.getByLabel('Listening mode', { exact: true }).inputValue(), 'assisted'); assert.equal((await media()).calls.length, 0);
   await page.getByLabel('Listening mode', { exact: true }).selectOption('automatic');
   assert.equal(await voiceCommands().isChecked(), false, 'Voice-command preferences are not restored across a full browser reload');

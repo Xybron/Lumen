@@ -148,6 +148,35 @@
 .w-listener-meter{height:5px;flex:0 0 82px;overflow:hidden;border-radius:3px;background:#ffffff0a}
 .w-listener-meter>span{display:block;height:100%;background:#82d6af;transition:width .08s linear}
 .w-listener-meter.clipping>span{background:#eaa99b}
+/* Scripture listening lives in the search header; closing its controls does
+   not change the running listener. The portal stays clear of panel clipping. */
+.w-scripture-search-heading{flex-wrap:wrap}
+.w-listening-control{display:flex;align-items:center;justify-content:flex-end;gap:6px;margin-left:auto;flex-shrink:0;max-width:100%}
+.w-listening-trigger.w-button,.w-listening-stop.w-button{min-height:32px;padding:7px 10px;font-size:11px}
+.w-listening-trigger[data-state="open"]{border-color:var(--border-glow);background:var(--bg-hover);color:var(--accent)}
+.w-listening-trigger.is-listening{color:#82d6af}
+.w-listening-trigger.armed,.w-listening-trigger.needs-attention{color:#e3ba66}
+.w-listening-dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0}
+.w-listener-popover.panel{width:320px;max-width:calc(100vw - 24px);max-height:min(560px,var(--reka-popover-content-available-height,calc(100dvh - 24px)));min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:16px;gap:12px;border:1px solid var(--border-hair);border-radius:10px;background:var(--surface-1,#18191c);color:var(--text-primary);box-shadow:0 10px 34px #0005;backdrop-filter:none;box-sizing:border-box}
+.w-listener-popover.armed{border-color:#e3ba6666}
+.w-listener-popover .w-listener-title{gap:8px}
+.w-listener-popover .w-listener-title>div{flex:1}
+.w-listener-popover h3{font-size:13px;gap:7px}
+.w-listener-popover h3>svg{color:var(--accent)}
+.w-listener-close{flex-shrink:0}
+.w-listener-popover .w-listener-transport{display:flex;flex-direction:column;align-items:stretch;gap:12px}
+.w-listener-field{display:flex;flex-direction:column;gap:6px;color:var(--text-muted);font-size:11px;min-width:0}
+.w-listener-field select{width:100%;min-width:0;font-size:12px;min-height:36px;padding:8px 10px;border:1px solid var(--border-hair);border-radius:7px;background:var(--surface-2);color:var(--text-primary)}
+.w-listener-access{align-self:flex-start;font-size:11px}
+.w-listener-popover .w-listener-start{min-height:36px;justify-content:center;font-size:12px}
+.w-listener-popover .w-listener-signal{flex-wrap:nowrap}
+.w-listener-popover .w-listener-signal>span{font-size:11px;max-width:none}
+.w-listener-popover .w-listener-meter{flex-basis:55px}
+.w-listener-popover .w-listener-note,.w-listener-popover .w-error,.w-listener-popover .w-check,.w-listener-popover .w-transcript p,.w-listener-popover .w-listener-decision p{font-size:11px;overflow-wrap:anywhere}
+.w-listener-popover-footer{display:flex;align-items:center;gap:12px;border-top:1px solid var(--border-hair);padding-top:12px;margin-top:2px}
+.w-listener-popover-footer .w-text-button,.w-listener-popover-footer .w-local{font-size:11px}
+.w-listening-control button:focus-visible,.w-listener-popover button:focus-visible,.w-listener-popover select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media(pointer:coarse){.w-listening-trigger.w-button,.w-listening-stop.w-button,.w-listener-popover button,.w-listener-popover select{min-height:44px}.w-listener-popover .w-listener-close{min-width:44px}}
 .listening-settings-dialog{width:min(850px,calc(100vw - 32px))!important;max-width:850px!important;padding:22px!important;transition-property:opacity,transform}
 .listening-settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:6px}
 .listening-settings-section{display:flex;flex-direction:column;align-items:stretch;gap:11px;min-width:0}

@@ -134,10 +134,16 @@ const server=http.createServer(async(req,res)=>{
   const stop = () => page.getByRole('button', { name: 'Stop listening', exact: true });
   const listen = () => page.getByRole('button', { name: 'Listen', exact: true });
   const decision = () => page.getByTestId('listening-decision');
+  const controls = () => page.getByRole('dialog', { name: 'Open listening controls', exact: true });
+  async function openListeningControls() {
+    if (!await controls().isVisible()) await page.getByRole('button', { name: 'Open listening controls', exact: true }).click();
+    await controls().waitFor();
+  }
   const setSpeech = async text => { const temporary = `${responseFile}.tmp`; await fs.writeFile(temporary, JSON.stringify({ text })); await fs.rename(temporary, responseFile); };
   const heard = async (text, expectedDecision, label) => {
     const from = results.length; await setSpeech(text);
     const result = await until(() => results.slice(from).find(item => item.transcript === text && item.decision === expectedDecision), label);
+    await openListeningControls();
     await until(async () => await decision().getAttribute('data-decision') === expectedDecision, `${label} visible decision`);
     await unchangedStudio(label); return result;
   };
@@ -146,6 +152,7 @@ const server=http.createServer(async(req,res)=>{
     const expected = verses.find(item => item.book === book && item.chapter === chapter && item.verse === verse).text;
     await live.getByText(expected, { exact: true }).waitFor(); return state;
   };
+  await openListeningControls();
   await page.getByLabel('Listening mode', { exact: true }).selectOption('automatic');
   await page.getByRole('checkbox', { name: 'Enable “Lumen next / previous” voice commands', exact: true }).check();
   await listen().click();
