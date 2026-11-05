@@ -195,7 +195,8 @@ test('v2 scenes include media, channel setlists and library dependencies; record
     const studio = initialProduction(), layer = studio.scenes[0].layers[0];
     const typography = { fontFamily: 'georgia', italic: true, underline: true, lineHeight: 1.5, letterSpacing: 3,
       verticalAlign: 'bottom', textTransform: 'uppercase', textStroke: { color: '#14263b', width: 2 },
-      textShadow: { color: '#000000a0', blur: 8, offsetX: -2, offsetY: 4 } } satisfies Partial<SceneLayer>;
+      textShadow: { color: '#000000a0', blur: 8, offsetX: -2, offsetY: 4 },
+      textPadding: { top: 24, right: 48, bottom: 36, left: 64, linked: false } } satisfies Partial<SceneLayer>;
     studio.sources = [
       { id: 'channel_source', kind: 'channel', name: 'Lyrics', channelId: 'worship_channel', loop: false, audio: { volume: 1, muted: false, mode: 'always', delayMs: 0 } },
       { id: 'image_source', kind: 'image', name: 'Backdrop', url: 'media/backgrounds/portable.png', loop: false, audio: { volume: 1, muted: true, mode: 'follow', delayMs: 0 } },
@@ -238,6 +239,7 @@ test('v2 scenes include media, channel setlists and library dependencies; record
       assert.deepEqual(newScene.layers[0][key], typography[key], `Portable typography: ${key}`);
     }
     assert.equal(newScene.layers[1].fontFamily, undefined, 'A neighbouring legacy layer retains its defaults');
+    assert.equal(newScene.layers[1].textPadding, undefined, 'A neighbouring legacy layer retains its implicit margins');
     const importedBackground = newScene.layers[0].mediaBackground!;
     assert.notEqual(importedBackground.url, '/media/backgrounds/motion.webm');
     assert.deepEqual({ ...importedBackground, url: '' }, { kind: 'video', url: '', fit: 'cover', dim: .4, loop: true });

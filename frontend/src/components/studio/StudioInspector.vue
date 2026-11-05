@@ -12,6 +12,7 @@ import AnimationPresetLibrary from './AnimationPresetLibrary.vue';
 import StudioPropertyInput from './StudioPropertyInput.vue';
 import LyricsBackgroundPopover from './LyricsBackgroundPopover.vue';
 import StudioTypographyPanel from './StudioTypographyPanel.vue';
+import StudioTextPadding from './StudioTextPadding.vue';
 import type { LayerAnimation, SceneLayer, StudioScene } from '../../../../shared/production';
 const studio = useStudioStore();
 const preview = useAnimationPreview();
@@ -24,6 +25,7 @@ const textChannelLayer = computed(() => {
   return channelLayer.value && ['scripture', 'lyrics'].includes(useContentStore().content.channels.find(c => c.id === source?.channelId)?.kind ?? '');
 });
 const lyricsLayer = computed(() => { const source=studio.state?.sources.find(s=>s.id===layer.value?.sourceId); return channelLayer.value && useContentStore().content.channels.find(c=>c.id===source?.channelId)?.kind==='lyrics'; });
+const textLayer = computed(() => layer.value?.kind === 'text' || textChannelLayer.value || (channelLayer.value && layer.value?.channelStyle === 'overlay'));
 const animationEditorOpen = ref(false);
 const presetDialogOpen = ref(false), presetMode = ref<'save' | 'library'>('library'), presetBusy = ref(false);
 const animationEditorPreset = ref<LayerAnimation['preset'] | null>(null);
@@ -146,10 +148,11 @@ function previewAnimation() {
             <div class="inspector-alignments" role="group" aria-label="Align layer to canvas"><button v-for="alignment in alignments" :key="alignment.value" class="s-icon" :aria-label="alignment.label" :title="alignment.label" @click="align(alignment.value)"><component :is="alignment.icon" :size="14" /></button></div>
             <div class="inspector-layout-units"><span>Position & size</span><select aria-label="Layout units" :value="units" @change="setUnits"><option value="px">px</option><option value="%">%</option></select></div>
             <div class="field-grid"><label v-for="field in layoutFields" :key="field.key" class="studio-field">{{ field.label }}<StudioPropertyInput type="number" :identity="fieldIdentity(`${field.key}:${units}`)" :pending="!!studio.saving" :value="geometryValue(field.key)" :step="units === 'px' ? 1 : 0.1" :min="layerGeometryValue(field.key === 'x' || field.key === 'y' ? -100 : 1, field.key, units)" :max="layerGeometryValue(field.key === 'x' || field.key === 'y' ? 100 : 200, field.key, units)" @commit="(value, identity) => geometryInput(field.key, value, identity)" /></label></div>
+            <StudioTextPadding v-if="textLayer" :key="scene.id+layer.id" :layer="layer" :scene-id="scene.id" />
             <label v-if="layer.kind === 'source' && !textChannelLayer" class="studio-field">Image fit<select :value="layer.fit" @change="patch({ fit: text($event) as SceneLayer['fit'] })"><option value="cover">Fill frame (crop)</option><option value="contain">Fit inside frame</option></select></label>
           </details>
           <LyricsBackgroundPopover v-if="lyricsLayer" :key="scene.id+layer.id" :layer="layer" :scene-id="scene.id" />
-          <StudioTypographyPanel v-if="layer.kind === 'text' || textChannelLayer || (channelLayer && layer.channelStyle === 'overlay')" :key="scene.id+layer.id" :layer="layer" :scene-id="scene.id" />
+          <StudioTypographyPanel v-if="textLayer" :key="scene.id+layer.id" :layer="layer" :scene-id="scene.id" />
           <details class="inspector-group" open>
             <summary><ChevronDown :size="12" /><span>Appearance</span></summary>
             <label class="studio-field">Opacity <span>{{ Math.round(layer.opacity * 100) }}%</span><StudioPropertyInput type="range" live min="0" max="1" step="0.01" :identity="fieldIdentity('opacity')" :pending="!!studio.saving" :value="layer.opacity" @commit="(value, identity) => patch({ opacity: Number(value) }, identity)" /></label>

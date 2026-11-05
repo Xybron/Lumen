@@ -5,6 +5,7 @@ import { blendScenes, sceneSourceWeights, transitionProgress, weightedScene, typ
 import { AnimationRunTracker, sampleAnimation } from './animation';
 import { channelText, layoutChannelOverlay, type ChannelOverlayLayout } from './channel-overlay';
 import { drawPreparedText, measureStyledText, prepareTextLine, textFont, textMetricsKey, transformText, type PreparedTextLine, type TextOptions } from './text-style';
+import { resolveTextPadding, type TextPaddingInsets } from './text-padding';
 import { blendProgramPictures, programPictureSources, withProgramInsert, type ProgramPicture } from './program-picture';
 import { outputAudioEnabled, sourceAudioWeight } from './audio-routing';
 import { BroadcastVideoSource, captureCanvasFrames } from './broadcast-capture';
@@ -23,13 +24,20 @@ function drawFitted(ctx: CanvasRenderingContext2D, media: CanvasImageSource, x: 
   try { ctx.drawImage(media, x + (w - mw * scale) / 2, y + (h - mh * scale) / 2, mw * scale, mh * scale); } catch { /* media is not ready */ }
 }
 
-function textLines(ctx: CanvasRenderingContext2D, text: string, width: number, measure = (value: string) => ctx.measureText(value).width) {
+function textLines(ctx: CanvasRenderingContext2D, text: string, width: number, measure = (value: string) => ctx.measureText(value).width, breakLongWords = false) {
   const lines: string[] = [];
   for (const paragraph of text.split('\n')) {
     let line = '';
     for (const word of paragraph.split(/\s+/)) {
       const next = line ? `${line} ${word}` : word;
-      if (line && measure(next) > width) { lines.push(line); line = word; } else line = next;
+      if (line && measure(next) > width) { lines.push(line); line = ''; }
+      if (breakLongWords && measure(word) > width) {
+        if (line) line += ' ';
+        for (const character of word) {
+          if (line && measure(line + character) > width) { lines.push(line); line = ''; }
+          line += character;
+        }
+      } else line = line ? `${line} ${word}` : word;
     }
     lines.push(line);
   }
@@ -37,28 +45,33 @@ function textLines(ctx: CanvasRenderingContext2D, text: string, width: number, m
 }
 
 type TextStyle = Pick<SceneLayer, 'fontWeight' | 'fontSize' | 'color' | 'align' | 'text'> & TextOptions;
-let wrappedText = new WeakMap<TextStyle, { width: number; font: string; text: string; lines: PreparedTextLine[] }>();
+let wrappedText = new WeakMap<TextStyle, { width: number; height: number; font: string; text: string; insets: TextPaddingInsets; lines: PreparedTextLine[] }>();
 function drawText(ctx: CanvasRenderingContext2D, style: TextStyle, w: number, h: number, bank?: SceneSourceBank) {
   const font = textFont(style, style.fontSize, style.fontWeight), content = transformText(style.text, style);
   ctx.font = font;
   const metrics = font + textMetricsKey(style);
   let cached = wrappedText.get(style);
-  if (!cached || cached.width !== w || cached.font !== metrics || cached.text !== content) {
+  if (!cached || cached.width !== w || cached.height !== h || cached.font !== metrics || cached.text !== content) {
     const measure = (value: string) => measureStyledText(ctx, value, style, style.fontSize, style.fontWeight);
-    cached = { width: w, font: metrics, text: content, lines: textLines(ctx, content, Math.max(1, w - 16), measure)
+    const insets = resolveTextPadding(w, h, style.textPadding);
+    cached = { width: w, height: h, font: metrics, text: content, insets,
+      lines: textLines(ctx, content, Math.max(1, w - insets.left - insets.right), measure, !!style.textPadding)
       .map(line => prepareTextLine(ctx, line, style, style.fontSize, style.fontWeight)) };
     wrappedText.set(style, cached);
   }
-  const { lines } = cached, lineHeight = style.fontSize * (style.lineHeight ?? 1.24);
-  const x = style.align === 'left' ? 8 : style.align === 'right' ? w - 8 : w / 2;
-  const available = Math.max(0, h - lines.length * lineHeight);
-  const top = lineHeight / 2 + (style.verticalAlign === 'top' ? 0 : style.verticalAlign === 'bottom' ? available : available / 2);
+  const { lines, insets } = cached, lineHeight = style.fontSize * (style.lineHeight ?? 1.24);
+  const contentWidth = Math.max(1, w - insets.left - insets.right), contentHeight = Math.max(1, h - insets.top - insets.bottom);
+  const x = insets.left + (style.align === 'left' ? 0 : style.align === 'right' ? contentWidth : contentWidth / 2);
+  const available = Math.max(0, contentHeight - lines.length * lineHeight);
+  const top = insets.top + lineHeight / 2 + (style.verticalAlign === 'top' ? 0 : style.verticalAlign === 'bottom' ? available : available / 2);
   const paint = (target: CanvasRenderingContext2D) => {
     target.fillStyle = style.color; target.textBaseline = 'middle';
     lines.forEach((line, i) => drawPreparedText(target, line, x, top + i * lineHeight, style.fontSize, style.fontWeight, style, style.align));
   };
+  if (style.textPadding) { ctx.save(); ctx.beginPath(); ctx.rect(insets.left, insets.top, contentWidth, contentHeight); ctx.clip(); }
   paintStyledText(ctx, bank, cached, style, w, h, paint,
     { top: top - style.fontSize, bottom: top + Math.max(0, lines.length - 1) * lineHeight + style.fontSize });
+  if (style.textPadding) ctx.restore();
 }
 
 // The source bank supplies a new Item when the channel content changes. Keep
@@ -277,8 +290,9 @@ function drawChannelOverlay(ctx: CanvasRenderingContext2D, item: Item, layer: Sc
     if (layouts.size >= 32) layouts.clear();
     layouts.set(key, layout);
   }
-  const x = layer.align === 'left' ? layout.padding : layer.align === 'right' ? w - layout.padding : w / 2;
+  const x = layout.insets.left + (layer.align === 'left' ? 0 : layer.align === 'right' ? layout.contentWidth : layout.contentWidth / 2);
   const current = layout;
+  if (layer.textPadding) { ctx.save(); ctx.beginPath(); ctx.rect(current.insets.left, current.insets.top, current.contentWidth, current.contentHeight); ctx.clip(); }
   paintStyledText(ctx, bank, current, layer, w, h, target => {
     target.fillStyle = layer.color; target.textBaseline = 'top';
     current.blocks.forEach((block, blockIndex) => {
@@ -288,6 +302,7 @@ function drawChannelOverlay(ctx: CanvasRenderingContext2D, item: Item, layer: Sc
     });
   }, { top: current.blocks[0]?.top ?? 0,
     bottom: current.blocks.reduce((last, block) => Math.max(last, block.top + block.lines.length * block.lineHeight + block.fontSize), 0) });
+  if (layer.textPadding) ctx.restore();
 }
 
 // This is a visual insert into the final Program picture, not a replacement

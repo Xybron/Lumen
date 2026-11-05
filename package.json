@@ -33,6 +33,7 @@
     "test:studio:source-properties": "npm run build && node backend/test/source-properties-browser.mjs",
     "test:studio:editing": "npm run build && npm --prefix backend run test:studio:editing",
     "test:studio:clipboard": "npm run build && node backend/test/layer-clipboard-browser.mjs",
+    "test:studio:padding": "npm run build && node backend/test/text-padding-browser.mjs",
     "test:app:fullscreen": "npm run build && node backend/test/app-fullscreen-browser.mjs",
     "test:studio:properties": "npm run build && node backend/test/studio-properties-browser.mjs",
     "test:clips": "npm run build && node backend/test/nle-browser.mjs",

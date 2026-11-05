@@ -11,6 +11,7 @@ import { useEnginesStore } from '@/stores/engines';
 import { subscribeTopics } from '@/lib/ws';
 import { useAnimationPreview } from '@/composables/useAnimationPreview';
 import { canvasSnapTargets, moveRect, resizeRect, type CanvasRect, type ResizeHandle, type SnapGuide } from '@/lib/studio/canvas-geometry';
+import { textPaddingForLayer } from '@/lib/studio/text-padding';
 import type { SceneLayer, StudioScene, StudioSource } from '../../../../shared/production';
 
 const props = defineProps<{ scene: StudioScene | null; sources: StudioSource[]; engineRunning: boolean }>();
@@ -62,6 +63,18 @@ const channels = computed(() => Object.fromEntries(channelIds.value.map(id => {
 })));
 const layers = computed(() => props.scene?.layers.filter(layer => layer.visible) ?? []);
 const selectedLayer = computed(() => props.scene?.layers.find(layer => layer.id === studio.selectedLayerId) ?? null);
+const textAreaGuide = computed(() => {
+  const layer = selectedLayer.value;
+  if (!layer?.textPadding) return null;
+  const source = props.sources.find(item => item.id === layer.sourceId);
+  const isText = layer.kind === 'text' || (source?.kind === 'channel'
+    && (layer.channelStyle === 'overlay' || channels.value[source.channelId ?? '']?.textChannel));
+  if (!isText) return null;
+  const rect = interaction.value?.layerId === layer.id ? { ...layer, ...interaction.value.rect } : layer;
+  const padding = textPaddingForLayer(rect), width = rect.width * 19.2, height = rect.height * 10.8;
+  return { top: `${padding.top / height * 100}%`, right: `${padding.right / width * 100}%`,
+    bottom: `${padding.bottom / height * 100}%`, left: `${padding.left / width * 100}%` };
+});
 const dimensions = computed(() => {
   const rect = interaction.value?.rect ?? selectedLayer.value;
   return rect ? `${Math.round(rect.width * 19.2)} × ${Math.round(rect.height * 10.8)}` : '';
@@ -223,6 +236,7 @@ onBeforeUnmount(() => { cancel(); motion.stop(); motion.setOverride(null); });
           role="button" tabindex="0" :aria-label="`Select ${layer.name}`" :aria-pressed="studio.selectedLayerId === layer.id" :data-layer-id="layer.id"
           @pointerdown="begin($event, layer)" @focus.self="select(layer)" @keydown.enter.prevent.stop="select(layer)">
           <template v-if="studio.selectedLayerId === layer.id">
+            <span v-if="textAreaGuide" class="text-area-guide" :style="textAreaGuide" aria-hidden="true" />
             <span class="selection-name" :style="nameStyle(layer)">{{ layer.name }}<Lock v-if="layer.locked" :size="9" /></span>
             <template v-if="!layer.locked"><button v-for="handle in handles" :key="handle.key" :class="['resize-handle', `handle-${handle.key}`]" :style="handleStyle(layer, handle.key)" :data-handle="handle.key" :aria-label="handle.label" @pointerdown.stop="begin($event, layer, handle.key)" /></template>
             <span v-if="interaction?.layerId === layer.id" class="selection-dimensions">{{ dimensions }}</span>
@@ -250,6 +264,7 @@ onBeforeUnmount(() => { cancel(); motion.stop(); motion.setOverride(null); });
 .layer-hitbox.selected { border-color: #7dd3fc; }
 .layer-hitbox:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 2px; }
 .layer-hitbox.locked { cursor: default; }
+.text-area-guide { position: absolute; border: 1px dashed #7dd3fc70; pointer-events: none; }
 .selection-name { position: absolute; top: -20px; left: -1px; display: flex; align-items: center; gap: 5px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 5px; border-radius: 3px 3px 0 0; background: #7dd3fc; color: #10212c; font-size: 9px; line-height: 14px; pointer-events: none; }
 .resize-handle { position: absolute; width: var(--canvas-handle-size, 8px); height: var(--canvas-handle-size, 8px); min-width: 0; padding: 0; margin: 0; border: 1px solid #16445b; border-radius: 1px; background: #dbf3ff; z-index: 2; touch-action: none; transform: translate(-50%, -50%); right: auto; bottom: auto; }
 .resize-handle:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }

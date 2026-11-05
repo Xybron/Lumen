@@ -71,6 +71,13 @@ export interface LayerTextShadow {
   offsetX: number;
   offsetY: number;
 }
+export interface LayerTextPadding {
+  top: number; // pixels on the 1920 × 1080 design canvas
+  right: number;
+  bottom: number;
+  left: number;
+  linked?: boolean; // editing preference only; rendering uses each side's value
+}
 
 export interface SceneLayer {
   id: string;
@@ -103,6 +110,7 @@ export interface SceneLayer {
   textTransform?: 'none' | 'uppercase' | 'lowercase';
   textStroke?: LayerTextStroke;
   textShadow?: LayerTextShadow;
+  textPadding?: LayerTextPadding; // omitted layers keep their existing implicit margins
   radius: number;
   // Channel content can inherit a transparent, geometry-aware Studio overlay
   // rather than the channel's full slide background. Existing layers use slide.

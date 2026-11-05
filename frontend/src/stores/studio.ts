@@ -7,6 +7,7 @@ import { StudioPeer, StudioSignal } from '@/lib/studio/signal';
 import { shortId } from '@/lib/ids';
 import { reorderScenes } from '@/lib/studio/scene-order';
 import { animationFromPreset, cloneAnimation } from '@/lib/studio/animation';
+import { textPaddingForLayer, type TextPaddingInsets } from '@/lib/studio/text-padding';
 import { openDeviceCapture, type InputSelection } from '@/lib/studio/device-capture';
 import { arrangeLayers, layerAlignment, layerPreset, nudgeLayerGeometry, reorderLayers, type LayerAlignment, type LayerArrangeAction, type LayerPreset } from '@/lib/studio/layer-layout';
 import type { ProductionState, StudioStatus, StudioRecording, StudioScene, SceneLayer, StudioSource, StudioCommand, LayerAnimation } from '../../../shared/production';
@@ -204,6 +205,32 @@ export const useStudioStore = defineStore('studio', () => {
       if (!layer || layer.locked || !layer[key]) return;
       Object.assign(layer[key]!, patch);
     }, Object.keys(patch).length === 1 ? `layer:${sceneId}:${id}:${key}:${Object.keys(patch)[0]}` : undefined);
+  }
+  function updateLayerTextPadding(id: string, change: { linked: boolean; side?: keyof TextPaddingInsets; value?: number } | null, sceneId = selectedScene.value?.id) {
+    return edit(draft => {
+      const layer = draft.scenes.find(scene => scene.id === sceneId)?.layers.find(item => item.id === id);
+      if (!layer || layer.locked) return;
+      if (!change) { delete layer.textPadding; return; }
+      // Read the latest insets when this edit executes. Rapid edits to separate
+      // sides must not replace each other with an earlier station snapshot.
+      const insets = textPaddingForLayer(layer);
+      const next = { ...(layer.textPadding ?? insets), linked: change.linked };
+      if (change.side && change.value !== undefined && Number.isFinite(change.value)) {
+        const width = layer.width * 19.2, height = layer.height * 10.8;
+        const opposite = { top: 'bottom', right: 'left', bottom: 'top', left: 'right' } as const;
+        const extent = change.side === 'left' || change.side === 'right' ? width : height;
+        const max = change.linked ? (Math.min(width, height) - 1) / 2 : extent - insets[opposite[change.side]] - 1;
+        const value = Math.max(0, Math.min(3840, max, change.value));
+        if (change.linked) for (const side of ['top', 'right', 'bottom', 'left'] as const) next[side] = value;
+        else {
+          next[change.side] = value;
+          next[opposite[change.side]] = insets[opposite[change.side]];
+        }
+      }
+      // A link-only change preserves the saved sides, including values that
+      // temporarily exceed a resized frame and are clamped only for rendering.
+      layer.textPadding = next;
+    });
   }
   function removeLayer(id: string) {
     const sceneId = selectedScene.value?.id;
@@ -462,7 +489,7 @@ export const useStudioStore = defineStore('studio', () => {
     if (captures.size) { e.preventDefault(); e.returnValue = ''; }
   });
   return { state, status, loading, saving, recordings, engineBusy, recordingBusy, selectedLayerId, selectedScene, selectedLayer, connectedSources, animationPresets, canPasteLayer, copiedLayerName, reconnect: () => signal.reconnect(),
-    load, edit, command, selectScene, reorderScene, addScene, removeScene, updateScene, addLayer, updateLayer, updateLayerMediaBackground, updateLayerTextEffect, removeLayer, moveLayer, copyLayer, pasteLayer, duplicateLayer, reorderLayer, arrangeLayer, alignLayer, presetLayer, nudgeLayer, addSource, removeSource, updateSource,
+    load, edit, command, selectScene, reorderScene, addScene, removeScene, updateScene, addLayer, updateLayer, updateLayerMediaBackground, updateLayerTextEffect, updateLayerTextPadding, removeLayer, moveLayer, copyLayer, pasteLayer, duplicateLayer, reorderLayer, arrangeLayer, alignLayer, presetLayer, nudgeLayer, addSource, removeSource, updateSource,
     connectSource, disconnectSource, sourceStream, cameraStreams, inputSelection, saveSourceProperties, setMainAudio, toggleEngine, refreshRecordings, toggleRecord, recoverRecording,
     saveAnimationPreset, renameAnimationPreset, deleteAnimationPreset, applyAnimationPreset };
 });

@@ -32,20 +32,25 @@ const backgroundStyle = computed(() => props.overlay ? {} : {
   background: background.value?.kind === 'gradient' ? background.value.gradient : background.value?.color ?? '#121820',
   color: props.item.color ?? '#ffffff',
 });
+const textClip = computed(() => {
+  if (!props.overlay || !props.layer.textPadding) return {};
+  const inset = layout.value.insets;
+  return { clipPath: `inset(${inset.top / height.value * 100}% ${inset.right / width.value * 100}% ${inset.bottom / height.value * 100}% ${inset.left / width.value * 100}%)` };
+});
 </script>
 
 <template>
   <div class="poster-channel" :class="{ 'is-overlay': overlay }" :style="backgroundStyle" :data-item-id="item.id">
     <img v-if="image" :src="image" :style="{ objectFit: overlay ? layer.fit : background?.fit ?? 'cover' }" loading="lazy" decoding="async" draggable="false" alt="" />
     <div v-if="!overlay && background?.overlayOpacity" class="poster-shade" :style="{ opacity: background.overlayOpacity }" />
-    <template v-if="!visual">
+    <div v-if="!visual" class="poster-channel-text-region" :style="textClip">
       <div v-for="(block, i) in layout.blocks" :key="i" class="poster-channel-text" :style="{
         ...textCss(overlay ? layer : {}, scale),
-        left: layout.padding / width * 100 + '%', width: layout.contentWidth / width * 100 + '%', top: block.top / height * 100 + '%',
+        left: layout.insets.left / width * 100 + '%', width: layout.contentWidth / width * 100 + '%', top: block.top / height * 100 + '%',
         fontSize: block.fontSize * scale / 19.2 + 'cqw', lineHeight: block.lineHeight / block.fontSize,
         fontWeight: block.fontWeight, opacity: block.opacity, textAlign: align,
       }">{{ block.lines.join('\n') }}</div>
-    </template>
+    </div>
     <span v-else-if="!image" class="poster-video-name">{{ item.title || channelText(item) || 'Video' }}</span>
   </div>
 </template>
@@ -55,5 +60,6 @@ const backgroundStyle = computed(() => props.overlay ? {} : {
 .poster-channel img,.poster-shade { position: absolute; inset: 0; width: 100%; height: 100%; }
 .poster-shade { background: #000; }
 .poster-channel-text { position: absolute; white-space: pre-wrap; overflow-wrap: anywhere; }
+.poster-channel-text-region { position: absolute; inset: 0; }
 .poster-video-name { position: absolute; inset: 0; display: grid; place-items: center; padding: 5%; text-align: center; font-size: 2.4cqw; color: #a5b2b9; background: #12191c; }
 </style>

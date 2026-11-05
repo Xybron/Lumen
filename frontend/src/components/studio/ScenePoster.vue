@@ -3,6 +3,7 @@ import { computed, watch } from 'vue';
 import { sampleAnimation } from '@/lib/studio/animation';
 import { ensureScenePosterMedia, scenePosterMedia } from '@/lib/studio/scene-poster-media';
 import { textCss } from '@/lib/studio/text-style';
+import { textPaddingForLayer } from '@/lib/studio/text-padding';
 import ChannelPoster from './ChannelPoster.vue';
 import type { Item } from '@/types';
 import type { SceneLayer, StudioScene, StudioSource } from '../../../../shared/production';
@@ -27,6 +28,14 @@ function sourceFor(id?: string) { return props.sources?.find(source => source.id
 function channelFor(id?: string) { const source = sourceFor(id); return source?.kind === 'channel' && source.channelId ? props.channels?.[source.channelId] : undefined; }
 function mediaUrl(id?: string) { const source = sourceFor(id); return source?.url ? props.posterForMedia && source.kind === 'image' ? props.posterForMedia(source.url, 'image') : `/${source.url.replace(/^\//, '')}` : undefined; }
 function stream(id?: string) { return id ? props.streamForSource?.(id) ?? null : null; }
+function textAreaStyle(layer: SceneLayer) {
+  const insets = textPaddingForLayer(layer), width = layer.width * 19.2, height = layer.height * 10.8;
+  const alignment = layer.verticalAlign === 'top' ? 'flex-start' : layer.verticalAlign === 'bottom' ? 'flex-end' : 'center';
+  return { top: insets.top / height * 100 + '%', right: insets.right / width * 100 + '%',
+    bottom: insets.bottom / height * 100 + '%', left: insets.left / width * 100 + '%',
+    alignItems: layer.textPadding ? `safe ${alignment}` : alignment,
+    overflow: layer.textPadding ? 'hidden' : 'visible', overflowWrap: layer.textPadding ? 'anywhere' as const : 'normal' as const };
+}
 function styleFor(layer: SceneLayer) {
   const pose = sampleAnimation(layer.animation, props.animationLayerId && props.animationLayerId !== layer.id ? null : props.animationTime);
   return {
@@ -43,7 +52,8 @@ function styleFor(layer: SceneLayer) {
     <div v-for="layer in layers" :key="layer.id" class="poster-layer" :data-layer-id="layer.id" :style="styleFor(layer)">
       <img v-if="layer.mediaBackground && backgroundPoster(layer)" class="layer-media-background" :src="backgroundPoster(layer)" :style="{ objectFit: layer.mediaBackground.fit }" loading="lazy" decoding="async" draggable="false" alt="" />
       <div v-if="layer.mediaBackground?.dim" class="layer-media-dim" :style="{ opacity: layer.mediaBackground.dim }" />
-      <span v-if="layer.kind === 'text'" :style="textCss(layer)">{{ layer.text }}</span>
+      <span v-if="layer.kind === 'text' && !layer.textPadding" :style="textCss(layer)">{{ layer.text }}</span>
+      <div v-else-if="layer.kind === 'text'" class="poster-text-area" :style="textAreaStyle(layer)"><span :style="textCss(layer)">{{ layer.text }}</span></div>
       <ChannelPoster v-else-if="channelFor(layer.sourceId)?.item" class="poster-channel" :item="channelFor(layer.sourceId)!.item!" :layer="layer" :overlay="channelFor(layer.sourceId)!.textChannel || layer.channelStyle === 'overlay'" :poster-for-media="posterForMedia" />
       <template v-else-if="channelFor(layer.sourceId)" />
       <img v-else-if="layer.sourceId && ['camera', 'screen'].includes(sourceFor(layer.sourceId)?.kind ?? '') && sourceStills?.[layer.sourceId]" class="scene-source-still" :data-source-id="layer.sourceId" :src="sourceStills[layer.sourceId]" :style="{ objectFit: layer.fit }" decoding="async" draggable="false" alt="" />
@@ -59,6 +69,8 @@ function styleFor(layer: SceneLayer) {
 .scene-poster { position: absolute; inset: 0; container-type: inline-size; overflow: hidden; }
 .poster-layer { position: absolute; display: flex; align-items: center; overflow: hidden; line-height: 1.24; }
 .poster-layer > span { position: relative; z-index: 1; white-space: pre-wrap; padding: 0 .4cqw; width: 100%; }
+.poster-text-area { position: absolute; display: flex; z-index: 1; min-width: 0; min-height: 0; }
+.poster-text-area > span { position: relative; white-space: pre-wrap; width: 100%; flex-shrink: 0; }
 .poster-layer img, .poster-layer video { width: 100%; height: 100%; }
 .layer-media-background, .layer-media-dim { position: absolute; inset: 0; pointer-events: none; }
 .layer-media-dim { background: #000; }

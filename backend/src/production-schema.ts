@@ -58,6 +58,11 @@ export const LayerSchema = z.object({
   textStroke: z.object({ color, width: z.number().finite().min(0).max(10) }).strict().optional(),
   textShadow: z.object({ color, blur: z.number().finite().min(0).max(30),
     offsetX: z.number().finite().min(-30).max(30), offsetY: z.number().finite().min(-30).max(30) }).strict().optional(),
+  textPadding: z.object({
+    top: z.number().finite().min(0).max(3840), right: z.number().finite().min(0).max(3840),
+    bottom: z.number().finite().min(0).max(3840), left: z.number().finite().min(0).max(3840),
+    linked: z.boolean().optional(),
+  }).strict().optional(),
   radius: z.number().finite().min(0).max(200),
   channelStyle: z.enum(['slide', 'overlay']).optional(),
   mediaBackground: LayerMediaBackgroundSchema.nullable().optional(),

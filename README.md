@@ -353,6 +353,12 @@ Scripture and Lyrics supply live text, not designs or Program routes:
    horizontal/vertical alignment, line height and letter spacing. Expand
    **Text effects** for an outline or shadow. These settings also work on text
    layers, stay in Preview until a Take, and persist in saved scenes and exports.
+   **Layout → Text padding** places Top, Right, Bottom and Left controls around
+   a link button. Edit each side or link all four for equal spacing; linking
+   mixed values preserves them until the next edit. Padding changes only the
+   text area, leaving the layer position, size and background intact. A dashed
+   guide marks the text area in the editor. Reset restores the original spacing.
+   Padding is saved per layer, copied with it, and goes live only on Cut/Fade.
    To reuse a styled layer, choose **Copy layer** from its right-click menu or
    the Scene layers toolbar, select another scene, then **Paste layer**.
    Ctrl+C / Ctrl+V (Windows) or ⌘C / ⌘V (Mac) also work outside text fields.
@@ -904,6 +910,7 @@ npm run test:lyrics:search # build + title/lyric fragments, typo matching, exact
 npm run test:lyrics:background # build + media popover, scene isolation, persistence and upload cancellation
 npm run test:lyrics:typography # build + long filename layout, text styling, persistence and Program isolation
 npm run test:studio:clipboard # build + layer copy/paste, keyboard safety and Program isolation
+npm run test:studio:padding # build + visual text padding, queued edits, persistence and Program isolation
 npm run test:presentation # build + presentation navigation, creation and isolated editing destinations
 npm run test:channel-workflow # build + channel-only publication, real text output, camera and scene isolation
 npm run test:studio:audio # build + persistent audio, ICE/RTP output connections, engine reconnect and recording regression

@@ -1,5 +1,6 @@
 import type { Item } from '../../types';
 import { transformText, type TextOptions } from './text-style';
+import { resolveTextPadding, type TextPaddingInsets } from './text-padding';
 
 export interface OverlayTextBlock {
   lines: string[];
@@ -11,8 +12,11 @@ export interface OverlayTextBlock {
 }
 
 export interface ChannelOverlayLayout {
+  /** Legacy uniform inset; use insets when positioning new content. */
   padding: number;
+  insets: TextPaddingInsets;
   contentWidth: number;
+  contentHeight: number;
   blocks: OverlayTextBlock[];
 }
 
@@ -27,8 +31,8 @@ export function channelText(item: Item): string {
 export function layoutChannelOverlay(item: Item, width: number, height: number, requestedSize: number,
   requestedWeight: number, measure: (text: string, fontSize: number, fontWeight: number) => number,
   style: TextOptions = {}): ChannelOverlayLayout {
-  const padding = Math.max(2, Math.min(30, width * .025, height * .1));
-  const contentWidth = Math.max(1, width - padding * 2), contentHeight = Math.max(1, height - padding * 2);
+  const insets = resolveTextPadding(width, height, style.textPadding, 'overlay');
+  const contentWidth = Math.max(1, width - insets.left - insets.right), contentHeight = Math.max(1, height - insets.top - insets.bottom);
   const body = transformText(channelText(item).trim(), style);
   const reference = transformText(item.reference?.trim() ?? '', style);
   const credit = transformText(item.id.startsWith('cue_') ? item.subtitle?.trim() ?? '' : '', style);
@@ -67,10 +71,10 @@ export function layoutChannelOverlay(item: Item, width: number, height: number, 
     result = blocks;
     if (totalHeight <= contentHeight || size <= 1) {
       const remaining = Math.max(0, contentHeight - totalHeight);
-      let top = padding + (style.verticalAlign === 'top' ? 0 : style.verticalAlign === 'bottom' ? remaining : remaining / 2);
+      let top = insets.top + (style.verticalAlign === 'top' ? 0 : style.verticalAlign === 'bottom' ? remaining : remaining / 2);
       for (const block of blocks) { block.top = top; top += block.lines.length * block.lineHeight + gap; }
       break;
     }
   }
-  return { padding, contentWidth, blocks: result };
+  return { padding: insets.left, insets, contentWidth, contentHeight, blocks: result };
 }

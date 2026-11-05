@@ -1,4 +1,5 @@
 import type { SceneLayer } from '../../../../shared/production';
+import { textPaddingKey } from './text-padding';
 
 export const FONT_FAMILIES = [
   { value: 'system', label: 'System', css: '-apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif' },
@@ -9,11 +10,11 @@ export const FONT_FAMILIES = [
   { value: 'times', label: 'Times New Roman', css: '"Times New Roman", Times, serif' },
   { value: 'courier', label: 'Courier New', css: '"Courier New", Courier, monospace' },
 ] as const;
-export type TextOptions = Pick<SceneLayer, 'fontFamily' | 'italic' | 'underline' | 'lineHeight' | 'letterSpacing' | 'verticalAlign' | 'textTransform' | 'textStroke' | 'textShadow'>;
+export type TextOptions = Pick<SceneLayer, 'fontFamily' | 'italic' | 'underline' | 'lineHeight' | 'letterSpacing' | 'verticalAlign' | 'textTransform' | 'textStroke' | 'textShadow' | 'textPadding'>;
 export const fontFamily = (style: TextOptions = {}) => FONT_FAMILIES.find(font => font.value === style.fontFamily)?.css ?? FONT_FAMILIES[0].css;
 export const textFont = (style: TextOptions, size: number, weight: number) => `${style.italic ? 'italic ' : ''}${weight} ${size}px ${fontFamily(style)}`;
 export const transformText = (text: string, style: TextOptions = {}) => style.textTransform === 'uppercase' ? text.toUpperCase() : style.textTransform === 'lowercase' ? text.toLowerCase() : text;
-export const textMetricsKey = (style: TextOptions = {}) => JSON.stringify([style.fontFamily ?? 'system', !!style.italic, style.lineHeight ?? 1.24, style.letterSpacing ?? 0, style.verticalAlign ?? 'middle', style.textTransform ?? 'none']);
+export const textMetricsKey = (style: TextOptions = {}) => JSON.stringify([style.fontFamily ?? 'system', !!style.italic, style.lineHeight ?? 1.24, style.letterSpacing ?? 0, style.verticalAlign ?? 'middle', style.textTransform ?? 'none', textPaddingKey(style.textPadding)]);
 
 const segmenter = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
 const nativeSpacing = (ctx: CanvasRenderingContext2D): boolean => 'letterSpacing' in ctx;
