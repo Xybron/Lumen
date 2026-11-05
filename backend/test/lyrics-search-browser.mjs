@@ -226,11 +226,9 @@ try {
   await privateState('Out-of-order song search');
   checks.push('Rapid typing, Enter during search, and delayed superseded requests cannot restore or prepare a stale song');
 
-  // Single- and double-clicking a song remain private preparations. Scripture’s
-  // separate double-click-to-publish gesture must not leak into Lyrics.
+  // A single click prepares privately; double-click explicitly publishes.
   await first('amaz gr', 'Amazing Grace');
   await rowFor('Amazing Grace').click(); await prepared('grace', 'grace_v1');
-  await rowFor('Amazing Grace').dblclick(); await prepared('grace', 'grace_v1');
   await privateState('Song clicking');
   const pin = page.getByRole('button', { name: 'Unpin song', exact: true }).first(); await pin.focus();
   for (const modifier of ['ctrlKey', 'metaKey']) await pin.dispatchEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, [modifier]: true });
@@ -266,6 +264,10 @@ try {
     assert.deepEqual(takes.at(-1).postDataJSON().command.selection, selection(songId, sectionId));
   }
   await explicitLive('grace', 'grace_v1', () => send.click(), 'Send live button');
+  const doubleClickCount = takes.length;
+  await rowFor('Amazing Grace').dblclick();
+  await until(() => takes.length === doubleClickCount + 1 && send.isEnabled(), 'Double-click publishes one lyric section');
+  assert.deepEqual((await workspace()).live.selection, selection('grace', 'grace_v1'));
   for (const [songId, sectionId, query, chord] of [['river', 'river_c', 'deep wat', 'Control+Enter'], ['grace', 'grace_v1', 'amazng grcae', 'Meta+Enter']]) {
     await first(query, fixtures.find(song => song.id === songId).title);
     await input.press('Enter'); await prepared(songId, sectionId);
@@ -291,6 +293,58 @@ try {
   assert.equal(listeningWrites.length, 0, 'Search and explicit publication never open a physical listening session');
   assert.deepEqual(errors, []);
   checks.push('Send live, Ctrl+Enter and Meta+Enter publish exactly one correct section from search-input or result focus; pending preparation cannot send stale content and Studio stays manual');
+
+  // Live navigation must move the prepared section/highlight and reveal it in
+  // the section column, without scrolling the workspace or retaking Studio.
+  const liveControls = page.getByRole('region', { name: 'Live cue controls', exact: true });
+  const nextSection = liveControls.getByRole('button', { name: 'Next', exact: true });
+  const previousSection = liveControls.getByRole('button', { name: 'Previous', exact: true });
+  async function followed(songId, sectionId) {
+    const section = fixtures.find(song => song.id === songId).sections.find(section => section.id === sectionId);
+    await until(async () => await send.isEnabled() && (await page.getByTestId('prepared-cue').innerText()).includes(section.text.split('\n')[0]), `followed ${sectionId}`);
+  }
+  const highlighted = page.locator('.w-song-cues .w-section-cue.selected');
+  await page.locator('.w-song-cues').evaluate(list => { list.style.maxHeight = '100px'; });
+  const scrollBefore = await page.evaluate(() => window.scrollY);
+  await nextSection.click(); await followed('river', 'river_bridge');
+  await until(async () => (await highlighted.innerText()).includes('Bridge'), 'Next highlights the live bridge');
+  assert.equal((await workspace()).live.selection.sectionId, 'river_bridge');
+  const visible = await highlighted.evaluate(cue => {
+    const row = cue.getBoundingClientRect(), list = cue.parentElement.getBoundingClientRect();
+    return row.top >= list.top - 1 && row.top < list.bottom;
+  });
+  assert.ok(visible, 'The current section is revealed within its own column');
+  assert.equal(await page.evaluate(() => window.scrollY), scrollBefore);
+  await previousSection.click(); await followed('river', 'river_c');
+  assert.ok((await highlighted.innerText()).includes('Chorus'));
+
+  // A preview already in flight cannot restore an outdated highlight after Next.
+  const olderPreviews = [];
+  await page.route('**/api/worship/preview', route => { olderPreviews.push(route); });
+  await page.locator('.w-song-cues .w-section-cue').first().click();
+  await until(() => olderPreviews.length === 1, 'old section preparation held');
+  await nextSection.click(); await followed('river', 'river_bridge');
+  await olderPreviews[0].continue(); await page.unroute('**/api/worship/preview');
+  await until(() => highlighted.innerText().then(text => text.includes('Bridge')), 'stale preparation does not move highlight back');
+
+  // An intentional selection made AFTER Previous was pressed remains prepared.
+  let releaseStep, stepStarted = false;
+  const stepHeld = new Promise(resolve => { releaseStep = resolve; });
+  await page.route('**/api/worship/channels/lyrics/command', async route => {
+    if (route.request().postDataJSON().command.type !== 'step') return route.continue();
+    stepStarted = true; await stepHeld; await route.continue();
+  });
+  await previousSection.click(); await until(() => stepStarted, 'Previous response held');
+  await page.locator('.w-song-cues .w-section-cue').first().click();
+  await until(() => page.getByTestId('prepared-cue').innerText().then(text => text.includes('We gather here before the dawn')), 'new preview is prepared during Previous');
+  releaseStep();
+  await until(async () => (await workspace()).live.selection.sectionId === 'river_c' && await previousSection.isEnabled(), 'Previous completes');
+  await page.unroute('**/api/worship/channels/lyrics/command');
+  await followed('river', 'river_v1');
+  assert.ok((await highlighted.innerText()).includes('Verse 1'), 'A newer manual preview stays selected');
+  assert.deepEqual(await production(), initialStudio, 'Lyrics navigation leaves Studio scenes and routing unchanged');
+  assert.deepEqual(errors, []);
+  checks.push('Next/Previous follow the current lyric section, reveal its highlight locally, and respect newer preview selections');
 
   // Pinning intentionally changes the service setlist, so check this after all
   // preparation-only deep-equality assertions against the original workspace.

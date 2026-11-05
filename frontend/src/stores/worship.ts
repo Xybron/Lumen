@@ -72,7 +72,20 @@ export const useWorshipStore=defineStore('worship',()=>{
   async function command(id:string,command:WorshipCommand){
     if(saving[id])return;
     saving[id]=true;
-    try{await stopListening(id,false);const state=workspaces[id];const result=await worshipRequest<WorshipWorkspace>(`/channels/${id}/command`,{method:'POST',body:JSON.stringify({revision:state.revision,command})});if(result.revision>=(workspaces[id]?.revision??-1))workspaces[id]=result;}
+    // Stepping live lyrics also moves the operator's prepared section. Supersede
+    // an older preview request, but preserve a new selection made while waiting.
+    const followLyrics=command.type==='step'&&workspaces[id]?.live?.selection.kind==='lyrics';
+    const stepVersion=followLyrics?(prepareVersion.get(id)??0)+1:undefined;
+    if(stepVersion!==undefined){prepareVersion.set(id,stepVersion);preparing[id]=false;}
+    try{
+      await stopListening(id,false);
+      const state=workspaces[id];
+      const result=await worshipRequest<WorshipWorkspace>(`/channels/${id}/command`,{method:'POST',body:JSON.stringify({revision:state.revision,command})});
+      if(result.revision>=(workspaces[id]?.revision??-1)){
+        workspaces[id]=result;
+        if(stepVersion!==undefined&&prepareVersion.get(id)===stepVersion&&result.live?.selection.kind==='lyrics')drafts[id]=result.live;
+      }
+    }
     catch(error){toast.error((error as Error).message);await load(id).catch(()=>{});throw error;}
     finally{saving[id]=false;}
   }
