@@ -33,6 +33,7 @@ const channels = computed(() => Object.fromEntries(channelIds.value.map(id => {
 const mediaPaths = computed(() => !visible.value ? [] : [...new Set([
   ...sources.value.filter(source => ['image', 'video'].includes(source.kind)).map(source => source.url),
   ...Object.values(channels.value).map(channel => channel.item?.background?.src),
+  ...props.scene.layers.filter(layer => layer.visible).map(layer => layer.mediaBackground?.url),
 ].filter((path): path is string => !!path))]);
 const liveInputs = computed(() => {
   studio.connectedSources; // Capture replacement/disconnection invalidates this list.

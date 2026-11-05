@@ -1,11 +1,13 @@
 import type { Content, Item, ProjectionState } from '@/types';
 import { subscribeWs, subscribeTopics } from '@/lib/ws';
 import { startWs } from '@/lib/ws';
-import type { ProductionState, StudioSource } from '../../../../shared/production';
+import type { ProductionState, SceneLayer, StudioSource } from '../../../../shared/production';
 import { acceptChannelProjection, programCueReady, programCuesReady } from './program-cue-gate';
 import { MediaPlayback, playbackError } from './media-playback';
 import { liveInputStatus } from './device-capture';
 import { api } from '@/lib/api';
+import { LayerBackgroundMedia } from './layer-background-media';
+import { mediaAssetUrl } from './media-library';
 
 export interface MediaInput {
   source: StudioSource;
@@ -33,6 +35,7 @@ export interface SceneSourceBank {
   image(url: string): HTMLImageElement;
   channelItem(input: MediaInput): Item | undefined;
   isTextChannel(input: MediaInput): boolean;
+  layerBackground?(layer: SceneLayer): HTMLImageElement | HTMLVideoElement | undefined;
 }
 
 interface MultiviewVideo { url: string; element: HTMLVideoElement; paused: boolean }
@@ -53,6 +56,11 @@ export class SourceBank {
   private multiviewVideos = new Map<string, MultiviewVideo>();
   private multiviewInputs = new Map<string, MediaInput>();
   private multiviewBank: SceneSourceBank | null = null;
+  private backgrounds = new LayerBackgroundMedia(url => api.sourceVideoStatus(url));
+  private activeLayerBackgrounds: readonly SceneLayer[] = [];
+  private backgroundPosters = new Map<string, string>();
+  private requestedBackgroundPosters = new Set<string>();
+  private loadingBackgroundPosters = false;
   constructor(readonly audio: AudioContext) {
     startWs();
     this.stopWs = subscribeWs(message => {
@@ -129,6 +137,28 @@ export class SourceBank {
     image.src = `/${url.replace(/^\//, '')}`;
     this.images.set(url, { image, lastUsedAt: now });
     return image;
+  }
+  syncLayerBackgrounds(layers: readonly SceneLayer[]) { this.activeLayerBackgrounds = layers; this.backgrounds.sync(layers); }
+  layerBackground(layer: SceneLayer) {
+    const background = layer.mediaBackground;
+    if (!background) return;
+    return background.kind === 'image' ? this.image(mediaAssetUrl(background.url)) : this.backgrounds.video(layer);
+  }
+  private multiviewLayerBackground(layer: SceneLayer) {
+    const background = layer.mediaBackground, active = this.layerBackground(layer);
+    if (active || !background) return active;
+    const path = background.url.replace(/^\/+/, '');
+    const poster = this.backgroundPosters.get(path);
+    if (poster) return this.image(mediaAssetUrl(poster));
+    // Inactive scenes get stored posters, never a new decoder. One catalog
+    // lookup per newly encountered asset; no polling during a service.
+    if (!this.loadingBackgroundPosters && !this.requestedBackgroundPosters.has(path)) {
+      this.requestedBackgroundPosters.add(path); this.loadingBackgroundPosters = true;
+      void api.listMedia('backgrounds').then(files => {
+        for (const file of files) if (file.thumbnail) this.backgroundPosters.set(file.path, file.thumbnail);
+      }).catch(() => {}).finally(() => { this.loadingBackgroundPosters = false; });
+    }
+    return undefined;
   }
   private trimArtwork() {
     if (!this.images.size) return;
@@ -335,6 +365,7 @@ export class SourceBank {
       inputs: this.multiviewInputs,
       image: url => this.image(url), isTextChannel: input => this.isTextChannel(input),
       channelItem: input => this.channelItem(input, false),
+      layerBackground: layer => this.multiviewLayerBackground(layer),
     };
     return this.multiviewBank;
   }
@@ -372,7 +403,7 @@ export class SourceBank {
   }
   status() {
     this.trimArtwork();
-    const sources: Record<string, 'ready' | 'missing' | 'loading' | 'error'> = {}, levels: Record<string, number> = {}, sourceErrors: Record<string, string> = {};
+    const sources: Record<string, 'ready' | 'missing' | 'loading' | 'error'> = {}, levels: Record<string, number> = {}, sourceErrors: Record<string, string> = {}, backgroundErrors: Record<string, string> = {};
     for (const [id, input] of this.inputs) {
       const kind = input.source.kind;
       const live = kind === 'camera' || kind === 'microphone' || kind === 'screen';
@@ -383,13 +414,21 @@ export class SourceBank {
       if (input.error) sourceErrors[id] = input.error;
       levels[id] = this.heldLevels.get(id) ?? 0;
     }
+    for (const layer of this.activeLayerBackgrounds) {
+      const background = layer.mediaBackground;
+      if (!background) continue;
+      const image = background.kind === 'image' ? this.images.get(mediaAssetUrl(background.url))?.image : undefined;
+      const error = background.kind === 'video' ? this.backgrounds.error(layer)
+        : image?.complete && !image.naturalWidth ? 'Background image could not load. Choose another image.' : undefined;
+      if (error) backgroundErrors[background.url] = error;
+    }
     this.heldLevels.clear();
-    return { sources, levels, sourceErrors };
+    return { sources, levels, sourceErrors, backgroundErrors };
   }
   private dispose(input: MediaInput) {
     input.stopStreamEvents?.(); input.stopStreamEvents = undefined;
     this.clearElement(input);
     input.node?.disconnect(); input.gain.disconnect(); input.delay.disconnect(); input.analyser.disconnect();
   }
-  close() { this.stopWs(); this.releaseMultiview(); for (const input of this.inputs.values()) this.dispose(input); this.inputs.clear(); this.images.clear(); }
+  close() { this.stopWs(); this.releaseMultiview(); this.backgrounds.close(); for (const input of this.inputs.values()) this.dispose(input); this.inputs.clear(); this.images.clear(); }
 }

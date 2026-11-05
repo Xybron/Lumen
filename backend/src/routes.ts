@@ -152,22 +152,3 @@ router.post('/media/:kind', requireSession, (req, res, next) => {
   }
   res.json({ path: rel, thumbnail });
 });
-
-router.delete('/media/:kind/:filename', requireSession, async (req, res) => {
-  const kind = req.params.kind as MediaKind;
-  if (!MEDIA_KINDS.includes(kind)) return res.status(400).json({ error: 'bad kind' });
-  const target = safeMediaPath(kind, String(req.params.filename));
-  if (!target) return res.status(400).json({ error: 'bad path' });
-  try {
-    await fs.unlink(target);
-    if (kind === 'backgrounds' && /\.mov$/i.test(target)) {
-      await Promise.allSettled([
-        fs.unlink(target.replace(/\.mov$/i, '.mp4')),
-        fs.unlink(path.join(MEDIA_DIR, 'thumbnails', path.basename(target).replace(/\.mov$/i, '.jpg'))),
-      ]);
-    }
-    res.json({ ok: true });
-  } catch {
-    res.status(404).json({ error: 'not found' });
-  }
-});

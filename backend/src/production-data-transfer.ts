@@ -60,7 +60,10 @@ export function selectPortableStudio(bundle: PortableStudio, ids: string[]): Por
 }
 export function portableStudioDependencies(bundle: PortableStudio) {
   return {
-    mediaIds: [...new Set(bundle.sources.flatMap(source => source.url ? [source.url.replace(/^\//, '')] : []))],
+    mediaIds: [...new Set([
+      ...bundle.sources.flatMap(source => source.url ? [source.url.replace(/^\//, '')] : []),
+      ...bundle.scenes.flatMap(scene => scene.layers.flatMap(layer => layer.mediaBackground ? [layer.mediaBackground.url.replace(/^\//, '')] : [])),
+    ])],
     channelIds: [...new Set(bundle.sources.flatMap(source => source.channelId ? [source.channelId] : []))],
     warnings: bundle.sources.some(source => ['camera', 'screen', 'microphone'].includes(source.kind)) ? ['Imported cameras, screens and microphones must be reconnected on this station.'] : [],
   };
@@ -107,6 +110,7 @@ export interface ProductionTransferAdapter {
   exportClips(ids: string[]): Promise<{ bundle: PortableClips; files: PortableFile[]; recordingIds: string[] }>;
   transaction<T>(backupPath: string, operation: (tx: ProductionTransferTransaction) => Promise<T>): Promise<T>;
   clearPlan(selection: ProductionClearSelection): Promise<{ blockers: string[]; warnings: string[] }>;
+  withUnusedMedia<T>(ids: string[], operation: () => Promise<T>): Promise<T>;
   isLive(): boolean;
   revisionKey(): string;
 }
@@ -134,6 +138,13 @@ function retainedSourceIds(state: ProductionState): Set<string> {
   return new Set([...state.scenes, state.program, ...state.outputs.map(output => output.scene)].flatMap(scene => scene?.layers.flatMap(layer => layer.sourceId ? [layer.sourceId] : []) ?? [])
     .concat(state.channelInsert ? [state.channelInsert.sourceId] : [], state.mainAudioSourceId ? [state.mainAudioSourceId] : []));
 }
+function assertUnusedBackgrounds(state: ProductionState, ids: string[]) {
+  const layers = [...state.scenes, state.program, ...state.outputs.map(output => output.scene)]
+    .flatMap(scene => scene?.layers ?? []).concat(state.channelInsert ? [state.channelInsert.layer] : []);
+  if (layers.some(layer => layer.mediaBackground && ids.includes(layer.mediaBackground.url.replace(/^\//, '')))) {
+    fail('This media is used as a scene background. Remove it from the scene and its live outputs first.');
+  }
+}
 function clearSceneDraft(state: ProductionState, ids: string[], live: boolean) {
   const scenes = selected(state.scenes, ids, 'Scene');
   if (live && (state.program && ids.includes(state.program.id) || state.outputs.some(output => output.scene && ids.includes(output.scene.id)))) fail('Stop Studio before clearing scenes used by Program or a pinned output.');
@@ -153,6 +164,9 @@ function clearSceneDraft(state: ProductionState, ids: string[], live: boolean) {
   return scenes.length;
 }
 function removeSourceDependencies(state: ProductionState, ids: string[], kind: 'channel' | 'media', live: boolean) {
+  if (kind === 'media') {
+    assertUnusedBackgrounds(state, ids);
+  }
   const candidates = state.sources.filter(source => kind === 'channel' ? !!source.channelId && ids.includes(source.channelId) : !!source.url && ids.includes(source.url.replace(/^\//, '')));
   if (!live && state.mainAudioSourceId && candidates.some(source => source.id === state.mainAudioSourceId)
     && !retainedSourceIds({ ...state, mainAudioSourceId: null }).has(state.mainAudioSourceId)) state.mainAudioSourceId = null;
@@ -191,6 +205,17 @@ export class ProductionDataTransfer implements ProductionTransferAdapter {
   constructor(private store: ProductionStore, private recordings: RecordingStore, private clips: ClipTransferAccess | undefined,
     private live: () => boolean = () => false) {}
   isLive() { return this.live(); }
+  withUnusedMedia<T>(ids: string[], operation: () => Promise<T>): Promise<T> {
+    // Keep the dependency check and file removal together with queued Studio
+    // changes so a new Take cannot slip between them.
+    return this.store.withTransferLock(async ({ state }) => {
+      assertUnusedBackgrounds(state, ids);
+      if (state.sources.some(source => source.url && ids.includes(source.url.replace(/^\//, '')))) {
+        fail('This media is used by a Studio source. Remove that source before deleting the file.');
+      }
+      return operation();
+    });
+  }
   revisionKey() { return JSON.stringify({ revision: this.store.get().revision, recordings: this.recordings.list(), clips: this.clips?.snapshot() }); }
   catalog() {
     const snapshot = this.clips?.snapshot();
@@ -285,7 +310,15 @@ export class ProductionDataTransfer implements ProductionTransferAdapter {
           if (copy.channelId) { if (!maps.channels[copy.channelId]) fail('A Studio source is missing its channel dependency.'); copy.channelId = maps.channels[copy.channelId]; }
           state.sources.push(copy);
         }
-        for (const scene of bundle.scenes) state.scenes.push({ ...structuredClone(scene), id: randomUUID(), layers: scene.layers.map(layer => ({ ...structuredClone(layer), id: randomUUID(), ...(layer.sourceId ? { sourceId: sourceIds.get(layer.sourceId)! } : {}) })) });
+        for (const scene of bundle.scenes) state.scenes.push({ ...structuredClone(scene), id: randomUUID(), layers: scene.layers.map(layer => {
+          const copy = { ...structuredClone(layer), id: randomUUID(), ...(layer.sourceId ? { sourceId: sourceIds.get(layer.sourceId)! } : {}) };
+          if (copy.mediaBackground) {
+            const key = copy.mediaBackground.url.replace(/^\//, '');
+            if (!maps.media[key]) fail('A scene background is missing its media dependency.');
+            copy.mediaBackground.url = maps.media[key];
+          }
+          return copy;
+        }) });
         const existingNames = new Set((state.animationPresets ?? []).map(preset => animationPresetNameKey(preset.name)));
         for (const preset of bundle.animationPresets) {
           const sameName = state.animationPresets?.find(existing => animationPresetNameKey(existing.name) === animationPresetNameKey(preset.name));

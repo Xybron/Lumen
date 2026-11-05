@@ -10,6 +10,7 @@ import { ANIMATION_PRESETS, cloneAnimation, createAnimation } from '@/lib/studio
 import LayerAnimationEditor from './LayerAnimationEditor.vue';
 import AnimationPresetLibrary from './AnimationPresetLibrary.vue';
 import StudioPropertyInput from './StudioPropertyInput.vue';
+import LyricsBackgroundPopover from './LyricsBackgroundPopover.vue';
 import type { LayerAnimation, SceneLayer, StudioScene } from '../../../../shared/production';
 const studio = useStudioStore();
 const preview = useAnimationPreview();
@@ -21,6 +22,7 @@ const textChannelLayer = computed(() => {
   const source = studio.state?.sources.find(s => s.id === layer.value?.sourceId);
   return channelLayer.value && ['scripture', 'lyrics'].includes(useContentStore().content.channels.find(c => c.id === source?.channelId)?.kind ?? '');
 });
+const lyricsLayer = computed(() => { const source=studio.state?.sources.find(s=>s.id===layer.value?.sourceId); return channelLayer.value && useContentStore().content.channels.find(c=>c.id===source?.channelId)?.kind==='lyrics'; });
 const animationEditorOpen = ref(false);
 const presetDialogOpen = ref(false), presetMode = ref<'save' | 'library'>('library'), presetBusy = ref(false);
 const animationEditorPreset = ref<LayerAnimation['preset'] | null>(null);
@@ -135,7 +137,7 @@ function previewAnimation() {
         <label class="studio-field">Name<StudioPropertyInput data-inspector-layer-name aria-label="Layer name" :identity="fieldIdentity('name')" :pending="!!studio.saving" :value="layer.name" trim nonempty maxlength="100" @commit="(value, identity) => patch({ name: value }, identity)" /></label>
         <fieldset :disabled="layer.locked" class="inspector-fields">
           <label v-if="layer.kind === 'source'" class="studio-field">Source<select :value="layer.sourceId" @change="patch({ sourceId: text($event) })"><option v-for="source in studio.state?.sources" :key="source.id" :value="source.id">{{ source.name }}</option></select></label>
-          <p v-if="textChannelLayer" class="inspector-channel-note">Live text comes from its channel. Style and position it here; place images or looping video on layers below it.</p>
+          <p v-if="textChannelLayer" class="inspector-channel-note">Live text comes from its channel. Style and position it here.</p>
           <template v-else-if="channelLayer"><label class="studio-field">Channel presentation<select aria-label="Channel presentation" :value="layer.channelStyle ?? 'slide'" @change="patch({ channelStyle: text($event) as SceneLayer['channelStyle'] })"><option value="slide">Full slide · channel design</option><option value="overlay">Overlay · layer styling</option></select></label><p class="inspector-channel-note">{{ layer.channelStyle === 'overlay' ? 'Uses this layer’s fill and typography. Clearing the channel reveals the layers below it.' : 'Uses the presentation’s full slide design.' }}</p></template>
           <label v-if="layer.kind === 'text'" class="studio-field">Text<StudioPropertyInput multiline :identity="fieldIdentity('text')" :pending="!!studio.saving" :value="layer.text" rows="4" maxlength="8000" @commit="(value, identity) => patch({ text: value }, identity)" /></label>
           <details class="inspector-group" open>
@@ -146,6 +148,7 @@ function previewAnimation() {
             <div class="field-grid"><label v-for="field in layoutFields" :key="field.key" class="studio-field">{{ field.label }}<StudioPropertyInput type="number" :identity="fieldIdentity(`${field.key}:${units}`)" :pending="!!studio.saving" :value="geometryValue(field.key)" :step="units === 'px' ? 1 : 0.1" :min="layerGeometryValue(field.key === 'x' || field.key === 'y' ? -100 : 1, field.key, units)" :max="layerGeometryValue(field.key === 'x' || field.key === 'y' ? 100 : 200, field.key, units)" @commit="(value, identity) => geometryInput(field.key, value, identity)" /></label></div>
             <label v-if="layer.kind === 'source' && !textChannelLayer" class="studio-field">Image fit<select :value="layer.fit" @change="patch({ fit: text($event) as SceneLayer['fit'] })"><option value="cover">Fill frame (crop)</option><option value="contain">Fit inside frame</option></select></label>
           </details>
+          <LyricsBackgroundPopover v-if="lyricsLayer" :key="scene.id+layer.id" :layer="layer" :scene-id="scene.id" />
           <details v-if="layer.kind === 'text' || textChannelLayer || (channelLayer && layer.channelStyle === 'overlay')" class="inspector-group" open>
             <summary><ChevronDown :size="12" /><span>Typography</span></summary>
             <div class="field-grid"><label class="studio-field">Size<StudioPropertyInput type="number" min="12" max="300" :identity="fieldIdentity('fontSize')" :pending="!!studio.saving" :value="layer.fontSize" @commit="(value, identity) => patch({ fontSize: Number(value) }, identity)" /></label><label class="studio-field">Weight<select :value="layer.fontWeight" @change="patch({ fontWeight: number($event) })"><option :value="400">Regular</option><option :value="500">Medium</option><option :value="600">Semibold</option><option :value="700">Bold</option></select></label></div>
@@ -155,8 +158,8 @@ function previewAnimation() {
           <details class="inspector-group" open>
             <summary><ChevronDown :size="12" /><span>Appearance</span></summary>
             <label class="studio-field">Opacity <span>{{ Math.round(layer.opacity * 100) }}%</span><StudioPropertyInput type="range" live min="0" max="1" step="0.01" :identity="fieldIdentity('opacity')" :pending="!!studio.saving" :value="layer.opacity" @commit="(value, identity) => patch({ opacity: Number(value) }, identity)" /></label>
-            <label class="studio-field color-field">Fill<StudioPropertyInput type="color" live :identity="fieldIdentity('background')" :pending="!!studio.saving" :value="layer.background.slice(0, 7)" @commit="(value, identity) => colorInput('background', value, identity)" /><code>{{ layer.background }}</code></label>
-            <label class="studio-check"><input type="checkbox" :checked="layer.background.length === 9 && layer.background.endsWith('00')" @change="patch({ background: ($event.target as HTMLInputElement).checked ? layer.background.slice(0, 7) + '00' : layer.background.slice(0, 7) })" /> Transparent fill</label>
+            <label v-if="!lyricsLayer" class="studio-field color-field">Fill<StudioPropertyInput type="color" live :identity="fieldIdentity('background')" :pending="!!studio.saving" :value="layer.background.slice(0, 7)" @commit="(value, identity) => colorInput('background', value, identity)" /><code>{{ layer.background }}</code></label>
+            <label v-if="!lyricsLayer" class="studio-check"><input type="checkbox" :checked="layer.background.length === 9 && layer.background.endsWith('00')" @change="patch({ background: ($event.target as HTMLInputElement).checked ? layer.background.slice(0, 7) + '00' : layer.background.slice(0, 7) })" /> Transparent fill</label>
             <label class="studio-field">Corner radius<StudioPropertyInput type="number" min="0" max="200" :identity="fieldIdentity('radius')" :pending="!!studio.saving" :value="layer.radius" @commit="(value, identity) => patch({ radius: Number(value) }, identity)" /></label>
           </details>
           <details class="inspector-group inspector-animation" open>

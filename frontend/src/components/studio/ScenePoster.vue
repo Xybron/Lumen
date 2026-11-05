@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, watch } from 'vue';
 import { sampleAnimation } from '@/lib/studio/animation';
+import { ensureScenePosterMedia, scenePosterMedia } from '@/lib/studio/scene-poster-media';
 import ChannelPoster from './ChannelPoster.vue';
 import type { Item } from '@/types';
 import type { SceneLayer, StudioScene, StudioSource } from '../../../../shared/production';
@@ -13,6 +14,14 @@ const layers = computed(() => props.scene.layers.filter(layer => {
   const channel = channelFor(layer.sourceId);
   return !channel || !!channel.item || !(channel.textChannel || layer.channelStyle === 'overlay');
 }));
+// Design/offline previews use the same static catalog as scene cards. Motion
+// belongs to the renderer; mounting a card must never start a video decoder.
+watch(() => props.posterForMedia ? [] : layers.value.flatMap(layer => layer.mediaBackground ? [layer.mediaBackground.url] : []),
+  paths => ensureScenePosterMedia(paths), { immediate: true });
+function backgroundPoster(layer: SceneLayer) {
+  const background = layer.mediaBackground;
+  return background ? (props.posterForMedia ?? scenePosterMedia)(background.url, background.kind) : undefined;
+}
 function sourceFor(id?: string) { return props.sources?.find(source => source.id === id); }
 function channelFor(id?: string) { const source = sourceFor(id); return source?.kind === 'channel' && source.channelId ? props.channels?.[source.channelId] : undefined; }
 function mediaUrl(id?: string) { const source = sourceFor(id); return source?.url ? props.posterForMedia && source.kind === 'image' ? props.posterForMedia(source.url, 'image') : `/${source.url.replace(/^\//, '')}` : undefined; }
@@ -30,8 +39,10 @@ function styleFor(layer: SceneLayer) {
 <template>
   <div class="scene-poster" :style="{ background: scene.background }" aria-hidden="true">
     <div v-for="layer in layers" :key="layer.id" class="poster-layer" :data-layer-id="layer.id" :style="styleFor(layer)">
+      <img v-if="layer.mediaBackground && backgroundPoster(layer)" class="layer-media-background" :src="backgroundPoster(layer)" :style="{ objectFit: layer.mediaBackground.fit }" loading="lazy" decoding="async" draggable="false" alt="" />
+      <div v-if="layer.mediaBackground?.dim" class="layer-media-dim" :style="{ opacity: layer.mediaBackground.dim }" />
       <span v-if="layer.kind === 'text'">{{ layer.text }}</span>
-      <ChannelPoster v-else-if="channelFor(layer.sourceId)?.item" :item="channelFor(layer.sourceId)!.item!" :layer="layer" :overlay="channelFor(layer.sourceId)!.textChannel || layer.channelStyle === 'overlay'" :poster-for-media="posterForMedia" />
+      <ChannelPoster v-else-if="channelFor(layer.sourceId)?.item" class="poster-channel" :item="channelFor(layer.sourceId)!.item!" :layer="layer" :overlay="channelFor(layer.sourceId)!.textChannel || layer.channelStyle === 'overlay'" :poster-for-media="posterForMedia" />
       <template v-else-if="channelFor(layer.sourceId)" />
       <img v-else-if="layer.sourceId && ['camera', 'screen'].includes(sourceFor(layer.sourceId)?.kind ?? '') && sourceStills?.[layer.sourceId]" class="scene-source-still" :data-source-id="layer.sourceId" :src="sourceStills[layer.sourceId]" :style="{ objectFit: layer.fit }" decoding="async" draggable="false" alt="" />
       <img v-else-if="sourceFor(layer.sourceId)?.kind === 'image' && mediaUrl(layer.sourceId)" :src="mediaUrl(layer.sourceId)" :style="{ objectFit: layer.fit }" loading="lazy" decoding="async" draggable="false" alt="" />
@@ -45,9 +56,12 @@ function styleFor(layer: SceneLayer) {
 <style scoped>
 .scene-poster { position: absolute; inset: 0; container-type: inline-size; overflow: hidden; }
 .poster-layer { position: absolute; display: flex; align-items: center; overflow: hidden; line-height: 1.24; }
-.poster-layer > span { white-space: pre-wrap; padding: 0 .4cqw; width: 100%; }
+.poster-layer > span { position: relative; z-index: 1; white-space: pre-wrap; padding: 0 .4cqw; width: 100%; }
 .poster-layer img, .poster-layer video { width: 100%; height: 100%; }
-.source-placeholder { width: 100%; height: 100%; background: #12191c; display: grid; place-items: center; font-size: 3cqw; color: #667c84; }
+.layer-media-background, .layer-media-dim { position: absolute; inset: 0; pointer-events: none; }
+.layer-media-dim { background: #000; }
+.poster-channel { z-index: 1; }
+.source-placeholder { position: relative; width: 100%; height: 100%; background: #12191c; display: grid; place-items: center; font-size: 3cqw; color: #667c84; }
 .source-placeholder small { display: block; margin-top: .6cqw; font-size: 1.7cqw; opacity: .7; }
 .channel-overlay-placeholder { background: transparent; color: inherit; font-size: inherit; text-align: inherit; }
 .channel-overlay-placeholder small { font-size: .8em; }

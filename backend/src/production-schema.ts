@@ -6,6 +6,11 @@ const id = z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/);
 const name = z.string().trim().min(1).max(100);
 const color = z.string().regex(/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/);
 const unit = z.number().finite().min(0).max(1);
+const stationMediaUrl = z.string().regex(/^\/?media\/(backgrounds|music)\/[\w.\-]+$/);
+export const LayerMediaBackgroundSchema = z.object({
+  kind: z.enum(['image', 'video']), url: stationMediaUrl,
+  fit: z.enum(['cover', 'contain']), dim: unit, loop: z.boolean(),
+}).strict();
 export const AnimationKeyframeSchema = z.object({
   offset: unit,
   x: z.number().finite().min(-3840).max(3840),
@@ -46,6 +51,7 @@ export const LayerSchema = z.object({
   fontWeight: z.number().int().min(100).max(900), align: z.enum(['left', 'center', 'right']),
   radius: z.number().finite().min(0).max(200),
   channelStyle: z.enum(['slide', 'overlay']).optional(),
+  mediaBackground: LayerMediaBackgroundSchema.nullable().optional(),
   animation: LayerAnimationSchema.optional(),
 }).strict();
 export const SceneSchema = z.object({ id, name, background: color, layers: z.array(LayerSchema).max(40) }).strict();
@@ -53,7 +59,7 @@ export const SourceSchema = z.object({
   id, name, kind: z.enum(['camera', 'screen', 'microphone', 'image', 'video', 'audio', 'channel']),
   // Only the station's uploaded files can enter the compositor. No remote URLs,
   // arbitrary file paths, data URLs or credentials in a saved scene.
-  url: z.string().regex(/^\/?media\/(backgrounds|music)\/[\w.\-]+$/).optional(),
+  url: stationMediaUrl.optional(),
   channelId: id.optional(), loop: z.boolean(),
   playback: z.object({ paused: z.boolean(), restart: z.number().int().nonnegative() }).strict().optional(),
   audio: z.object({ volume: unit, muted: z.boolean(), mode: z.enum(['always', 'follow']), delayMs: z.number().int().min(0).max(2000) }).strict(),

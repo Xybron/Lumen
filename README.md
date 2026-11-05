@@ -338,8 +338,16 @@ Scripture and Lyrics supply live text, not designs or Program routes:
 3. In Studio, add the channel as a source to the desired scene. Set its text
    color, typography, fill, opacity and exact placement in **Design**. Choose
    **Lower third**, **Upper third**, or **Full view**, then refine by dragging or
-   entering dimensions. Add images, cameras or looping video as separate layers
-   below the text. Dedicated Scripture/Lyrics layers always use Studio styling,
+   entering dimensions. For Lyrics, **Design → Background** opens a compact
+   media popover with None, Color, Image and Video. Choose from the station
+   library or upload a file, set Fill/Fit and dimming, and enable or disable
+   video looping. Background videos are always silent. Settings belong to the
+   selected layer, so a full-screen Lyrics scene can have a background while a
+   lower-third scene stays transparent. They are saved across restarts and
+   included with their media in `.lumen` exports. Background changes stay in
+   Preview until Cut/Fade; changing lyric sections does not restart the video.
+   Cameras and other content can still be separate layers below the text.
+   Dedicated Scripture/Lyrics layers always use Studio styling,
    including layers saved with the older slide-design mode.
 4. **Cut/Fade** that scene to Program, or use its configured scene shortcut
    directly from the channel workspace. Publishing itself never switches scenes.
@@ -882,6 +890,7 @@ npm run test:scripture:doubleclick # build + exact-verse double-click publicatio
 npm run test:scripture:search # build + short references, typo tolerance, book choices, keyword ranking and keyboard preparation
 npm run test:scripture:focus # build + Scripture entry autofocus, navigation and focus-stealing safeguards
 npm run test:lyrics:search # build + title/lyric fragments, typo matching, exact section preparation and keyboard/live safeguards
+npm run test:lyrics:background # build + media popover, scene isolation, persistence and upload cancellation
 npm run test:presentation # build + presentation navigation, creation and isolated editing destinations
 npm run test:channel-workflow # build + channel-only publication, real text output, camera and scene isolation
 npm run test:studio:audio # build + persistent audio, ICE/RTP output connections, engine reconnect and recording regression

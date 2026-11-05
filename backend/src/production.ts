@@ -374,6 +374,7 @@ export async function createProduction(rendererOptions: Pick<RendererOriginOptio
     levels: z.record(z.number().finite().min(0).max(1)),
     sources: z.record(z.enum(['ready', 'missing', 'loading', 'error'])),
     sourceErrors: z.record(z.string().max(500)),
+    backgroundErrors: z.record(z.string().max(500)).default({}),
   });
   router.post('/studio/engine/heartbeat', requireEngine, asyncRoute(async (req, res) => {
     const data = heartbeatSchema.parse(req.body); lastHeartbeat = Date.now();

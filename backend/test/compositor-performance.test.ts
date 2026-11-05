@@ -8,7 +8,7 @@ async function loadRenderer() {
   const { default: esbuild } = await import('../../frontend/node_modules/esbuild/lib/main.js');
   const frontend = fileURLToPath(new URL('../../frontend/', import.meta.url));
   const bundle = await esbuild.build({ absWorkingDir: frontend,
-    stdin: { contents: 'export { paintScene } from "./src/lib/studio/compositor.ts"; export { SourceBank } from "./src/lib/studio/sources.ts";', resolveDir: frontend },
+    stdin: { contents: 'export { paintScene, StudioCompositor } from "./src/lib/studio/compositor.ts"; export { SourceBank } from "./src/lib/studio/sources.ts";', resolveDir: frontend },
     tsconfig: 'tsconfig.json', bundle: true, write: false, format: 'esm', platform: 'browser', define: { 'process.env.NODE_ENV': '"production"' } });
   return import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
 }
@@ -84,4 +84,67 @@ test('standby artwork is bounded without reloading source-owned or recently draw
   bank.trimArtwork();
   assert.equal(bank.images.size, 13, 'One owned input plus at most twelve standby entries even when dimensions are unknown');
   assert.equal(bank.image('logo'), logo);
+});
+
+test('lyrics media draws behind dimming and text, while blank cues clear the whole layer', async () => {
+  const { paintScene } = await renderer;
+  const scene = initialProduction().scenes[0];
+  scene.layers = [{ ...scene.layers[0], kind: 'source', sourceId: 'lyrics', channelStyle: 'overlay',
+    mediaBackground: { kind: 'video', url: 'media/backgrounds/worship.mp4', fit: 'contain', dim: .4, loop: true } }];
+  let item: Item | undefined = { id: 'cue_lyrics', type: 'lyrics', body: 'Amazing grace', durationMs: 0 };
+  const background = { videoWidth: 640, videoHeight: 360 }, calls: string[] = [];
+  const bank = { inputs: new Map([['lyrics', { source: { kind: 'channel' }, element: null }]]),
+    channelItem: () => item, isTextChannel: () => true, layerBackground: () => { calls.push('background'); return background; } };
+  const ctx = { font: '', fillStyle: '', globalAlpha: 1, save() {}, restore() {}, setTransform() {}, translate() {}, rotate() {}, scale() {}, clip() {}, beginPath() {}, roundRect() {},
+    fillRect() { calls.push('fill:' + this.fillStyle); },
+    measureText(value: string) { return { width: value.length * Number(/([\d.]+)px/.exec(this.font)?.[1]) * .5 }; },
+    fillText(value: string) { calls.push('text:' + value); }, drawImage(image: unknown) { assert.equal(image, background); calls.push('draw'); } };
+  const paint = () => paintScene({ width: 1920, height: 1080, getContext: () => ctx }, scene, bank);
+  paint();
+  assert.ok(calls.indexOf('draw') < calls.indexOf('fill:rgba(0,0,0,0.4)'));
+  assert.ok(calls.indexOf('fill:rgba(0,0,0,0.4)') < calls.indexOf('text:Amazing grace'));
+  item = undefined; calls.length = 0; paint();
+  assert.deepEqual(calls, ['fill:' + scene.background], 'Blanking reveals the scene, including removal of media and dimming');
+});
+
+test('background decoding is limited to active Program, observed Preview and unblanked pinned outputs', async () => {
+  const { StudioCompositor } = await renderer;
+  const state = initialProduction(), layer = state.scenes[0].layers[0];
+  const makeScene = (id: string) => ({ ...state.scenes[0], id, layers: [{ ...layer, id, sourceId: 'lyrics', kind: 'source',
+    mediaBackground: { kind: 'video', url: `media/backgrounds/${id}.mp4`, fit: 'cover', dim: 0, loop: true } }] });
+  state.program = makeScene('program'); state.scenes = [makeScene('preview'), makeScene('inactive')]; state.previewSceneId = 'preview';
+  state.outputs = [{ ...state.outputs[0], id: 'pinned', mode: 'scene', scene: makeScene('pinned'), blanked: false }];
+  let blanked = false, retained: string[] = [];
+  const compositor = Object.create(StudioCompositor.prototype);
+  compositor.state = state; compositor.buses = new Map([['program', {}]]); compositor.animationRuns = { output: () => null };
+  compositor.bank = { inputs: new Map([['lyrics', { source: { kind: 'channel' } }]]), isTextChannel: () => true,
+    channelItem: () => blanked ? undefined : { id: 'cue' }, syncLayerBackgrounds: (layers: { id: string }[]) => { retained = layers.map(layer => layer.id); } };
+  compositor.syncLayerBackgrounds(0); assert.deepEqual(retained, ['program']);
+  compositor.buses.set('preview', {}); compositor.buses.set('pinned', {});
+  compositor.syncLayerBackgrounds(0); assert.deepEqual(retained, ['program', 'preview', 'pinned']);
+  state.outputs[0].blanked = true; compositor.syncLayerBackgrounds(0); assert.deepEqual(retained, ['program', 'preview']);
+  state.scenes[0].layers[0].visible = false; compositor.syncLayerBackgrounds(0); assert.deepEqual(retained, ['program']);
+  blanked = true; compositor.syncLayerBackgrounds(0); assert.deepEqual(retained, [], 'No decoder remains active for a cleared lyrics channel');
+});
+
+test('background failures remain independent from working channel text and never probe inactive media', async t => {
+  const { SourceBank } = await renderer;
+  const originals = ['HTMLMediaElement', 'HTMLImageElement'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
+  for (const [key] of originals) Object.defineProperty(globalThis, key, { configurable: true, value: class {} });
+  t.after(() => { for (const [key, value] of originals) if (value) Object.defineProperty(globalThis, key, value); else Reflect.deleteProperty(globalThis, key); });
+  const base = initialProduction().scenes[0].layers[0], imageUrl = 'media/backgrounds/missing.jpg', videoUrl = 'media/backgrounds/missing.mp4';
+  const bank = Object.create(SourceBank.prototype);
+  bank.trimArtwork = () => {}; bank.heldLevels = new Map();
+  bank.inputs = new Map([['lyrics', { source: { kind: 'channel' }, element: null, error: '' }]]);
+  bank.activeLayerBackgrounds = [
+    { ...base, mediaBackground: { kind: 'image', url: imageUrl } },
+    { ...base, mediaBackground: { kind: 'video', url: videoUrl } },
+  ];
+  bank.images = new Map([['/' + imageUrl, { image: { complete: true, naturalWidth: 0 } }]]);
+  bank.backgrounds = { error: () => 'Background video is missing from this station. Choose another video.' };
+  const status = bank.status();
+  assert.deepEqual(status.sources, { lyrics: 'ready' }); assert.deepEqual(status.sourceErrors, {});
+  assert.match(status.backgroundErrors[imageUrl], /image could not load/);
+  assert.match(status.backgroundErrors[videoUrl], /video is missing/);
+  bank.activeLayerBackgrounds = []; assert.deepEqual(bank.status().backgroundErrors, {});
 });

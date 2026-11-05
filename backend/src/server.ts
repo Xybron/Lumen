@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { router } from './routes.js';
 import { identityRouter } from './identity-routes.js';
 import { createMediaRouter } from './media-routes.js';
+import { createMediaDeleteRouter } from './media-delete-routes.js';
 import { initDb } from './db.js';
 import { attachWebSocket } from './ws.js';
 import { attachAgentSocket, createAgentRouter } from './agent-ws.js';
@@ -139,6 +140,7 @@ export async function startLumenServer(options: LumenServerOptions = {}) {
   app.use('/api', dataClear.router);
   app.use('/api', dataTransfer.router);
   app.use('/api', worship.router);
+  app.use('/api', createMediaDeleteRouter(production.transfer));
   app.use('/api', router);
   app.use('/api', createMediaRouter(relay));
   app.use('/api', createAgentRouter(relay));

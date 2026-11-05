@@ -190,13 +190,14 @@ test('v2 scenes include media, channel setlists and library dependencies; record
     source.library.command('worship_channel', 2, { type: 'take', selection: { kind: 'lyrics', songId: 'setlist_song', sectionId: 'v1' } });
     await fs.mkdir(path.join(source.root, 'media/backgrounds'), { recursive: true });
     await fs.writeFile(path.join(source.root, 'media/backgrounds/portable.png'), 'synthetic pixels');
+    await fs.writeFile(path.join(source.root, 'media/backgrounds/motion.webm'), 'synthetic background motion');
     const studio = initialProduction(), layer = studio.scenes[0].layers[0];
     studio.sources = [
       { id: 'channel_source', kind: 'channel', name: 'Lyrics', channelId: 'worship_channel', loop: false, audio: { volume: 1, muted: false, mode: 'always', delayMs: 0 } },
       { id: 'image_source', kind: 'image', name: 'Backdrop', url: 'media/backgrounds/portable.png', loop: false, audio: { volume: 1, muted: true, mode: 'follow', delayMs: 0 } },
     ];
     studio.scenes = [{ id: 'portable_scene', name: 'Portable scene', background: '#000000', layers: [
-      { ...layer, id: 'channel_layer', kind: 'source', sourceId: 'channel_source' },
+      { ...layer, id: 'channel_layer', kind: 'source', sourceId: 'channel_source', mediaBackground: { kind: 'video', url: '/media/backgrounds/motion.webm', fit: 'cover', dim: .4, loop: true } },
       { ...layer, id: 'image_layer', kind: 'source', sourceId: 'image_source' },
     ] }]; studio.previewSceneId = 'portable_scene';
     await fs.writeFile(path.join(source.root, 'production.json'), JSON.stringify(studio));
@@ -216,7 +217,7 @@ test('v2 scenes include media, channel setlists and library dependencies; record
     const selection = { ...none, scenes: ['portable_scene'], recordings: [recordingId] };
     const archive = path.join(source.root, 'everything.lumen'); await sourceTransfer.exportToFile(selection, archive);
     const staging = path.join(target.root, 'preview-assets'), preview = await targetTransfer.previewFile(archive, staging);
-    assert.equal(preview.catalog.setlists.length, 1); assert.equal(preview.catalog.songs.length, 1); assert.equal(preview.catalog.bibles.length, 1); assert.equal(preview.catalog.media.length, 1);
+    assert.equal(preview.catalog.setlists.length, 1); assert.equal(preview.catalog.songs.length, 1); assert.equal(preview.catalog.bibles.length, 1); assert.equal(preview.catalog.media.length, 2);
     const beforeContent = await fs.readFile(path.join(target.root, 'content.json'));
     const beforeStudio = targetStore.get(), transaction = targetAdapter.transaction.bind(targetAdapter);
     targetAdapter.transaction = (backupPath, operation) => transaction(backupPath, tx => operation({ ...tx, commitSync() { tx.commitSync(); throw new Error('injected post-commit failure'); } }));
@@ -226,9 +227,13 @@ test('v2 scenes include media, channel setlists and library dependencies; record
     assert.equal((await targetTransfer.catalog()).songs.length, 0); assert.deepEqual(await fs.readdir(path.join(target.root, 'media/backgrounds')), []);
     targetAdapter.transaction = transaction;
     const result = await targetTransfer.import(preview.archive, selection);
-    assert.deepEqual(result.imported, { bibles: 1, songs: 1, presentations: 1, media: 1, scenes: 1, recordings: 1, setlists: 1, clips: 0, settings: 0 });
+    assert.deepEqual(result.imported, { bibles: 1, songs: 1, presentations: 1, media: 2, scenes: 1, recordings: 1, setlists: 1, clips: 0, settings: 0 });
     const afterStudio = targetStore.get(); assert.deepEqual(afterStudio.program, beforeStudio.program); assert.deepEqual(afterStudio.outputs, beforeStudio.outputs);
     const newScene = afterStudio.scenes.find(scene => scene.name === 'Portable scene')!; assert.notEqual(newScene.id, 'portable_scene');
+    const importedBackground = newScene.layers[0].mediaBackground!;
+    assert.notEqual(importedBackground.url, '/media/backgrounds/motion.webm');
+    assert.deepEqual({ ...importedBackground, url: '' }, { kind: 'video', url: '', fit: 'cover', dim: .4, loop: true });
+    assert.equal(await fs.readFile(path.join(target.root, importedBackground.url.replace(/^\//, '')), 'utf8'), 'synthetic background motion');
     const importedChannel = afterStudio.sources.find(source => source.name === 'Lyrics')!.channelId!;
     assert.notEqual(importedChannel, 'worship_channel');
     const workspace = target.library.workspace(importedChannel); assert.deepEqual(workspace.setlist, ['setlist_song']); assert.equal(workspace.versionId, 'SPAN'); assert.equal(workspace.live, null); assert.deepEqual(workspace.recent, []);

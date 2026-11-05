@@ -52,6 +52,14 @@ export interface StudioAnimationPreset {
   updatedAt: string;
 }
 
+export interface LayerMediaBackground {
+  kind: 'image' | 'video';
+  url: string;
+  fit: 'cover' | 'contain';
+  dim: number;
+  loop: boolean;
+}
+
 export interface SceneLayer {
   id: string;
   name: string;
@@ -76,6 +84,9 @@ export interface SceneLayer {
   // Channel content can inherit a transparent, geometry-aware Studio overlay
   // rather than the channel's full slide background. Existing layers use slide.
   channelStyle?: 'slide' | 'overlay';
+  // Scene-local media travels with committed snapshots, independently of the
+  // shared channel content. Null explicitly clears it in a saved draft.
+  mediaBackground?: LayerMediaBackground | null;
   animation?: LayerAnimation;
 }
 
@@ -156,6 +167,8 @@ export interface StudioStatus {
   levels: Record<string, number>;
   sources: Record<string, 'ready' | 'missing' | 'loading' | 'error'>;
   sourceErrors: Record<string, string>;
+  /** Active layer media failures, separate from the channel's text readiness. */
+  backgroundErrors?: Record<string, string>;
   recording: StudioRecording | null;
   broadcast?: { id: string; state: 'starting' | 'live' | 'stopping' | 'stopped' | 'error' };
 }

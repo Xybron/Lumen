@@ -146,7 +146,7 @@ function paintLayers(ctx: CanvasRenderingContext2D, layers: SceneLayer[], bank: 
     ctx.globalAlpha = layer.opacity * pose.opacity;
     const input = layer.sourceId ? bank.inputs.get(layer.sourceId) : undefined;
     const clearBackground = layer.background.length === 9 && layer.background.endsWith('00');
-    const multipleDraws = layer.kind !== 'shape' && (!clearBackground || input?.source.kind === 'channel');
+    const multipleDraws = !!layer.mediaBackground || layer.kind !== 'shape' && (!clearBackground || input?.source.kind === 'channel');
     if (ctx.globalAlpha > 0 && ctx.globalAlpha < 1 && multipleDraws) {
       // Opacity belongs to the complete element, not each overlapping draw.
       // Rendering its fill and text/media separately at half alpha would tint
@@ -187,6 +187,12 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: SceneLayer, bank
   ctx.save();
   ctx.beginPath(); ctx.roundRect(0, 0, w, h, Math.min(layer.radius, w / 2, h / 2)); ctx.clip();
   ctx.fillStyle = layer.background; ctx.fillRect(0, 0, w, h);
+  if (layer.mediaBackground) {
+    const background = layer.mediaBackground;
+    const media = bank.layerBackground?.(layer) ?? (background.kind === 'image' ? bank.image(background.url) : undefined);
+    if (media) drawFitted(ctx, media, 0, 0, w, h, background.fit);
+    if (background.dim > 0) { ctx.fillStyle = `rgba(0,0,0,${background.dim})`; ctx.fillRect(0, 0, w, h); }
+  }
   if (layer.kind === 'text') drawText(ctx, layer, w, h);
   else if (layer.kind === 'source' && layer.sourceId) {
     if (channel) {
@@ -340,7 +346,8 @@ export class StudioCompositor {
       const input = this.bank.inputs.get(layer.sourceId);
       if (!input) return false;
       if (['camera', 'screen', 'video'].includes(input.source.kind)) return true;
-      return input.source.kind === 'channel' && this.bank.channelItem(input, false)?.background?.kind === 'video';
+      const item = input.source.kind === 'channel' ? this.bank.channelItem(input, false) : undefined;
+      return !!item && (layer.mediaBackground?.kind === 'video' || item.background?.kind === 'video');
     }) ?? false;
   }
   private programMix(now: number): SceneWeight[] {
@@ -470,6 +477,31 @@ export class StudioCompositor {
     const sourceIds = new Set(this.state.scenes.flatMap(scene => scene.layers.filter(layer => layer.visible && layer.sourceId).map(layer => layer.sourceId!)));
     paintMultiview(canvas, this.state.scenes, this.bank.multiviewView(sourceIds));
   }
+  private syncLayerBackgrounds(now: number) {
+    const active: SceneLayer[] = [];
+    const retain = (layers: readonly SceneLayer[], elapsedMs: number | null = null) => {
+      for (const layer of layers) {
+        if (!layer.mediaBackground || !layer.visible || layer.opacity <= 0 || sampleAnimation(layer.animation, elapsedMs).opacity <= 0) continue;
+        const input = layer.kind === 'source' && layer.sourceId ? this.bank.inputs.get(layer.sourceId) : undefined;
+        if (input?.source.kind === 'channel' && (this.bank.isTextChannel(input) || layer.channelStyle === 'overlay') && !this.bank.channelItem(input, false)) continue;
+        active.push(layer);
+      }
+    };
+    // Retain both snapshots during fades and pending cue handoffs. An edit to
+    // the draft cannot replace the committed Program background's player.
+    for (const picture of this.programPictures(now)) {
+      if (picture.weight <= 0) continue;
+      retain(picture.scene?.layers ?? [], picture.animationStartedAt === undefined ? null : now - picture.animationStartedAt);
+      for (const insert of picture.inserts) retain([insert.layer]);
+    }
+    if (this.buses.has('preview')) retain(this.state.scenes.find(scene => scene.id === this.state.previewSceneId)?.layers ?? []);
+    for (const output of this.state.outputs) {
+      if (!this.buses.has(output.id) || output.mode !== 'scene' || output.blanked) continue;
+      const run = this.animationRuns.output(output.id);
+      retain(output.scene?.layers ?? [], run ? now - run.startedAt : null);
+    }
+    this.bank.syncLayerBackgrounds(active);
+  }
   private draw() {
     const now = performance.now();
     const cueReady = this.bank.programCueReady(this.state.programCueGate) && this.bank.programCuesReady(this.state.programCueGates);
@@ -498,6 +530,7 @@ export class StudioCompositor {
     // A presentation channel selected for service audio may not appear in the
     // current picture. Resolve its media independently of visual painting.
     if (mainInput?.source.kind === 'channel') this.bank.channelItem(mainInput);
+    this.syncLayerBackgrounds(now);
     // A newly routed cue arrives on the channel connection independently from
     // Studio state. Keep the last good Program frame until its authoritative
     // cue revision has arrived; never paint (or activate) a stale channel item.
