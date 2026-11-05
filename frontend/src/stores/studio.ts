@@ -178,6 +178,13 @@ export const useStudioStore = defineStore('studio', () => {
       Object.assign(layer.mediaBackground, patch);
     }, Object.keys(patch).length === 1 ? `layer:${sceneId}:${id}:mediaBackground:${Object.keys(patch)[0]}` : undefined);
   }
+  function updateLayerTextEffect<K extends 'textStroke' | 'textShadow'>(id: string, key: K, patch: Partial<NonNullable<SceneLayer[K]>>, sceneId = selectedScene.value?.id) {
+    return edit(draft => {
+      const layer = draft.scenes.find(scene => scene.id === sceneId)?.layers.find(item => item.id === id);
+      if (!layer || layer.locked || !layer[key]) return;
+      Object.assign(layer[key]!, patch);
+    }, Object.keys(patch).length === 1 ? `layer:${sceneId}:${id}:${key}:${Object.keys(patch)[0]}` : undefined);
+  }
   function removeLayer(id: string) {
     const sceneId = selectedScene.value?.id;
     return edit(d => {
@@ -392,7 +399,7 @@ export const useStudioStore = defineStore('studio', () => {
     if (captures.size) { e.preventDefault(); e.returnValue = ''; }
   });
   return { state, status, loading, saving, recordings, engineBusy, recordingBusy, selectedLayerId, selectedScene, selectedLayer, connectedSources, animationPresets, reconnect: () => signal.reconnect(),
-    load, edit, command, selectScene, reorderScene, addScene, removeScene, updateScene, addLayer, updateLayer, updateLayerMediaBackground, removeLayer, moveLayer, duplicateLayer, reorderLayer, arrangeLayer, alignLayer, presetLayer, nudgeLayer, addSource, removeSource, updateSource,
+    load, edit, command, selectScene, reorderScene, addScene, removeScene, updateScene, addLayer, updateLayer, updateLayerMediaBackground, updateLayerTextEffect, removeLayer, moveLayer, duplicateLayer, reorderLayer, arrangeLayer, alignLayer, presetLayer, nudgeLayer, addSource, removeSource, updateSource,
     connectSource, disconnectSource, sourceStream, cameraStreams, inputSelection, saveSourceProperties, setMainAudio, toggleEngine, refreshRecordings, toggleRecord, recoverRecording,
     saveAnimationPreset, renameAnimationPreset, deleteAnimationPreset, applyAnimationPreset };
 });

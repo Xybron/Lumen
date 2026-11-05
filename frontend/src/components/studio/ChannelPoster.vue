@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { channelText } from '@/lib/studio/channel-overlay';
 import { channelPosterLayout } from '@/lib/studio/channel-poster-layout';
+import { textCss } from '@/lib/studio/text-style';
 import type { Item } from '@/types';
 import type { SceneLayer } from '../../../../shared/production';
 
@@ -14,7 +15,7 @@ const layout = computed(() => {
   const height = props.overlay ? layer.height * 10.8 : 1080;
   return channelPosterLayout(item, width, height,
     props.overlay ? layer.fontSize : ({ sm: 42, md: 54, lg: 68, xl: 82, '2xl': 100 })[item.typography?.size ?? 'lg'],
-    props.overlay ? layer.fontWeight : item.typography?.weight ?? 500);
+    props.overlay ? layer.fontWeight : item.typography?.weight ?? 500, props.overlay ? layer : {});
 });
 const visual = computed(() => ['image', 'video'].includes(props.item.type));
 const background = computed(() => props.item.background);
@@ -39,6 +40,7 @@ const backgroundStyle = computed(() => props.overlay ? {} : {
     <div v-if="!overlay && background?.overlayOpacity" class="poster-shade" :style="{ opacity: background.overlayOpacity }" />
     <template v-if="!visual">
       <div v-for="(block, i) in layout.blocks" :key="i" class="poster-channel-text" :style="{
+        ...textCss(overlay ? layer : {}, scale),
         left: layout.padding / width * 100 + '%', width: layout.contentWidth / width * 100 + '%', top: block.top / height * 100 + '%',
         fontSize: block.fontSize * scale / 19.2 + 'cqw', lineHeight: block.lineHeight / block.fontSize,
         fontWeight: block.fontWeight, opacity: block.opacity, textAlign: align,

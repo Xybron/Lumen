@@ -2,6 +2,7 @@
 import { computed, watch } from 'vue';
 import { sampleAnimation } from '@/lib/studio/animation';
 import { ensureScenePosterMedia, scenePosterMedia } from '@/lib/studio/scene-poster-media';
+import { textCss } from '@/lib/studio/text-style';
 import ChannelPoster from './ChannelPoster.vue';
 import type { Item } from '@/types';
 import type { SceneLayer, StudioScene, StudioSource } from '../../../../shared/production';
@@ -32,6 +33,7 @@ function styleFor(layer: SceneLayer) {
     left: layer.x + pose.x / 19.2 + '%', top: layer.y + pose.y / 10.8 + '%', width: layer.width + '%', height: layer.height + '%', opacity: layer.opacity * pose.opacity,
     transform: `rotate(${pose.rotation}deg) scale(${pose.scale})`, transformOrigin: 'center',
     background: layer.background, color: layer.color, fontSize: layer.fontSize / 19.2 + 'cqw', fontWeight: layer.fontWeight,
+    alignItems: layer.kind === 'text' && layer.verticalAlign === 'top' ? 'flex-start' : layer.kind === 'text' && layer.verticalAlign === 'bottom' ? 'flex-end' : 'center',
     textAlign: layer.align, justifyContent: layer.align === 'left' ? 'flex-start' : layer.align === 'right' ? 'flex-end' : 'center', borderRadius: layer.radius / 19.2 + 'cqw',
   };
 }
@@ -41,7 +43,7 @@ function styleFor(layer: SceneLayer) {
     <div v-for="layer in layers" :key="layer.id" class="poster-layer" :data-layer-id="layer.id" :style="styleFor(layer)">
       <img v-if="layer.mediaBackground && backgroundPoster(layer)" class="layer-media-background" :src="backgroundPoster(layer)" :style="{ objectFit: layer.mediaBackground.fit }" loading="lazy" decoding="async" draggable="false" alt="" />
       <div v-if="layer.mediaBackground?.dim" class="layer-media-dim" :style="{ opacity: layer.mediaBackground.dim }" />
-      <span v-if="layer.kind === 'text'">{{ layer.text }}</span>
+      <span v-if="layer.kind === 'text'" :style="textCss(layer)">{{ layer.text }}</span>
       <ChannelPoster v-else-if="channelFor(layer.sourceId)?.item" class="poster-channel" :item="channelFor(layer.sourceId)!.item!" :layer="layer" :overlay="channelFor(layer.sourceId)!.textChannel || layer.channelStyle === 'overlay'" :poster-for-media="posterForMedia" />
       <template v-else-if="channelFor(layer.sourceId)" />
       <img v-else-if="layer.sourceId && ['camera', 'screen'].includes(sourceFor(layer.sourceId)?.kind ?? '') && sourceStills?.[layer.sourceId]" class="scene-source-still" :data-source-id="layer.sourceId" :src="sourceStills[layer.sourceId]" :style="{ objectFit: layer.fit }" decoding="async" draggable="false" alt="" />

@@ -11,6 +11,7 @@ import LayerAnimationEditor from './LayerAnimationEditor.vue';
 import AnimationPresetLibrary from './AnimationPresetLibrary.vue';
 import StudioPropertyInput from './StudioPropertyInput.vue';
 import LyricsBackgroundPopover from './LyricsBackgroundPopover.vue';
+import StudioTypographyPanel from './StudioTypographyPanel.vue';
 import type { LayerAnimation, SceneLayer, StudioScene } from '../../../../shared/production';
 const studio = useStudioStore();
 const preview = useAnimationPreview();
@@ -55,7 +56,6 @@ function patch(value: Partial<SceneLayer>, identity?: string) {
   if (target) void studio.updateLayer(target.id, value, sceneId).catch(() => {});
 }
 function patchScene(value: Partial<StudioScene>, identity: string) { void studio.updateScene(value, identity.split(':')[0]).catch(() => {}); }
-function number(event: Event) { return Number((event.target as HTMLInputElement).value); }
 function text(event: Event) { return (event.target as HTMLInputElement).value; }
 function geometryValue(key: 'x' | 'y' | 'width' | 'height') { return layer.value ? Math.round(layerGeometryValue(layer.value[key], key, units.value) * 1000) / 1000 : 0; }
 function geometryInput(key: 'x' | 'y' | 'width' | 'height', input: string, identity: string) {
@@ -149,12 +149,7 @@ function previewAnimation() {
             <label v-if="layer.kind === 'source' && !textChannelLayer" class="studio-field">Image fit<select :value="layer.fit" @change="patch({ fit: text($event) as SceneLayer['fit'] })"><option value="cover">Fill frame (crop)</option><option value="contain">Fit inside frame</option></select></label>
           </details>
           <LyricsBackgroundPopover v-if="lyricsLayer" :key="scene.id+layer.id" :layer="layer" :scene-id="scene.id" />
-          <details v-if="layer.kind === 'text' || textChannelLayer || (channelLayer && layer.channelStyle === 'overlay')" class="inspector-group" open>
-            <summary><ChevronDown :size="12" /><span>Typography</span></summary>
-            <div class="field-grid"><label class="studio-field">Size<StudioPropertyInput type="number" min="12" max="300" :identity="fieldIdentity('fontSize')" :pending="!!studio.saving" :value="layer.fontSize" @commit="(value, identity) => patch({ fontSize: Number(value) }, identity)" /></label><label class="studio-field">Weight<select :value="layer.fontWeight" @change="patch({ fontWeight: number($event) })"><option :value="400">Regular</option><option :value="500">Medium</option><option :value="600">Semibold</option><option :value="700">Bold</option></select></label></div>
-            <label class="studio-field">Alignment<select :value="layer.align" @change="patch({ align: text($event) as SceneLayer['align'] })"><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
-            <label class="studio-field color-field">Text color<StudioPropertyInput type="color" live :identity="fieldIdentity('color')" :pending="!!studio.saving" :value="layer.color.slice(0, 7)" @commit="(value, identity) => colorInput('color', value, identity)" /><code>{{ layer.color }}</code></label>
-          </details>
+          <StudioTypographyPanel v-if="layer.kind === 'text' || textChannelLayer || (channelLayer && layer.channelStyle === 'overlay')" :key="scene.id+layer.id" :layer="layer" :scene-id="scene.id" />
           <details class="inspector-group" open>
             <summary><ChevronDown :size="12" /><span>Appearance</span></summary>
             <label class="studio-field">Opacity <span>{{ Math.round(layer.opacity * 100) }}%</span><StudioPropertyInput type="range" live min="0" max="1" step="0.01" :identity="fieldIdentity('opacity')" :pending="!!studio.saving" :value="layer.opacity" @commit="(value, identity) => patch({ opacity: Number(value) }, identity)" /></label>
@@ -194,6 +189,13 @@ function previewAnimation() {
 </template>
 
 <style scoped>
+.studio-inspector,.inspector-body,.inspector-fields,.studio-field { min-width: 0; max-width: 100%; }
+.inspector-group { min-width: 0; }
+.inspector-body { overflow-x: hidden; }
+.inspector-fields { margin: 0; padding: 0; border: 0; width: 100%; min-inline-size: 0; }
+.field-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.inspector-selection>div { min-width: 0; }
+.inspector-selection b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .inspector-placement { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 12px; }
 .inspector-placement .s-button { flex: 1; padding: 6px; font-size: 10px; white-space: nowrap; }
 .inspector-alignments { display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; padding: 2px 0 13px; }

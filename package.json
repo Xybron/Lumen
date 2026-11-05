@@ -54,6 +54,7 @@
     "test:lyrics:search": "npm run build && node backend/test/lyrics-search-browser.mjs",
     "test:lyrics:paste": "npm run build && node backend/test/song-paste-browser.mjs",
     "test:lyrics:background": "npm run build && node backend/test/lyrics-background-browser.mjs",
+    "test:lyrics:typography": "npm run build && node backend/test/lyrics-typography-browser.mjs",
     "test:presentation": "npm run build && node backend/test/presentation-design-browser.mjs",
     "test:channel-program": "npm run build && node backend/test/channel-program-browser.mjs",
     "test:channel-workflow": "npm run build && node backend/test/channel-workflow-browser.mjs",

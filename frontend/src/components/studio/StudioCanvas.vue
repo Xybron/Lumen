@@ -6,6 +6,9 @@ import ScenePoster from './ScenePoster.vue';
 import StudioMonitor from './StudioMonitor.vue';
 import LayerContextMenu from './LayerContextMenu.vue';
 import { useStudioStore } from '@/stores/studio';
+import { useContentStore } from '@/stores/content';
+import { useEnginesStore } from '@/stores/engines';
+import { subscribeTopics } from '@/lib/ws';
 import { useAnimationPreview } from '@/composables/useAnimationPreview';
 import { canvasSnapTargets, moveRect, resizeRect, type CanvasRect, type ResizeHandle, type SnapGuide } from '@/lib/studio/canvas-geometry';
 import type { SceneLayer, StudioScene, StudioSource } from '../../../../shared/production';
@@ -13,6 +16,7 @@ import type { SceneLayer, StudioScene, StudioSource } from '../../../../shared/p
 const props = defineProps<{ scene: StudioScene | null; sources: StudioSource[]; engineRunning: boolean }>();
 const emit = defineEmits<{ inspect: [] }>();
 const studio = useStudioStore();
+const content = useContentStore(), engines = useEnginesStore();
 const motion = useAnimationPreview();
 const isAnimationPreview = computed(() => motion.sceneId.value === props.scene?.id && motion.elapsedMs.value !== null);
 const frame = ref<HTMLElement | null>(null), previewReady = ref(false), menuOpen = ref(false);
@@ -43,6 +47,19 @@ const animationScene = computed(() => {
   if (!scene || !override || override.sceneId !== scene.id) return scene;
   return { ...scene, layers: scene.layers.map(layer => layer.id === override.layerId ? { ...layer, animation: override.animation } : layer) };
 });
+// Reuse the app's cue registry while the renderer is offline. Font and layout
+// edits need real lyric text, without starting playback, decoding media, or
+// publishing a cue merely to inspect its design.
+const channelIds = computed(() => {
+  const sourceIds = new Set(animationScene.value?.layers.filter(layer => layer.visible).map(layer => layer.sourceId));
+  return props.sources.filter(source => sourceIds.has(source.id) && source.kind === 'channel' && source.channelId).map(source => source.channelId!);
+});
+watch(() => channelIds.value.filter(id => !!engines.engineFor(id)), ids => subscribeTopics(ids), { immediate: true });
+const channels = computed(() => Object.fromEntries(channelIds.value.map(id => {
+  const engine = engines.engineFor(id);
+  return [id, { item: engine?.blanked.value ? undefined : engine?.current.value,
+    textChannel: ['scripture', 'lyrics'].includes(content.channels.find(channel => channel.id === id)?.kind ?? '') }];
+})));
 const layers = computed(() => props.scene?.layers.filter(layer => layer.visible) ?? []);
 const selectedLayer = computed(() => props.scene?.layers.find(layer => layer.id === studio.selectedLayerId) ?? null);
 const dimensions = computed(() => {
@@ -196,7 +213,7 @@ onBeforeUnmount(() => { cancel(); motion.stop(); motion.setOverride(null); });
 <template>
   <div ref="frame" class="monitor-frame preview-frame studio-canvas" tabindex="0" role="group" aria-label="Preview canvas"
     :class="{ 'is-interacting': !!interaction }" :style="{ '--canvas-handle-size': `${handleSize}px` }" @keydown="keydown" @pointermove="move" @pointerup="finish" @pointercancel="cancelPointer" @lostpointercapture="cancelPointer" @pointerdown.self="clearSelection">
-    <ScenePoster v-if="animationScene && (!previewReady || isAnimationPreview)" :scene="animationScene" :sources="sources"
+    <ScenePoster v-if="animationScene && (!previewReady || isAnimationPreview)" :scene="animationScene" :sources="sources" :channels="channels"
       :animation-time="isAnimationPreview ? motion.elapsedMs.value : null" :animation-layer-id="motion.layerId.value"
       :preview-media="isAnimationPreview" :stream-for-source="studio.sourceStream" :class="{ 'animation-preview': isAnimationPreview }" :data-animation-preview="isAnimationPreview ? '' : undefined" />
     <StudioMonitor output-id="preview" @ready="previewReady = $event" />

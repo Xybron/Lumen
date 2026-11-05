@@ -13,6 +13,7 @@ import { ProductionStore } from '../src/production-store.js';
 import { RecordingStore } from '../src/production-recordings.js';
 import { ProductionDataTransfer } from '../src/production-data-transfer.js';
 import { writeArchiveFile } from '../src/data-transfer-codec.js';
+import type { SceneLayer } from '../../shared/production.js';
 
 const none = { bibles: [] as string[], songs: [] as string[], presentations: [] as string[], media: [] as string[], settings: false };
 const sampleSong = (id: string, text = 'A portable lyric with a distinctive phrase') => ({ id, title: `Song ${id}`, author: 'Fixture author', copyright: 'Synthetic test text', sections: [{ id: 'v1', label: 'Verse 1', text }] });
@@ -192,12 +193,15 @@ test('v2 scenes include media, channel setlists and library dependencies; record
     await fs.writeFile(path.join(source.root, 'media/backgrounds/portable.png'), 'synthetic pixels');
     await fs.writeFile(path.join(source.root, 'media/backgrounds/motion.webm'), 'synthetic background motion');
     const studio = initialProduction(), layer = studio.scenes[0].layers[0];
+    const typography = { fontFamily: 'georgia', italic: true, underline: true, lineHeight: 1.5, letterSpacing: 3,
+      verticalAlign: 'bottom', textTransform: 'uppercase', textStroke: { color: '#14263b', width: 2 },
+      textShadow: { color: '#000000a0', blur: 8, offsetX: -2, offsetY: 4 } } satisfies Partial<SceneLayer>;
     studio.sources = [
       { id: 'channel_source', kind: 'channel', name: 'Lyrics', channelId: 'worship_channel', loop: false, audio: { volume: 1, muted: false, mode: 'always', delayMs: 0 } },
       { id: 'image_source', kind: 'image', name: 'Backdrop', url: 'media/backgrounds/portable.png', loop: false, audio: { volume: 1, muted: true, mode: 'follow', delayMs: 0 } },
     ];
     studio.scenes = [{ id: 'portable_scene', name: 'Portable scene', background: '#000000', layers: [
-      { ...layer, id: 'channel_layer', kind: 'source', sourceId: 'channel_source', mediaBackground: { kind: 'video', url: '/media/backgrounds/motion.webm', fit: 'cover', dim: .4, loop: true } },
+      { ...layer, ...typography, id: 'channel_layer', kind: 'source', sourceId: 'channel_source', mediaBackground: { kind: 'video', url: '/media/backgrounds/motion.webm', fit: 'cover', dim: .4, loop: true } },
       { ...layer, id: 'image_layer', kind: 'source', sourceId: 'image_source' },
     ] }]; studio.previewSceneId = 'portable_scene';
     await fs.writeFile(path.join(source.root, 'production.json'), JSON.stringify(studio));
@@ -230,6 +234,10 @@ test('v2 scenes include media, channel setlists and library dependencies; record
     assert.deepEqual(result.imported, { bibles: 1, songs: 1, presentations: 1, media: 2, scenes: 1, recordings: 1, setlists: 1, clips: 0, settings: 0 });
     const afterStudio = targetStore.get(); assert.deepEqual(afterStudio.program, beforeStudio.program); assert.deepEqual(afterStudio.outputs, beforeStudio.outputs);
     const newScene = afterStudio.scenes.find(scene => scene.name === 'Portable scene')!; assert.notEqual(newScene.id, 'portable_scene');
+    for (const key of Object.keys(typography) as (keyof typeof typography)[]) {
+      assert.deepEqual(newScene.layers[0][key], typography[key], `Portable typography: ${key}`);
+    }
+    assert.equal(newScene.layers[1].fontFamily, undefined, 'A neighbouring legacy layer retains its defaults');
     const importedBackground = newScene.layers[0].mediaBackground!;
     assert.notEqual(importedBackground.url, '/media/backgrounds/motion.webm');
     assert.deepEqual({ ...importedBackground, url: '' }, { kind: 'video', url: '', fit: 'cover', dim: .4, loop: true });

@@ -60,6 +60,18 @@ export interface LayerMediaBackground {
   loop: boolean;
 }
 
+export type StudioFontFamily = 'system' | 'arial' | 'verdana' | 'trebuchet' | 'georgia' | 'times' | 'courier';
+export interface LayerTextStroke {
+  color: string;
+  width: number; // pixels on the 1920 × 1080 design canvas; 0 disables the outline
+}
+export interface LayerTextShadow {
+  color: string;
+  blur: number;
+  offsetX: number;
+  offsetY: number;
+}
+
 export interface SceneLayer {
   id: string;
   name: string;
@@ -80,6 +92,17 @@ export interface SceneLayer {
   fontSize: number; // pixels on a 1920 × 1080 design canvas
   fontWeight: number;
   align: 'left' | 'center' | 'right';
+  // Optional to preserve the appearance of scenes saved before rich typography.
+  // Font keys resolve to the same fixed, local stacks in canvas and DOM previews.
+  fontFamily?: StudioFontFamily;
+  italic?: boolean;
+  underline?: boolean;
+  lineHeight?: number; // line-height multiplier; legacy rendering uses 1.24
+  letterSpacing?: number; // design pixels
+  verticalAlign?: 'top' | 'middle' | 'bottom';
+  textTransform?: 'none' | 'uppercase' | 'lowercase';
+  textStroke?: LayerTextStroke;
+  textShadow?: LayerTextShadow;
   radius: number;
   // Channel content can inherit a transparent, geometry-aware Studio overlay
   // rather than the channel's full slide background. Existing layers use slide.

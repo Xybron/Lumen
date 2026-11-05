@@ -4,6 +4,7 @@ import { SourceBank, type MediaInput, type SceneSourceBank } from './sources';
 import { blendScenes, sceneSourceWeights, transitionProgress, weightedScene, type SceneWeight } from './transition';
 import { AnimationRunTracker, sampleAnimation } from './animation';
 import { channelText, layoutChannelOverlay, type ChannelOverlayLayout } from './channel-overlay';
+import { drawPreparedText, measureStyledText, prepareTextLine, textFont, textMetricsKey, transformText, type PreparedTextLine, type TextOptions } from './text-style';
 import { blendProgramPictures, programPictureSources, withProgramInsert, type ProgramPicture } from './program-picture';
 import { outputAudioEnabled, sourceAudioWeight } from './audio-routing';
 import { BroadcastVideoSource, captureCanvasFrames } from './broadcast-capture';
@@ -22,34 +23,42 @@ function drawFitted(ctx: CanvasRenderingContext2D, media: CanvasImageSource, x: 
   try { ctx.drawImage(media, x + (w - mw * scale) / 2, y + (h - mh * scale) / 2, mw * scale, mh * scale); } catch { /* media is not ready */ }
 }
 
-function textLines(ctx: CanvasRenderingContext2D, text: string, width: number) {
+function textLines(ctx: CanvasRenderingContext2D, text: string, width: number, measure = (value: string) => ctx.measureText(value).width) {
   const lines: string[] = [];
   for (const paragraph of text.split('\n')) {
     let line = '';
     for (const word of paragraph.split(/\s+/)) {
       const next = line ? `${line} ${word}` : word;
-      if (line && ctx.measureText(next).width > width) { lines.push(line); line = word; } else line = next;
+      if (line && measure(next) > width) { lines.push(line); line = word; } else line = next;
     }
     lines.push(line);
   }
   return lines;
 }
 
-type TextStyle = Pick<SceneLayer, 'fontWeight' | 'fontSize' | 'color' | 'align' | 'text'>;
-let wrappedText = new WeakMap<TextStyle, { width: number; font: string; text: string; lines: string[] }>();
-function drawText(ctx: CanvasRenderingContext2D, style: TextStyle, w: number, h: number) {
-  const font = `${style.fontWeight} ${style.fontSize}px -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif`;
+type TextStyle = Pick<SceneLayer, 'fontWeight' | 'fontSize' | 'color' | 'align' | 'text'> & TextOptions;
+let wrappedText = new WeakMap<TextStyle, { width: number; font: string; text: string; lines: PreparedTextLine[] }>();
+function drawText(ctx: CanvasRenderingContext2D, style: TextStyle, w: number, h: number, bank?: SceneSourceBank) {
+  const font = textFont(style, style.fontSize, style.fontWeight), content = transformText(style.text, style);
   ctx.font = font;
-  ctx.fillStyle = style.color; ctx.textAlign = style.align; ctx.textBaseline = 'middle';
+  const metrics = font + textMetricsKey(style);
   let cached = wrappedText.get(style);
-  if (!cached || cached.width !== w || cached.font !== font || cached.text !== style.text) {
-    cached = { width: w, font, text: style.text, lines: textLines(ctx, style.text, Math.max(1, w - 16)) };
+  if (!cached || cached.width !== w || cached.font !== metrics || cached.text !== content) {
+    const measure = (value: string) => measureStyledText(ctx, value, style, style.fontSize, style.fontWeight);
+    cached = { width: w, font: metrics, text: content, lines: textLines(ctx, content, Math.max(1, w - 16), measure)
+      .map(line => prepareTextLine(ctx, line, style, style.fontSize, style.fontWeight)) };
     wrappedText.set(style, cached);
   }
-  const { lines } = cached, lineHeight = style.fontSize * 1.24;
+  const { lines } = cached, lineHeight = style.fontSize * (style.lineHeight ?? 1.24);
   const x = style.align === 'left' ? 8 : style.align === 'right' ? w - 8 : w / 2;
-  const top = Math.max(lineHeight / 2, (h - lines.length * lineHeight) / 2 + lineHeight / 2);
-  lines.forEach((line, i) => ctx.fillText(line, x, top + i * lineHeight));
+  const available = Math.max(0, h - lines.length * lineHeight);
+  const top = lineHeight / 2 + (style.verticalAlign === 'top' ? 0 : style.verticalAlign === 'bottom' ? available : available / 2);
+  const paint = (target: CanvasRenderingContext2D) => {
+    target.fillStyle = style.color; target.textBaseline = 'middle';
+    lines.forEach((line, i) => drawPreparedText(target, line, x, top + i * lineHeight, style.fontSize, style.fontWeight, style, style.align));
+  };
+  paintStyledText(ctx, bank, cached, style, w, h, paint,
+    { top: top - style.fontSize, bottom: top + Math.max(0, lines.length - 1) * lineHeight + style.fontSize });
 }
 
 // The source bank supplies a new Item when the channel content changes. Keep
@@ -59,6 +68,7 @@ let slideText = new WeakMap<Item, SlideText>();
 function fitSize(ctx: CanvasRenderingContext2D, text: string, width: number, height: number,
   size: number, weight: number, step: number) {
   while (size > 4) {
+    if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
     ctx.font = `${weight} ${size}px sans-serif`;
     if (textLines(ctx, text, width).length * size * 1.24 <= height) break;
     size -= step;
@@ -193,7 +203,7 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: SceneLayer, bank
     if (media) drawFitted(ctx, media, 0, 0, w, h, background.fit);
     if (background.dim > 0) { ctx.fillStyle = `rgba(0,0,0,${background.dim})`; ctx.fillRect(0, 0, w, h); }
   }
-  if (layer.kind === 'text') drawText(ctx, layer, w, h);
+  if (layer.kind === 'text') drawText(ctx, layer, w, h, bank);
   else if (layer.kind === 'source' && layer.sourceId) {
     if (channel) {
       if (item && styledText) drawChannelOverlay(ctx, item, layer, bank, input, w, h);
@@ -205,11 +215,50 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: SceneLayer, bank
   ctx.restore();
 }
 
-let overlayLayouts = new WeakMap<Item, Map<string, ChannelOverlayLayout>>();
+interface PaintedOverlayLayout extends ChannelOverlayLayout { prepared: PreparedTextLine[][] }
+let overlayLayouts = new WeakMap<Item, Map<string, PaintedOverlayLayout>>();
+let styledTextSurfaces = new WeakMap<SceneSourceBank, Map<string, { canvas: HTMLCanvasElement; usedAt: number }>>();
+let textLayoutIds = new WeakMap<object, number>(), nextTextLayoutId = 0;
+// Effects are rasterised once per text/geometry/style variant, not blurred on
+// every moving video frame. Per-bank storage is capped at four million pixels
+// (~16 MB), and old cues/layouts are evicted before new artwork is retained.
+function paintStyledText(ctx: CanvasRenderingContext2D, bank: SceneSourceBank | undefined, layout: object,
+  style: TextStyle | SceneLayer, w: number, h: number, paint: (target: CanvasRenderingContext2D) => void,
+  bounds: { top: number; bottom: number }) {
+  const spread = (style.textShadow?.blur ?? 0) * 2 + Math.abs(style.textShadow?.offsetY ?? 0) + (style.textStroke?.width ?? 0) + 2;
+  const top = Math.max(0, Math.floor(bounds.top - spread)), bottom = Math.min(Math.ceil(h), Math.ceil(bounds.bottom + spread));
+  const pixels = Math.ceil(w) * Math.max(1, bottom - top);
+  if (!bank || !style.textStroke?.width && !style.textShadow || pixels > 4_000_000) { paint(ctx); return; }
+  let cache = styledTextSurfaces.get(bank);
+  if (!cache) { cache = new Map(); styledTextSurfaces.set(bank, cache); }
+  let layoutId = textLayoutIds.get(layout);
+  if (layoutId === undefined) { layoutId = ++nextTextLayoutId; textLayoutIds.set(layout, layoutId); }
+  const key = JSON.stringify([layoutId, w, h, top, bottom, style.color, style.align, style.underline, style.textStroke, style.textShadow]);
+  const now = performance.now();
+  let surface = cache.get(key);
+  if (!surface) {
+    let used = [...cache.values()].reduce((sum, value) => sum + value.canvas.width * value.canvas.height, 0);
+    while (cache.size && (used + pixels > 4_000_000 || cache.size >= 12)) {
+      const oldest = cache.keys().next().value!;
+      const evicted = cache.get(oldest)!;
+      // Several active outputs must not evict each other's artwork every
+      // frame. Over-budget variants paint directly until a slot goes idle.
+      if (now - evicted.usedAt < 100) { paint(ctx); return; }
+      used -= evicted.canvas.width * evicted.canvas.height; cache.delete(oldest);
+    }
+    const canvas = document.createElement('canvas'); canvas.width = Math.ceil(w); canvas.height = Math.max(1, bottom - top);
+    const target = canvas.getContext('2d');
+    if (!target) { paint(ctx); return; }
+    target.translate(0, -top); paint(target); surface = { canvas, usedAt: now }; cache.set(key, surface);
+  } else { surface.usedAt = now; cache.delete(key); cache.set(key, surface); }
+  ctx.drawImage(surface.canvas, 0, top);
+}
 function clearTextLayouts() {
   wrappedText = new WeakMap();
   slideText = new WeakMap();
   overlayLayouts = new WeakMap();
+  styledTextSurfaces = new WeakMap();
+  textLayoutIds = new WeakMap();
 }
 function drawChannelOverlay(ctx: CanvasRenderingContext2D, item: Item, layer: SceneLayer, bank: SceneSourceBank,
   input: MediaInput, w: number, h: number) {
@@ -219,24 +268,26 @@ function drawChannelOverlay(ctx: CanvasRenderingContext2D, item: Item, layer: Sc
   // measured layout rather than wrapping and measuring it 30 times a second.
   let layouts = overlayLayouts.get(item);
   if (!layouts) { layouts = new Map(); overlayLayouts.set(item, layouts); }
-  const key = `${w}:${h}:${layer.fontSize}:${layer.fontWeight}`;
+  const key = `${w}:${h}:${layer.fontSize}:${layer.fontWeight}:${textMetricsKey(layer)}`;
   let layout = layouts.get(key);
   if (!layout) {
-    layout = layoutChannelOverlay(item, w, h, layer.fontSize, layer.fontWeight, (text, size, weight) => {
-      ctx.font = `${weight} ${size}px -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif`;
-      return ctx.measureText(text).width;
-    });
+    const measured = layoutChannelOverlay(item, w, h, layer.fontSize, layer.fontWeight,
+      (text, size, weight) => measureStyledText(ctx, text, layer, size, weight), layer);
+    layout = { ...measured, prepared: measured.blocks.map(block => block.lines.map(line => prepareTextLine(ctx, line, layer, block.fontSize, block.fontWeight))) };
     if (layouts.size >= 32) layouts.clear();
     layouts.set(key, layout);
   }
-  ctx.fillStyle = layer.color; ctx.textAlign = layer.align; ctx.textBaseline = 'top';
   const x = layer.align === 'left' ? layout.padding : layer.align === 'right' ? w - layout.padding : w / 2;
-  for (const block of layout.blocks) {
-    ctx.save(); ctx.globalAlpha *= block.opacity;
-    ctx.font = `${block.fontWeight} ${block.fontSize}px -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif`;
-    block.lines.forEach((line, index) => ctx.fillText(line, x, block.top + index * block.lineHeight));
-    ctx.restore();
-  }
+  const current = layout;
+  paintStyledText(ctx, bank, current, layer, w, h, target => {
+    target.fillStyle = layer.color; target.textBaseline = 'top';
+    current.blocks.forEach((block, blockIndex) => {
+      target.save(); target.globalAlpha *= block.opacity;
+      current.prepared[blockIndex].forEach((line, index) => drawPreparedText(target, line, x, block.top + index * block.lineHeight, block.fontSize, block.fontWeight, layer, layer.align));
+      target.restore();
+    });
+  }, { top: current.blocks[0]?.top ?? 0,
+    bottom: current.blocks.reduce((last, block) => Math.max(last, block.top + block.lines.length * block.lineHeight + block.fontSize), 0) });
 }
 
 // This is a visual insert into the final Program picture, not a replacement

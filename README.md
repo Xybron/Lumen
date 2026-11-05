@@ -349,6 +349,10 @@ Scripture and Lyrics supply live text, not designs or Program routes:
    Cameras and other content can still be separate layers below the text.
    Dedicated Scripture/Lyrics layers always use Studio styling,
    including layers saved with the older slide-design mode.
+   **Typography** offers font family, size, weight, italic, underline, text case,
+   horizontal/vertical alignment, line height and letter spacing. Expand
+   **Text effects** for an outline or shadow. These settings also work on text
+   layers, stay in Preview until a Take, and persist in saved scenes and exports.
 4. **Cut/Fade** that scene to Program, or use its configured scene shortcut
    directly from the channel workspace. Publishing itself never switches scenes.
 
@@ -891,6 +895,7 @@ npm run test:scripture:search # build + short references, typo tolerance, book c
 npm run test:scripture:focus # build + Scripture entry autofocus, navigation and focus-stealing safeguards
 npm run test:lyrics:search # build + title/lyric fragments, typo matching, exact section preparation and keyboard/live safeguards
 npm run test:lyrics:background # build + media popover, scene isolation, persistence and upload cancellation
+npm run test:lyrics:typography # build + long filename layout, text styling, persistence and Program isolation
 npm run test:presentation # build + presentation navigation, creation and isolated editing destinations
 npm run test:channel-workflow # build + channel-only publication, real text output, camera and scene isolation
 npm run test:studio:audio # build + persistent audio, ICE/RTP output connections, engine reconnect and recording regression
