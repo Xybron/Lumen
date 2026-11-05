@@ -59,6 +59,9 @@ export async function createWorship(relay:RelayHandle) {
     next();
   }
   const router=Router();
+  router.get('/worship/scripture-pins',requireSession,route((_req,res)=>res.json(library.scripturePins())));
+  router.post('/worship/scripture-pins',libraryWriter,route((req,res)=>res.json(library.pinScripture(req.body))));
+  router.delete('/worship/scripture-pins/:id',libraryWriter,route((req,res)=>res.json(library.unpinScripture(z.string().uuid().parse(req.params.id)))));
   router.get('/worship/versions',requireSession,(_req,res)=>res.json(library.versions()));
   router.post('/worship/versions/import',libraryWriter,json({limit:'20mb'}),route((req,res)=>res.json(library.importBible(req.body))));
   router.get('/worship/scripture',requireSession,route((req,res)=>res.json(library.searchScripture(z.string().max(80).parse(req.query.version??'KJV'),z.string().max(500).parse(req.query.q??'')))));

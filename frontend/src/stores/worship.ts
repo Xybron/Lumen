@@ -6,11 +6,20 @@ import { worshipRequest, WorshipRequestError } from '@/lib/worship/api';
 import { captureListening,listeningInputError,type ListeningInputInfo,type ListeningProcessing } from '@/lib/worship/audio';
 import { useIdentityStore } from './identity';
 import { usePresenceStore } from './presence';
-import type { BibleVersion, WorshipWorkspace, WorshipCommand, CueSelection, LiveCue, ListeningStatus, ListeningSession, ListeningResult } from '../../../shared/worship';
+import type { BibleVersion, WorshipWorkspace, WorshipCommand, CueSelection, LiveCue, ListeningStatus, ListeningSession, ListeningResult, ScripturePin, ScriptureSelection } from '../../../shared/worship';
 
 interface ListeningView { session:ListeningSession|null; starting:boolean; busy:boolean; level:number; peak:number; clipping:boolean; inputInfo:ListeningInputInfo|null; result:ListeningResult|null; error:string }
 interface ListeningControls { mode:'assisted'|'automatic'; commands:boolean }
 export const useWorshipStore=defineStore('worship',()=>{
+  const scripturePins=ref<ScripturePin[]>([]),pinsBusy=ref(false);
+  let pinsRequest=0;
+  async function refreshPins(){if(pinsBusy.value)return;const request=++pinsRequest;const pins=await worshipRequest<ScripturePin[]>('/scripture-pins');if(request===pinsRequest)scripturePins.value=pins;}
+  async function savePin(selection:ScriptureSelection,id?:string){
+    if(pinsBusy.value)return;
+    pinsBusy.value=true;const request=++pinsRequest;
+    try{const pins=await worshipRequest<ScripturePin[]>(id?`/scripture-pins/${id}`:'/scripture-pins',{method:id?'DELETE':'POST',...(id?{}:{body:JSON.stringify(selection)})});if(request===pinsRequest)scripturePins.value=pins;}
+    finally{pinsBusy.value=false;}
+  }
   const workspaces=reactive<Record<string,WorshipWorkspace>>({}),drafts=reactive<Record<string,LiveCue|null>>({});
   const versions=ref<BibleVersion[]>([]),aiStatus=ref<ListeningStatus|null>(null),saving=reactive<Record<string,boolean>>({}),preparing=reactive<Record<string,boolean>>({});
   const listening=reactive<Record<string,ListeningView>>({});
@@ -113,5 +122,5 @@ export const useWorshipStore=defineStore('worship',()=>{
     }catch(error){stopCapture?.();if(captures.get(id)===capture)captures.delete(id);if(abort.signal.aborted)return;view.starting=false;view.error=listeningInputError(error);toast.error(view.error);}
   }
   window.addEventListener('beforeunload',()=>{for(const capture of captures.values())capture.stop();});
-  return{workspaces,drafts,versions,aiStatus,saving,preparing,listening,listeningControlsFor,load,refreshVersions,refreshAi,selectListeningModel,prepare,command,take,startListening,stopListening};
+  return{scripturePins,pinsBusy,refreshPins,savePin,workspaces,drafts,versions,aiStatus,saving,preparing,listening,listeningControlsFor,load,refreshVersions,refreshAi,selectListeningModel,prepare,command,take,startListening,stopListening};
 });

@@ -55,3 +55,5 @@ export interface ListeningResult {
   decision: ListeningDecision;
   suggestedQuery?: string;
 }
+
+export interface ScripturePin { id: string; selection: ScriptureSelection; reference: string; text: string }

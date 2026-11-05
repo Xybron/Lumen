@@ -8,7 +8,7 @@ import { matchScriptureQuote } from './scripture-quote-match.js';
 import { searchLyrics, invalidateLyricsSearch, ensureLyricsSearchIndex, updateLyricsSearchIndex } from './lyrics-search.js';
 import { decodeSong, SongSchema } from './worship-song.js';
 import { ProductionError } from './production-store.js';
-import type { BibleVersion, Verse, Song, CueSelection, LiveCue, WorshipWorkspace, WorshipCommand, ScriptureSelection, ScriptureSearchResult, LyricsSearchHit } from '../../shared/worship.js';
+import type { BibleVersion, Verse, Song, CueSelection, LiveCue, WorshipWorkspace, WorshipCommand, ScriptureSelection, ScriptureSearchResult, LyricsSearchHit, ScripturePin } from '../../shared/worship.js';
 
 const key = z.string().regex(/^[\w-]{1,80}$/);
 const importedVerse = z.object({ book: z.number().int().min(1).max(66), chapter: z.number().int().min(1).max(150), verse: z.number().int().min(1).max(200), endVerse: z.number().int().min(1).max(200).optional(), text: z.string().trim().min(1).max(12000) }).superRefine((value, ctx) => {
@@ -60,6 +60,7 @@ export class WorshipLibrary {
       CREATE VIRTUAL TABLE IF NOT EXISTS songs_fts USING fts5(id UNINDEXED,title,body,prefix='2 3 4');
       CREATE VIRTUAL TABLE IF NOT EXISTS songs_vocab USING fts5vocab(songs_fts,'row');
       CREATE TABLE IF NOT EXISTS worship_workspaces (channelId TEXT PRIMARY KEY, state TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS scripture_pins (id TEXT PRIMARY KEY, selection TEXT NOT NULL UNIQUE, reference TEXT NOT NULL, text TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS worship_preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     `);
     this.db.transaction(() => {
@@ -67,6 +68,21 @@ export class WorshipLibrary {
       if (!(this.db.pragma('table_info(songs)') as { name: string }[]).some(column => column.name === 'showSectionLabels')) this.db.exec('ALTER TABLE songs ADD COLUMN showSectionLabels INTEGER NOT NULL DEFAULT 1');
     })();
     ensureLyricsSearchIndex(this.db);
+  }
+  scripturePins(): ScripturePin[] {
+    return (this.db.prepare('SELECT * FROM scripture_pins ORDER BY rowid').all() as {id:string;selection:string;reference:string;text:string}[]).map(row=>({...row,selection:JSON.parse(row.selection)}));
+  }
+  pinScripture(raw: unknown): ScripturePin[] {
+    const parsed=SelectionSchema.parse(raw);
+    if(parsed.kind!=='scripture')throw new ProductionError(422,'Choose a Scripture passage to pin.');
+    const cue=this.cue(parsed), selection=cue.selection as ScriptureSelection;
+    const normalized={kind:'scripture',versionId:selection.versionId,book:selection.book,chapter:selection.chapter,verse:selection.verse,...(selection.endVerse && selection.endVerse>selection.verse?{endVerse:selection.endVerse}:{})};
+    this.db.prepare('INSERT OR IGNORE INTO scripture_pins(id,selection,reference,text) VALUES(?,?,?,?)').run(randomUUID(),JSON.stringify(normalized),cue.reference.replace(` · ${selection.versionId}`,''),cue.text);
+    return this.scripturePins();
+  }
+  unpinScripture(id: string): ScripturePin[] {
+    this.db.prepare('DELETE FROM scripture_pins WHERE id=?').run(id);
+    return this.scripturePins();
   }
   versions(): BibleVersion[] {
     const installed = this.db.prepare('SELECT b.*,coalesce(sum(coalesce(v.endVerse,v.verse)-v.verse+1),0) AS verseCount FROM bible_versions b LEFT JOIN verses v ON v.versionId=b.id GROUP BY b.id').all() as Omit<BibleVersion, 'installed'>[];

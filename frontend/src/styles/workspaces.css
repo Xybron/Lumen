@@ -452,3 +452,19 @@
   .w-setlist-content{flex:none;min-height:0}
   .w-setlist-content>.w-setlist-list{flex:none;max-height:240px}
 }
+
+/* Saved Scripture passages share the search panel, leaving Preview in place. */
+.w-passage-tabs{display:flex;gap:6px;padding:0 18px 12px;flex-shrink:0}
+.w-passage-tabs [aria-pressed="true"]{background:var(--surface-2);color:var(--accent)}
+.w-passage-tabs span{opacity:.7}
+.w-pinned-passages{flex:1;min-height:0;overflow:auto;padding:0 18px 18px}
+.w-pinned-row,.w-scripture-result-row{display:flex;align-items:center;gap:6px}
+.w-pinned-row>.w-verse-result,.w-scripture-result-row>.w-verse-result{flex:1;min-width:0}
+.w-pinned-row{border-bottom:1px solid var(--border-hair)}
+.w-pinned-row .w-verse-result p{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.w-pins-saved{font-size:12px;opacity:.65;margin-top:16px}
+.w-pinned-row>.w-icon,.w-scripture-result-row>.w-icon{flex-shrink:0}
+
+.w-pinned-row .w-verse-result>span:first-child{padding-right:0;flex-wrap:wrap}
+.w-scripture-result-row>.w-icon[aria-pressed="true"]{color:var(--accent)}
+@media(pointer:coarse){.w-passage-tabs .w-button,.w-pinned-row>.w-icon,.w-scripture-result-row>.w-icon{min-width:44px;min-height:44px}}
