@@ -129,13 +129,14 @@ test('Multiview inspects channel video/images without activating always-audio or
   let audioNodes = 0;
   const bank = Object.create(SourceBank.prototype);
   bank.audio = { createMediaElementSource() { audioNodes++; throw new Error('Multiview must not create audio nodes'); } };
-  bank.inputs = new Map(); bank.images = new Map(); bank.channelStates = new Map();
+  bank.inputs = new Map(); bank.images = new Map(); bank.channelStates = new Map(); bank.channelClocks = new Map();
   bank.multiviewVideos = new Map(); bank.multiviewInputs = new Map(); bank.multiviewBank = null;
   bank.content = {
+    settings: { countdownAtMs: 10000, warningAtMs: 30000 },
     channels: [{ id: 'slides', kind: 'slides', playlistId: 'service' }],
     playlists: [{ id: 'service', items: [
-      { id: 'film', type: 'video', background: { kind: 'video', src: 'media/backgrounds/current.mp4' } },
-      { id: 'art', type: 'image', background: { kind: 'image', src: 'media/backgrounds/current.png' } },
+      { id: 'film', type: 'video', durationMs: 0, background: { kind: 'video', src: 'media/backgrounds/current.mp4' } },
+      { id: 'art', type: 'image', durationMs: 0, background: { kind: 'image', src: 'media/backgrounds/current.png' } },
     ] }],
   };
   bank.channelStates.set('slides', { playlistId: 'service', index: 0 });

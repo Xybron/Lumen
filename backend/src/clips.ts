@@ -78,13 +78,17 @@ export interface ClipTransferSession {
   assetDir: string;
   exportsDir: string;
   downloads: Set<string>;
+  activeExportIds?: Set<string>;
+  withAssetDeletion?<T>(id: string, operation: () => Promise<T>): Promise<T>;
   replaceSync(data: ClipIndex, assets: SavedAsset[]): void;
 }
 export interface ClipTransferAccess {
-  snapshot(): { data: ClipIndex; assets: SavedAsset[] };
+  snapshot(): { data: ClipIndex; assets: SavedAsset[]; activeExportIds?: string[]; downloads?: string[] };
   resolveAsset(id: string): string;
   resolveExport(id: string): string;
   withLock<T>(operation: (session: ClipTransferSession) => Promise<T>): Promise<T>;
+  /** Serialize media metadata without interrupting an unrelated active export. */
+  withMediaLock?<T>(operation: (session: ClipTransferSession) => Promise<T>): Promise<T>;
 }
 
 interface ActiveWork { kind: 'poster' | 'export' | 'preview'; id: string; process: MediaProcess | null; reason: 'live' | 'cancel' | 'shutdown' | null; done: Promise<void> }
@@ -787,9 +791,22 @@ export async function createClips(options: { dir: string; recordings: RecordingS
     await assets.close();
   }
   const transfer: ClipTransferAccess = {
-    snapshot: () => ({ data: structuredClone(data), assets: assets.list().map(asset => structuredClone(assets.resolve(asset.id).asset)) }),
+    snapshot: () => ({ data: structuredClone(data), assets: assets.list().map(asset => structuredClone(assets.resolve(asset.id).asset)),
+      activeExportIds: active?.kind === 'export' ? [active.id] : [], downloads: [...downloads.keys()] }),
     resolveAsset: id => assets.resolve(id).path,
     resolveExport: id => artifactPath(requireExport(id)),
+    withMediaLock<T>(operation: (session: ClipTransferSession) => Promise<T>): Promise<T> {
+      return serial(() => {
+        if (closed) throw new ClipError(503, 'Clips is shutting down. Please retry shortly.');
+        return assets.withTransferLock(assetSession => operation({
+          data: structuredClone(data), assets: assetSession.assets, file: indexPath,
+          assetFile: assetSession.file, assetDir: assetSession.dir, exportsDir,
+          downloads: new Set(downloads.keys()), activeExportIds: new Set(active?.kind === 'export' ? [active.id] : []),
+          withAssetDeletion: (id, operation) => previews.withSourceDeletion({ kind: 'asset', id }, operation),
+          replaceSync: (next, nextAssets) => { data = structuredClone(next); assetSession.replaceSync(nextAssets); },
+        }));
+      });
+    },
     async withLock<T>(operation: (session: ClipTransferSession) => Promise<T>): Promise<T> {
       transferHolds++;
       try {
@@ -799,7 +816,8 @@ export async function createClips(options: { dir: string; recordings: RecordingS
         return await serial(() => assets.withTransferLock(assetSession => operation({
           data: structuredClone(data), assets: assetSession.assets, file: indexPath,
           assetFile: assetSession.file, assetDir: assetSession.dir, exportsDir,
-          downloads: new Set(downloads.keys()),
+          downloads: new Set(downloads.keys()), activeExportIds: new Set(active?.kind === 'export' ? [active.id] : []),
+          withAssetDeletion: (id, operation) => previews.withSourceDeletion({ kind: 'asset', id }, operation),
           replaceSync: (next, nextAssets) => { data = structuredClone(next); assetSession.replaceSync(nextAssets); },
         })));
       } finally { transferHolds--; }

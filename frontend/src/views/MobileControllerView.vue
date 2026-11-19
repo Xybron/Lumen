@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { LoadingSkeleton, Skeleton, SkeletonIndicator } from '@/components/ui/skeleton';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { Aperture, ArrowRightLeft, BookOpen, Check, ChevronLeft, ChevronRight, Circle, Layers, Link2, LoaderCircle, LockKeyhole, LogOut, Mic, Music2, Radio, Search, ShieldCheck, SlidersHorizontal, Volume2, VolumeX, Wifi, WifiOff } from 'lucide-vue-next';
+import { Aperture, ArrowRightLeft, BookOpen, Check, ChevronLeft, ChevronRight, Circle, Layers, Link2, LockKeyhole, LogOut, Mic, Music2, Radio, Search, ShieldCheck, SlidersHorizontal, Volume2, VolumeX, Wifi, WifiOff } from 'lucide-vue-next';
 import { useMobileController } from '@/lib/mobile/controller';
 import { useConfirmation } from '@/composables/useConfirmation';
 import MobileScenePoster from '@/components/mobile/MobileScenePoster.vue';
@@ -76,10 +77,16 @@ async function setVolume() {
 <template>
   <div class="mobile-controller" data-testid="mobile-controller">
     <header class="mobile-header"><div class="mobile-brand"><Aperture :size="25" /><b>lumen</b><span>Remote</span></div><span class="mobile-connection" :class="{ connected: fresh, disconnected: !fresh }" role="status"><Wifi v-if="fresh" :size="14" /><WifiOff v-else :size="14" />{{ connection }}</span></header>
-    <main v-if="loading && !session" class="mobile-pair-screen"><LoaderCircle :size="28" class="mobile-spin" /><h1>Connecting to your station…</h1><p>Live production continues on the main computer.</p></main>
+    <LoadingSkeleton v-if="loading && !session" class="mobile-pair-screen mobile-connection-skeleton" label="Connecting to your station">
+      <Skeleton :width="58" :height="58" :radius="15" /><Skeleton width="45%" :height="10" />
+      <div class="mobile-skeleton-lines" aria-hidden="true"><Skeleton width="78%" :height="29" /><Skeleton width="60%" :height="29" /></div>
+      <div class="mobile-skeleton-lines" aria-hidden="true"><Skeleton width="100%" :height="11" /><Skeleton width="90%" :height="11" /><Skeleton width="68%" :height="11" /></div>
+      <div v-for="n in 2" :key="n" class="mobile-skeleton-field" aria-hidden="true"><Skeleton width="34%" :height="10" /><Skeleton :height="48" :radius="8" /></div>
+      <Skeleton :height="48" :radius="9" />
+    </LoadingSkeleton>
     <main v-else-if="!session?.paired" class="mobile-pair-screen">
       <div class="mobile-pair-icon"><LockKeyhole :size="28" /></div><span class="mobile-eyebrow">Secure station access</span><h1>Your station.<br />Within reach.</h1><p>Pair this phone from <b>Studio → Mobile control</b>. Your station keeps rendering, recording and streaming.</p>
-      <form class="mobile-pair-form" data-mobile-private @submit.prevent="pair"><label>Device name<input v-model="deviceName" name="deviceName" autocomplete="off" maxlength="60" placeholder="e.g. Scripture operator’s phone" /></label><label>{{ pairingFromLink ? 'Pairing code from your link' : 'One-time pairing code' }}<input v-model="code" name="code" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="160" required placeholder="Paste your pairing code" data-team-private /></label><p v-if="error" class="mobile-error" role="alert">{{ error }}</p><button class="mobile-button primary" :disabled="busy || !code.trim()"><LoaderCircle v-if="busy" :size="17" class="mobile-spin" /><Link2 v-else :size="17" />Pair this phone</button></form>
+      <form class="mobile-pair-form" data-mobile-private @submit.prevent="pair"><label>Device name<input v-model="deviceName" name="deviceName" autocomplete="off" maxlength="60" placeholder="e.g. Scripture operator’s phone" /></label><label>{{ pairingFromLink ? 'Pairing code from your link' : 'One-time pairing code' }}<input v-model="code" name="code" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="160" required placeholder="Paste your pairing code" data-team-private /></label><p v-if="error" class="mobile-error" role="alert">{{ error }}</p><button class="mobile-button primary" :disabled="busy || !code.trim()"><SkeletonIndicator v-if="busy" /><Link2 v-else :size="17" />Pair this phone</button></form>
       <small class="mobile-privacy"><ShieldCheck :size="15" />No stream keys or station passwords are shared.</small>
     </main>
     <template v-else>
@@ -111,9 +118,10 @@ async function setVolume() {
               <div class="mobile-channel-step"><button class="mobile-button compact" :disabled="!canChannel || !channel.live" @click="controller.command({ type: 'channel-step', channelId: channel.id, direction: -1 })"><ChevronLeft :size="17" />Previous</button><button class="mobile-button compact" :disabled="!canChannel" @click="blank"><VolumeX v-if="channel.blanked" :size="16" />{{ channel.blanked ? 'Show' : 'Hide' }}</button><button class="mobile-button compact" :disabled="!canChannel || !channel.live" @click="controller.command({ type: 'channel-step', channelId: channel.id, direction: 1 })">Next<ChevronRight :size="17" /></button></div>
             </div>
             <template v-if="['scripture', 'lyrics'].includes(channel.kind)">
-              <label class="mobile-search"><Search :size="19" /><input v-model="query" :placeholder="channel.kind === 'scripture' ? 'jn3 16, jer20 11, or a few words…' : 'Song title or a few remembered lyrics…'" :disabled="!fresh || !permissions?.channels" aria-label="Search channel content" maxlength="500" autocomplete="off" autocapitalize="off" /><LoaderCircle v-if="searching" :size="17" class="mobile-spin" /></label>
+              <label class="mobile-search"><Search :size="19" /><input v-model="query" :placeholder="channel.kind === 'scripture' ? 'jn3 16, jer20 11, or a few words…' : 'Song title or a few remembered lyrics…'" :disabled="!fresh || !permissions?.channels" aria-label="Search channel content" maxlength="500" autocomplete="off" autocapitalize="off" /><SkeletonIndicator v-if="searching" /></label>
               <p v-if="searchError" class="mobile-error" role="alert">{{ searchError }}</p>
-              <div class="mobile-search-results"><button v-for="(result, index) in results" :key="index" class="mobile-result" :class="{ prepared: prepared === result }" @click="prepared = result"><b>{{ result.title }}<Check v-if="prepared === result" :size="15" /></b><p>{{ result.text }}</p><small>Tap to prepare</small></button><p v-if="query.trim() && !searching && !results.length && !searchError" class="mobile-empty">No matches. Try a shorter title, reference or phrase.</p></div>
+              <LoadingSkeleton v-if="searching" class="mobile-search-results" label="Searching channel content"><div v-for="n in 3" :key="n" class="mobile-result mobile-result-skeleton" aria-hidden="true"><Skeleton :width="n % 2 ? '42%' : '58%'" :height="13" /><Skeleton width="96%" :height="11" /><Skeleton width="78%" :height="11" /><Skeleton width="28%" :height="9" /></div></LoadingSkeleton>
+              <div v-else class="mobile-search-results"><button v-for="(result, index) in results" :key="index" class="mobile-result" :class="{ prepared: prepared === result }" @click="prepared = result"><b>{{ result.title }}<Check v-if="prepared === result" :size="15" /></b><p>{{ result.text }}</p><small>Tap to prepare</small></button><p v-if="query.trim() && !searching && !results.length && !searchError" class="mobile-empty">No matches. Try a shorter title, reference or phrase.</p></div>
             </template>
             <div v-else class="mobile-search-results">
               <button v-for="item in channel.items" :key="item.id" class="mobile-result" @click="prepared = { title: item.title, text: item.text, selection: { kind: 'presentation', index: item.index } }"><b>{{ item.index + 1 }}. {{ item.title || 'Slide' }}</b><p>{{ item.text }}</p><small>Tap to prepare</small></button>

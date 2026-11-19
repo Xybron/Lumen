@@ -34,7 +34,7 @@ for (const key of Object.keys(environment)) if (/^(?:LUMEN_|VITE_|SUPABASE_|POWE
 Object.assign(environment, { HOST: '127.0.0.1', PORT: String(port), NODE_ENV: 'test', LUMEN_DATA_DIR: directory });
 await fs.mkdir(path.join(directory, 'media', 'music'), { recursive: true });
 execFileSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000', '-t', '12', '-c:a', 'pcm_s16le', path.join(directory, 'media', 'music', 'main.wav')]);
-let browser, page, request, server, logs = '', stage = 'startup';
+let browser, page, request, server, logs = '', stage = 'startup', nativeFullscreenAvailable = false;
 const errors = [], requestedUrls = [];
 const check = label => { checks.push(label); console.log(`PASS: ${label}`); };
 async function until(fn, label, timeout = 30000) {
@@ -64,6 +64,23 @@ try {
   for (const stream of [server.stdout, server.stderr]) stream.on('data', bytes => { if (logs.length < 32000) logs += bytes.toString(); });
   await until(async () => (await fetch(`${base}/api/studio`, { signal: AbortSignal.timeout(1000) })).ok, 'isolated backend');
   browser = await chromium.launch({ executablePath: process.env.LUMEN_CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
+  // Some managed Chromium environments reject fullscreen even for an ordinary
+  // top-level page with a real click. Probe that capability independently of
+  // Lumen so the receiver must either enter fullscreen or show its honest hint.
+  const capability = await browser.newPage();
+  await capability.setContent('<button type="button">Fullscreen capability</button>');
+  await capability.evaluate(() => {
+    document.querySelector('button').onclick = async () => {
+      try { await document.body.requestFullscreen({ navigationUI: 'hide' }); window.__fullscreenCapability = { available: !!document.fullscreenElement }; }
+      catch (error) { window.__fullscreenCapability = { available: false, error: error.message }; }
+    };
+  });
+  await capability.getByRole('button', { name: 'Fullscreen capability' }).click();
+  await until(() => capability.evaluate(() => !!window.__fullscreenCapability), 'independent fullscreen capability');
+  const fullscreenCapability = await capability.evaluate(() => window.__fullscreenCapability);
+  nativeFullscreenAvailable = fullscreenCapability.available;
+  if (!nativeFullscreenAvailable) assert.equal(fullscreenCapability.error, 'not granted', 'Only a verified browser permission denial takes the fallback path');
+  await capability.close();
   const operator = await browser.newContext({ viewport: { width: 1512, height: 982 } }); request = operator.request;
   await operator.addInitScript(() => {
     window.__displayCalls = 0; window.__displayOpens = [];
@@ -92,8 +109,9 @@ try {
   const routing = value => JSON.stringify({ scenes: value.scenes, sources: value.sources, main: value.mainAudioSourceId, masterMuted: value.masterMuted, masterVolume: value.masterVolume, outputs: value.outputs });
   const settingsBefore = routing(await get());
   stage = 'create Program link';
-  await page.getByRole('button', { name: 'Program links', exact: true }).click();
-  let dialog = page.getByRole('dialog', { name: 'Program output', exact: true });
+  await page.getByRole('button', { name: 'Open Outputs', exact: true }).click();
+  let dialog = page.getByRole('dialog', { name: 'Outputs', exact: true });
+  await dialog.getByRole('button', { name: 'Open Lumen Share', exact: true }).click();
   await dialog.getByRole('button', { name: 'Create output link', exact: true }).click();
   let capabilityUrl = remember(await dialog.getByLabel('View-only link', { exact: true }).inputValue());
   assert.equal(new URL(capabilityUrl).port, String(gatewayPort));
@@ -130,9 +148,9 @@ try {
   await viewerContext.close();
   check('Revoking disconnects active viewers, rejects the former capability and creates a different working replacement');
   stage = 'connected display fixture';
-  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
-  await page.getByRole('button', { name: 'Set up Auditorium display', exact: true }).click();
-  dialog = page.getByRole('dialog', { name: 'Auditorium output', exact: true });
+  await dialog.getByRole('button', { name: 'All outputs', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Set up Auditorium display', exact: true }).click();
+  await dialog.getByRole('heading', { name: 'Auditorium output', exact: true }).waitFor();
   await dialog.getByRole('button', { name: 'Find displays', exact: true }).click();
   const displaySelect = dialog.getByRole('combobox');
   const projectorValue = await displaySelect.locator('option').filter({ hasText: 'Auditorium projector' }).getAttribute('value');
@@ -144,14 +162,32 @@ try {
   assert.equal(opened.name, 'lumen-output-screen_main'); assert.match(opened.features, /left=1920/); assert.match(opened.features, /width=1920/);
   assert.equal(await page.evaluate(() => window.__displayCalls), 1);
   assert.ok((await page.evaluate(() => localStorage.getItem('lumen.output.displays'))).includes('Auditorium projector'));
-  await popup.keyboard.press('f'); await until(() => popup.evaluate(() => !!document.fullscreenElement), 'receiving output window fullscreen shortcut');
+  // The opener's modal can retain focus after the metadata assertions above.
+  // Focus the receiving window as an operator would before exercising its key.
+  await popup.bringToFront();
+  await popup.locator('.production-output').click({ position: { x: 12, y: 12 } });
+  await popup.evaluate(() => {
+    window.__displayFullscreenRequests = 0;
+    const request = Element.prototype.requestFullscreen;
+    Element.prototype.requestFullscreen = function (...args) {
+      window.__displayFullscreenRequests++;
+      return request.apply(this, args);
+    };
+  });
+  await popup.keyboard.press('f');
+  await until(() => popup.evaluate(() => window.__displayFullscreenRequests > 0), 'receiving output fullscreen shortcut requests the real API');
+  if (nativeFullscreenAvailable) await until(() => popup.evaluate(() => !!document.fullscreenElement), 'receiving output window fullscreen');
+  else {
+    await until(() => popup.evaluate(() => document.querySelector('.output-controls [role=status]')?.textContent.includes('The browser requires a click or key press')), 'receiving output explains browser fullscreen denial');
+    assert.equal(await popup.evaluate(() => !!document.fullscreenElement), false);
+  }
   await popup.close();
   assert.equal(routing(await get()), settingsBefore);
-  check('Mocked display enumeration selects a projector and passes placement to a real detached popup; real output decode and fullscreen shortcut work (physical screen placement not claimed)');
+  check(`Mocked display enumeration selects a projector and passes placement to a real detached popup; real output decode and fullscreen shortcut ${nativeFullscreenAvailable ? 'enter fullscreen' : 'request the real API and show its browser-denial fallback'} (physical screen placement not claimed)`);
   stage = 'mobile setup';
-  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
-  await page.setViewportSize({ width: 390, height: 844 }); await page.getByRole('button', { name: 'Program links', exact: true }).click();
-  dialog = page.getByRole('dialog', { name: 'Program output', exact: true }); await dialog.waitFor();
+  await dialog.getByRole('button', { name: 'All outputs', exact: true }).click();
+  await page.setViewportSize({ width: 390, height: 844 }); await dialog.getByRole('button', { name: 'Open Lumen Share', exact: true }).click();
+  await dialog.getByRole('heading', { name: 'Program output', exact: true }).waitFor();
   const bounds = await dialog.boundingBox(); assert.ok(bounds.x >= -1 && bounds.x + bounds.width <= 391, 'Output dialog fits the mobile viewport.');
   assert.equal(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth + 1), true, 'Output setup has no horizontal overflow.');
   assert.ok(await dialog.getAttribute('aria-labelledby')); assert.ok(await dialog.getAttribute('aria-describedby'));

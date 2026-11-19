@@ -14,6 +14,9 @@ import { startVpsBridge } from './vps-bridge.js';
 import { startMediaStatusPoller } from './media-engine.js';
 import { createProduction } from './production.js';
 import { createWorship } from './worship.js';
+import { createNotes } from './notes.js';
+import { SharedListeningHub } from './shared-listening.js';
+import { createPresentationDocuments } from './presentation-document-routes.js';
 import { createDataTransferRouter } from './data-transfer-routes.js';
 import { createDataClearRouter } from './data-clear-routes.js';
 import { DATA_DIR, FRONTEND_DIST, INCOMING_DIR, MEDIA_DIR, MEDIA_KINDS } from './paths.js';
@@ -23,6 +26,7 @@ import { resolveStationWorkspace } from './workspace.js';
 import { createMobileController, mobileGatewayFromEnv } from './mobile-controller.js';
 import { ContentSchema, type Content } from './schema.js';
 import { ensureChannels } from './migrate-content.js';
+import { migrateNotesChannel } from './notes-channel-migration.js';
 import { CONTENT_FILE } from './paths.js';
 
 async function ensureDirs() {
@@ -58,6 +62,7 @@ export async function startLumenServer(options: LumenServerOptions = {}) {
   const workspace = await resolveStationWorkspace(lease.canonical);
   const mobileGateway = await mobileGatewayFromEnv();
   await ensureDirs();
+  await migrateNotesChannel(DATA_DIR);
   initDb(); // identity/ops store (SQLite at DATA_DIR/lumen.db) + seed admin
   const app = express();
   app.use(express.json({ limit: '20mb' }));
@@ -71,8 +76,15 @@ export async function startLumenServer(options: LumenServerOptions = {}) {
   cleanup.push(() => new Promise<void>(resolve => { if (!server.listening) { resolve(); return; } server.close(() => resolve()); server.closeAllConnections(); }));
   const relay = attachWebSocket();
   cleanup.push(() => { for (const client of relay.wss.clients) client.terminate(); relay.wss.close(); });
-  const worship = await createWorship(relay);
+  const sharedListening = new SharedListeningHub();
+  cleanup.push(() => sharedListening.close());
+  const worship = await createWorship(relay, sharedListening);
   cleanup.push(() => worship.close());
+  const notes = createNotes({ listener: worship.listener, library: worship.library, shared: sharedListening, otherListeningActive: worship.hasActiveListening });
+  worship.setExternalListeningGuard(notes.hasActive);
+  cleanup.push(() => notes.close());
+  const presentationDocuments = createPresentationDocuments();
+  cleanup.push(() => presentationDocuments.close());
   const agentWss = attachAgentSocket(relay); // capture agents (header-token auth)
   cleanup.push(() => { for (const client of agentWss.clients) client.terminate(); agentWss.close(); });
   const localHost = ['0.0.0.0', '::'].includes(HOST) ? '127.0.0.1' : HOST.includes(':') ? `[${HOST}]` : HOST;
@@ -119,7 +131,11 @@ export async function startLumenServer(options: LumenServerOptions = {}) {
   // Route WebSocket upgrades by path to the right server (both use noServer).
   server.on('upgrade', (req, socket, head) => {
     const pathname = (req.url ?? '').split('?')[0];
-    if (pathname === '/ws') {
+    if(pathname==='/worship/listening/stream'){
+      worship.cloudWss.handleUpgrade(req,socket,head,ws=>worship.cloudWss.emit('connection',ws,req));
+    } else if(pathname==='/notes/listening/stream'&&notes.cloudWss){
+      notes.cloudWss.handleUpgrade(req,socket,head,ws=>notes.cloudWss!.emit('connection',ws,req));
+    } else if (pathname === '/ws') {
       relay.wss.handleUpgrade(req, socket, head, (ws) => relay.wss.emit('connection', ws, req));
     } else if (pathname === '/agent') {
       agentWss.handleUpgrade(req, socket, head, (ws) => agentWss.emit('connection', ws, req));
@@ -139,8 +155,11 @@ export async function startLumenServer(options: LumenServerOptions = {}) {
   app.use('/api', production.router);
   app.use('/api', dataClear.router);
   app.use('/api', dataTransfer.router);
+  app.use('/api', sharedListening.router);
   app.use('/api', worship.router);
-  app.use('/api', createMediaDeleteRouter(production.transfer));
+  app.use('/api', notes.router);
+  app.use('/api', presentationDocuments.router);
+  app.use('/api', createMediaDeleteRouter(production.media));
   app.use('/api', router);
   app.use('/api', createMediaRouter(relay));
   app.use('/api', createAgentRouter(relay));
@@ -150,13 +169,13 @@ export async function startLumenServer(options: LumenServerOptions = {}) {
   app.use('/media/incoming', (_req, res) => res.status(404).end());
 
   // Static media — served with long-lived cache; filenames are timestamped on upload.
-  app.use(
-    '/media',
-    express.static(MEDIA_DIR, {
-      maxAge: '7d',
-      fallthrough: false,
-    }),
-  );
+  const serveMedia = express.static(MEDIA_DIR, { maxAge: '7d', fallthrough: false });
+  app.use('/media', (req, res, next) => {
+    // The exact root is the application library page. Asset paths still keep
+    // strict 404s, and the earlier incoming mount remains quarantined.
+    if (req.path === '/' && ['GET', 'HEAD'].includes(req.method)) { next(); return; }
+    serveMedia(req, res, next);
+  });
 
   // Serve built SPA in production.
   try {

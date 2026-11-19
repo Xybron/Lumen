@@ -305,15 +305,15 @@ try {
     assert.ok(sidebar.x >= 0 && sidebar.x + sidebar.width <= width, `Scenes sidebar stays in bounds at ${width}px`);
     await page.getByRole('button', { name: 'Hide scenes', exact: true }).click();
     assert.ok(await page.getByRole('button', { name: 'Show scenes', exact: true }).isVisible());
-    const liveButton = page.locator('.lumen-header').getByRole('button', { name: 'Open Live View', exact: true });
-    await liveButton.click({ trial: true });
+    const screenButton = page.locator('.lumen-header').getByRole('button', { name: 'Open Outputs', exact: true });
+    await screenButton.click({ trial: true });
     await page.getByRole('button', { name: 'Enter fullscreen', exact: true }).click({ trial: true });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Studio does not overflow horizontally at ${width}px`);
     if (width === 390) { await settled(); await page.screenshot({ path: path.join(dir, 'studio-editing-mobile.png'), fullPage: true }); }
   }
   await unchangedOutputs('Reload and responsive Studio layout');
   assert.deepEqual(errors, [], `Unexpected browser errors: ${errors.join('\n')}`);
-  checks.push('persistent draft geometry, responsive sidebar and accessible mobile fullscreen/live-view controls', 'Program and independent outputs unchanged throughout all edits');
+  checks.push('persistent draft geometry, responsive sidebar and accessible mobile fullscreen/Program screen controls', 'Program and independent outputs unchanged throughout all edits');
   console.log(JSON.stringify({ result: 'PASS', artifacts: dir, checks }, null, 2));
 } catch (error) {
   await page?.screenshot({ path: path.join(dir, 'studio-editing-failure.png'), fullPage: true }).catch(() => {});

@@ -5,6 +5,7 @@ import { atomicWriteJson } from './atomic.js';
 import { animationPresetNameKey, initialProduction, ProductionSchema } from './production-schema.js';
 import type { ProductionState, StudioCommand } from '../../shared/production.js';
 import { programChannelVisible } from '../../shared/program-channel.js';
+import type { MediaTransitionSnapshot } from './media-usage.js';
 
 export class ProductionError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -15,8 +16,10 @@ export class ProductionError extends Error {
 export class ProductionStore {
   private state!: ProductionState;
   private chain: Promise<unknown> = Promise.resolve();
+  private mediaTransitions: MediaTransitionSnapshot[] = [];
   constructor(private dir: string, private changed: (state: ProductionState) => void = () => {},
-    private cueGates: (channelIds: string[]) => Promise<NonNullable<ProductionState['programCueGates']>> = async () => []) {}
+    private cueGates: (channelIds: string[]) => Promise<NonNullable<ProductionState['programCueGates']>> = async () => [],
+    private rendererActive: () => boolean = () => false) {}
   async init() {
     await fs.mkdir(this.dir, { recursive: true });
     try { this.state = ProductionSchema.parse(JSON.parse(await fs.readFile(path.join(this.dir, 'production.json'), 'utf8'))); }
@@ -27,6 +30,16 @@ export class ProductionStore {
     }
   }
   get(): ProductionState { return structuredClone(this.state); }
+  /** Outgoing fade frames remain in the compositor briefly after a Take. */
+  mediaTransitionSnapshots(): MediaTransitionSnapshot[] {
+    this.mediaTransitions = this.mediaTransitions.filter(snapshot => snapshot.expiresAt > Date.now());
+    return structuredClone(this.mediaTransitions);
+  }
+  releaseMediaTransitions(revision?: number): void {
+    if (revision === undefined) { this.mediaTransitions = []; return; }
+    if (!Number.isSafeInteger(revision) || revision > this.state.revision || revision < 0) return;
+    this.mediaTransitions = this.mediaTransitions.filter(snapshot => snapshot.revision === undefined || snapshot.revision > revision);
+  }
   /** The transfer coordinator publishes only after all other stores commit. */
   withTransferLock<T>(operation: (session: { state: ProductionState; file: string; replaceSync(state: ProductionState): void; publish(): void }) => Promise<T>): Promise<T> {
     const run = this.chain.then(() => operation({ state: this.get(), file: path.join(this.dir, 'production.json'),
@@ -52,6 +65,15 @@ export class ProductionStore {
         // check rejects, restore the unpublished production document as well.
         await atomicWriteJson(path.join(this.dir, 'production.json'), this.state);
         throw error;
+      }
+      if ((this.state.program || this.state.channelInsert) && parsed.data.programTransition
+        && this.state.programTransition?.id !== parsed.data.programTransition.id
+        && (this.rendererActive() || parsed.data.programTransition.kind === 'fade')) {
+        this.mediaTransitions.push({ program: structuredClone(this.state.program), channelInsert: structuredClone(this.state.channelInsert), sources: structuredClone(this.state.sources),
+          revision: parsed.data.revision,
+          // Cue gating can delay the actual fade indefinitely. While an engine
+          // exists only its settled heartbeat proves outgoing media released.
+          expiresAt: this.rendererActive() ? Infinity : Date.now() + parsed.data.programTransition.durationMs + 150 });
       }
       this.state = parsed.data;
       this.changed(this.get());

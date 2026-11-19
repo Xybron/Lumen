@@ -36,10 +36,26 @@ export interface DisplayList {
   subscribe(listener: (displays: ConnectedDisplay[]) => void): () => void;
 }
 export interface DisplayBrowser {
+  lumenDisplays?: DesktopDisplays;
   readonly isSecureContext: boolean;
   readonly location: { href: string; origin: string };
   getScreenDetails?: () => Promise<DisplayDetails>;
   open(url: string, target: string, features: string): Window | null;
+}
+export interface DesktopDisplays {
+  list(): Promise<ConnectedDisplay[]>;
+  open(request: { outputId: string; displayId: string | null }): Promise<Omit<OpenDisplayResult, 'window'>>;
+  toggleFullscreen(): Promise<{ managed: boolean; fullscreen?: boolean }>;
+  exitFullscreen(): Promise<{ managed: boolean; fullscreen?: boolean }>;
+  onChanged(listener: () => void): () => void;
+}
+export const desktopDisplays = (): DesktopDisplays | undefined => browserWindow()?.lumenDisplays;
+export interface DisplayPreference { id?: string; label: string; width: number; height: number }
+export function assignedDisplay(displays: ConnectedDisplay[], saved?: DisplayPreference): ConnectedDisplay | null {
+  if (!saved) return null;
+  if (typeof saved.id === 'string' && saved.id.startsWith('desktop-')) return displays.find(display => display.id === saved.id) ?? null;
+  const matches = displays.filter(display => display.label === saved.label && display.width === saved.width && display.height === saved.height);
+  return matches.length === 1 ? matches[0] : null;
 }
 export interface OpenDisplayResult {
   status: 'opened' | 'blocked' | 'disconnected' | 'invalid-url' | 'unavailable';
@@ -78,6 +94,17 @@ function choices(details: DisplayDetails): ConnectedDisplay[] {
 export async function listDisplays(browser: DisplayBrowser | null = browserWindow()): Promise<DisplayList> {
   const unavailable = (status: DisplayList['status'], message: string): DisplayList => ({ status, displays: [], message, subscribe: () => unsubscribeNothing });
   if (!browser) return unavailable('unavailable', 'Display selection is available in the Studio browser on this computer.');
+  if (browser.lumenDisplays) {
+    const native = browser.lumenDisplays;
+    try {
+      return { status: 'available', displays: await native.list(), message: 'Assigned outputs open fullscreen automatically. Esc exits fullscreen; F toggles it.',
+        subscribe(listener) {
+          let stopped = false;
+          const stop = native.onChanged(() => { void native.list().then(items => { if (!stopped) listener(items); }).catch(() => {}); });
+          return () => { stopped = true; stop(); };
+        } };
+    } catch { return unavailable('unavailable', 'Connected displays could not be read. Try Find displays again.'); }
+  }
   if (!browser.isSecureContext) return unavailable('insecure', 'Open Studio on localhost or HTTPS to find connected displays. You can still open an output window and move it manually.');
   if (!browser.getScreenDetails) return unavailable('unsupported', 'This browser cannot choose connected displays. Open the output, move it to your monitor or projector, then press F for fullscreen. Use a supporting Chrome or Edge browser for display selection.');
   try {

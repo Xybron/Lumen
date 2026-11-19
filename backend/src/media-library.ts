@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
 import path from 'node:path';
 import { MEDIA_DIR, MEDIA_KINDS, type MediaKind } from './paths.js';
+import { readMediaAliases } from './media-metadata.js';
 
 export interface MediaLibraryFile {
   name: string;
@@ -9,6 +10,23 @@ export interface MediaLibraryFile {
   thumbnail: string | null;
   bytes: number;
   modifiedAt: string;
+  displayName?: string;
+}
+
+export function mediaFileKind(name: string): 'image' | 'video' | 'audio' | null {
+  if (/\.(png|jpe?g|webp|gif|svg|avif|bmp)$/i.test(name)) return 'image';
+  if (/\.(mp4|webm|mov|m4v)$/i.test(name)) return 'video';
+  if (/\.(mp3|m4a|wav|aac|ogg|flac|opus|aiff?|wma)$/i.test(name)) return 'audio';
+  return null;
+}
+
+/** Prepared MP4s and retained MOV originals are one logical asset. */
+export async function mediaVideoAliases(mediaDir: string): Promise<Array<[string, string]>> {
+  try {
+    return (await fs.readdir(path.join(mediaDir, 'backgrounds'), { withFileTypes: true }))
+      .filter(file => file.isFile() && !file.name.startsWith('.') && /\.mov$/i.test(file.name))
+      .map(file => [`media/backgrounds/${file.name}`, `media/backgrounds/${file.name.replace(/\.mov$/i, '.mp4')}`]);
+  } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; }
 }
 
 const VISUAL_MEDIA = /\.(png|jpe?g|webp|gif|mp4|webm|mov|m4v)$/i;
@@ -36,8 +54,8 @@ export async function listMediaLibrary(kind: MediaKind, mediaDir = MEDIA_DIR): P
   // Source MOVs retain their original path while the prepared MP4 is used
   // transparently for playback. Show one asset, not two copies of the upload.
   if (kind === 'backgrounds') {
-    const names = new Set(files.map(file => file.name));
-    files = files.filter(file => !/\.mp4$/i.test(file.name) || !names.has(file.name.replace(/\.mp4$/i, '.mov')));
+    const prepared = new Set(files.filter(file => /\.mov$/i.test(file.name)).map(file => file.name.replace(/\.mov$/i, '.mp4')));
+    files = files.filter(file => !prepared.has(file.name));
   }
 
   // The old generator uses stems rather than full filenames. If two originals
@@ -51,6 +69,7 @@ export async function listMediaLibrary(kind: MediaKind, mediaDir = MEDIA_DIR): P
     }
   }
 
+  const aliases = await readMediaAliases(path.dirname(mediaDir)).catch(() => ({} as Record<string, string>));
   const result: MediaLibraryFile[] = [];
   // Bound filesystem concurrency for large libraries instead of starting a
   // stat operation for every stored asset at once.
@@ -82,6 +101,7 @@ export async function listMediaLibrary(kind: MediaKind, mediaDir = MEDIA_DIR): P
         thumbnail,
         bytes: stat.size,
         modifiedAt: stat.mtime.toISOString(),
+        ...(aliases[`${kind === 'music' ? 'music' : 'library'}:${file.name}`] ? { displayName: aliases[`${kind === 'music' ? 'music' : 'library'}:${file.name}`] } : {}),
       };
     }));
     for (const item of batch) if (item) result.push(item);

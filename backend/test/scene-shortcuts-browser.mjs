@@ -84,7 +84,7 @@ try {
 
   assert.equal((await request.post(`${base}/api/studio/engine/start`, { timeout: 50000 })).status(), 200);
   await until(async () => (await (await request.get(`${base}/api/studio/status`)).json()).state === 'running', 'engine running', 50000);
-  await page.locator('.engine-indicator').getByText('Engine running', { exact: true }).waitFor();
+  await page.getByTestId('production-statusbar').getByTestId('program-engine-status').filter({ hasText: 'Engine running' }).waitFor();
   await page.getByRole('link', { name: 'Lumen home', exact: true }).click();
   await page.getByRole('heading', { name: 'Find a passage' }).waitFor();
   const before = await get();

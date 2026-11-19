@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { broadcast } from '@/lib/broadcast';
 import { subscribeWs } from '@/lib/ws';
 import { shortId } from '@/lib/ids';
+import { orderPresentationGroups, groupDescendants } from '@/lib/presentation-groups';
 import type { BroadcastMsg, Channel, ChannelKind, Content, Item, Playlist } from '@/types';
 
 // Content is plain JSON by schema, but reactivity wraps it in Proxies that
@@ -142,7 +143,7 @@ export const useContentStore = defineStore('content', () => {
     const channelId = shortId('chnl');
     const saved = await save((d) => {
       d.playlists.push({ id: playlistId, name, items: [] });
-      d.channels.push({ id: channelId, name, kind, playlistId, defaultMode: ['scripture','lyrics'].includes(kind)?'manual':'auto' });
+      d.channels.push({ id: channelId, name, kind, playlistId, defaultMode: 'manual' });
       d.sources.push({ id: shortId('src'), kind: 'channel', ref: channelId });
     });
     if (!saved) throw new Error('Channel could not be saved.');
@@ -200,7 +201,7 @@ export const useContentStore = defineStore('content', () => {
   async function addItem(playlistId: string, item: Partial<Item>) {
     const next: Item = {
       id: shortId('itm'),
-      type: 'scripture',
+      type: 'prayer',
       title: '',
       body: '',
       reference: '',
@@ -208,17 +209,19 @@ export const useContentStore = defineStore('content', () => {
       typography: { size: 'lg', align: 'center', weight: 500 },
       ...item,
     };
-    await save((d) => {
-      d.playlists.find((p) => p.id === playlistId)?.items.push(next);
+    const saved = await save((d) => {
+      const playlist = d.playlists.find((p) => p.id === playlistId);
+      if (playlist) { playlist.items.push(next); orderPresentationGroups(playlist); }
     });
+    return saved ? next : null;
   }
 
   async function updateItem(playlistId: string, itemId: string, patch: Partial<Item>) {
-    await save((d) => {
+    return await save((d) => {
       const p = d.playlists.find((x) => x.id === playlistId);
       if (!p) return;
       const i = p.items.findIndex((x) => x.id === itemId);
-      if (i >= 0) p.items[i] = { ...p.items[i], ...patch };
+      if (i >= 0) { p.items[i] = { ...p.items[i], ...patch }; orderPresentationGroups(p); }
     });
   }
 
@@ -237,6 +240,8 @@ export const useContentStore = defineStore('content', () => {
       const i = p.items.findIndex((x) => x.id === itemId);
       if (i < 0) return;
       const copy: Item = { ...JSON.parse(JSON.stringify(p.items[i])) as Item, id: shortId('itm') };
+      // A duplicated slide is independent of its original Note's generated set.
+      delete copy.notesSourceId;
       p.items.splice(i + 1, 0, copy);
     });
   }
@@ -245,8 +250,39 @@ export const useContentStore = defineStore('content', () => {
     return await save((d) => {
       const p = d.playlists.find((x) => x.id === playlistId);
       if (!p) return;
+      const targetGroupId = p.items[toIdx]?.groupId;
       const [moved] = p.items.splice(fromIdx, 1);
-      if (moved) p.items.splice(toIdx, 0, moved);
+      if (moved) { moved.groupId = targetGroupId; p.items.splice(toIdx, 0, moved); orderPresentationGroups(p); }
+    });
+  }
+
+  async function addGroup(playlistId: string, name: string, parentId?: string) {
+    const id = shortId('grp');
+    const ok = await save(draft => {
+      const playlist = draft.playlists.find(p => p.id === playlistId);
+      if (!playlist) return;
+      (playlist.groups ??= []).push({ id, name: name.trim().slice(0, 100) || 'Untitled group', parentId });
+    });
+    return ok ? id : null;
+  }
+  async function updateGroup(playlistId: string, groupId: string, name: string, parentId?: string) {
+    return save(draft => {
+      const playlist = draft.playlists.find(p => p.id === playlistId);
+      const group = playlist?.groups?.find(g => g.id === groupId);
+      if (!playlist || !group || (parentId && groupDescendants(playlist.groups ?? [], groupId).has(parentId))) return;
+      group.name = name.trim().slice(0, 100) || group.name; group.parentId = parentId;
+      orderPresentationGroups(playlist);
+    });
+  }
+  async function removeGroup(playlistId: string, groupId: string) {
+    return save(draft => {
+      const playlist = draft.playlists.find(p => p.id === playlistId);
+      const group = playlist?.groups?.find(g => g.id === groupId);
+      if (!playlist || !group) return;
+      for (const item of playlist.items) if (item.groupId === groupId) item.groupId = group.parentId;
+      for (const child of playlist.groups ?? []) if (child.parentId === groupId) child.parentId = group.parentId;
+      playlist.groups = playlist.groups?.filter(g => g.id !== groupId);
+      orderPresentationGroups(playlist);
     });
   }
 
@@ -286,6 +322,9 @@ export const useContentStore = defineStore('content', () => {
     removeItem,
     duplicateItem,
     reorderItems,
+    addGroup,
+    updateGroup,
+    removeGroup,
     updateMusic,
     updateSettings,
   };

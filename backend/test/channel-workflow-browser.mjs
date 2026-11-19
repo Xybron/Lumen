@@ -16,10 +16,49 @@ const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'lumen-channel-workflow-'));
 const port = Number(process.env.LUMEN_CHANNEL_WORKFLOW_TEST_PORT ?? 3423), base = `http://127.0.0.1:${port}`;
 const proxyPort = port + 1, rendererOrigin = `http://127.0.0.1:${proxyPort}`;
 const proxySockets = new Set();
-// Delay selected already-published cues only inside the test renderer, so Studio
-// Take arrives first. No debug/delay hook is added to the real application.
-const delayScript = `<script>{const Native=window.WebSocket;window.WebSocket=class extends Native{constructor(...args){super(...args);if(new URL(String(args[0]),location.href).pathname==='/ws')this.addEventListener('message',event=>{if(!event.isTrusted)return;let m;try{m=JSON.parse(event.data)}catch{return}if(m.t==='state'&&m.channel==='scripture'&&[2,7].includes(m.payload?.channelRevision)){event.stopImmediatePropagation();setTimeout(()=>this.dispatchEvent(new MessageEvent('message',{data:event.data})),2500)}})}}}</script>`;
+// Hold selected cues inside the test renderer until the test releases them.
+// Fixed delays can expire while a slow browser is still checking the hold.
+// No debug/delay hook is added to the real application.
+const heldCues = new Map(), releasedCues = new Set(), deliveredCues = new Set();
+function releaseCue(revision) {
+  releasedCues.add(revision);
+  for (const response of heldCues.get(revision) ?? []) response.writeHead(204).end();
+  heldCues.delete(revision);
+}
+const delayScript = `<script>{
+  const Native = window.WebSocket;
+  window.WebSocket = class extends Native {
+    constructor(...args) {
+      super(...args);
+      if (new URL(String(args[0]), location.href).pathname !== '/ws') return;
+      this.addEventListener('message', event => {
+        if (!event.isTrusted) return;
+        let message; try { message = JSON.parse(event.data); } catch { return; }
+        const revision = message.payload?.channelRevision;
+        if (message.t !== 'state' || message.channel !== 'scripture' || ![2, 7].includes(revision)) return;
+        event.stopImmediatePropagation();
+        void fetch('/__test/hold-cue?revision=' + revision).then(() => {
+          this.dispatchEvent(new MessageEvent('message', { data: event.data }));
+          return fetch('/__test/cue-delivered?revision=' + revision);
+        }).catch(() => {});
+      });
+    }
+  };
+}</script>`;
 const proxy = http.createServer((req, res) => {
+  const url = new URL(req.url, rendererOrigin), revision = Number(url.searchParams.get('revision'));
+  if (url.pathname === '/__test/hold-cue' && [2, 7].includes(revision)) {
+    if (releasedCues.has(revision)) res.writeHead(204).end();
+    else {
+      if (!heldCues.has(revision)) heldCues.set(revision, new Set());
+      heldCues.get(revision).add(res);
+      res.once('close', () => heldCues.get(revision)?.delete(res));
+    }
+    return;
+  }
+  if (url.pathname === '/__test/cue-delivered' && [2, 7].includes(revision)) {
+    deliveredCues.add(revision); res.writeHead(204).end(); return;
+  }
   const upstream = http.request(`${base}${req.url}`, { method: req.method, headers: req.headers }, response => {
     if (req.url === '/studio/engine') {
       const chunks = []; response.on('data', c => chunks.push(c)); response.on('end', () => {
@@ -65,6 +104,16 @@ const sample = async video => video.evaluate(element => {
 const green = p => p.camera[1] > p.camera[0] * 2 && p.camera[1] > p.camera[2] * 1.2;
 const logo = p => p.logo[0] > 190 && p.logo[1] < 75 && p.logo[2] < 75;
 const blue = p => p.corner[2] > 190 && p.corner[0] < 50;
+async function sampleHeldPicture(video, count) {
+  const samples = [];
+  for (let i = 0; i < count; i++) {
+    // A held canvas may send no new video frames. Waiting for a video-frame
+    // callback would skip the hold entirely and sample the later Fade instead.
+    await video.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
+    samples.push(await sample(video));
+  }
+  return samples;
+}
 
 try {
   await new Promise((resolve, reject) => { proxy.once('error', reject); proxy.listen(proxyPort, '127.0.0.1', resolve); });
@@ -143,12 +192,13 @@ try {
 
   const taken = await command({ type: 'take', sceneId: 'camera_scripture', transition: 'fade', durationMs: 600 });
   assert.deepEqual(taken.programCueGates, [{ channelId: 'scripture', revision: 2 }]);
-  const waiting = [];
-  for (let i = 0; i < 8; i++) {
-    await video.evaluate(v => new Promise(resolve => v.requestVideoFrameCallback(resolve)));
-    waiting.push(await sample(video));
-  }
-  assert.ok(waiting.every(p => green(p) && logo(p) && p.cyan < 5 && p.panel[1] > 80), 'Pending scene holds prior picture, never the old verse');
+  await until(() => heldCues.get(2)?.size > 0, 'revision2 held inside the renderer');
+  // Exceed the requested Fade duration while held to prove its clock waits for
+  // readiness. The cue remains blocked regardless of browser/machine speed.
+  await new Promise(resolve => setTimeout(resolve, 750));
+  const waiting = await sampleHeldPicture(video, 8);
+  assert.ok(waiting.every(p => green(p) && logo(p) && p.cyan < 5 && p.panel[1] > 80), `Pending scene holds prior picture, never the old verse: ${JSON.stringify(waiting)}`);
+  releaseCue(2);
   const fading = []; const fadeDeadline = Date.now() + 7000;
   while (Date.now() < fadeDeadline) {
     await video.evaluate(v => new Promise(resolve => v.requestVideoFrameCallback(resolve)));
@@ -179,15 +229,12 @@ try {
   await command({ type: 'take', sceneId: 'camera_only', transition: 'cut' });
   await until(async () => { const p = await sample(video); return green(p) && logo(p) && p.cyan < 5; }, 'Camera is actually on Program before pending Cut');
   const delayed = await publish('scripture', { type: 'take', selection: selection(20) });
-  const delayedAt = Date.now();
   assert.equal(delayed.revision, 7, 'Proxy delays revision7 while renderer still has visible revision6');
   const pendingCut = await command({ type: 'take', sceneId: 'camera_scripture', transition: 'cut' });
   assert.deepEqual(pendingCut.programCueGates, [{ channelId: 'scripture', revision: 7 }]);
-  for (let i = 0; i < 4; i++) {
-    await video.evaluate(v => new Promise(resolve => v.requestVideoFrameCallback(resolve)));
-    const p = await sample(video);
-    assert.ok(green(p) && logo(p) && p.cyan < 5, 'Pending Cut holds Camera, not old Scripture');
-  }
+  await until(() => heldCues.get(7)?.size > 0, 'revision7 held inside the renderer');
+  const pending = await sampleHeldPicture(video, 4);
+  assert.ok(pending.every(p => green(p) && logo(p) && p.cyan < 5), 'Pending Cut holds Camera, not old Scripture');
   await command({ type: 'take', sceneId: 'camera_only', transition: 'fade', durationMs: 600 });
   const interrupted = [];
   for (let i = 0; i < 25; i++) {
@@ -195,11 +242,12 @@ try {
     interrupted.push(await sample(video));
   }
   assert.ok(interrupted.every(p => green(p) && logo(p) && p.cyan < 5), 'Fade away from a gated Cut must use the actual held Camera; never flash stale Scripture');
-  // Let every delayed revision7 replay settle. Its late arrival must not
-  // automatically retake the discarded Scripture scene.
-  await new Promise(resolve => setTimeout(resolve, Math.max(0, delayedAt + 3000 - Date.now())));
-  const settled = await sample(video);
-  assert.ok(green(settled) && logo(settled) && settled.cyan < 5);
+  // Deliver revision7 only after the superseding Fade has completed. Its late
+  // arrival must not automatically retake the discarded Scripture scene.
+  releaseCue(7);
+  await until(() => deliveredCues.has(7), 'late revision7 delivered to the renderer');
+  const settled = await sampleHeldPicture(video, 8);
+  assert.ok(settled.every(p => green(p) && logo(p) && p.cyan < 5));
   assert.equal((await get()).program.id, 'camera_only');
   assert.ok(blue(await sample(pinned.locator('video'))));
   checks.push('Interrupting a gated Cut uses the actual on-air Camera for the next Fade, with no stale-text flash or late automatic takeover');

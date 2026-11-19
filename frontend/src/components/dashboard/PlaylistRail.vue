@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useTemplateRef } from 'vue';
-import { Plus, Trash2, Pencil, Settings as SettingsIcon, ListVideo } from 'lucide-vue-next';
+import { Plus, Trash2, Pencil, Settings as SettingsIcon, ListVideo, NotebookPen } from 'lucide-vue-next';
 import { useContentStore } from '@/stores/content';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -15,8 +15,12 @@ const engines = useEnginesStore();
 const identity = useIdentityStore();
 const presence = usePresenceStore();
 const canCreate = computed(() => identity.can('*', 'author'));
-const visiblePlaylists = computed(() => content.playlists.filter(playlist => !content.channels.some(channel => channel.playlistId === playlist.id && ['scripture', 'lyrics'].includes(channel.kind))));
-const channelFor = (playlistId: string) => content.channels.find(channel => channel.playlistId === playlistId);
+const notesMode = computed(() => content.channels.find(channel => channel.id === engines.focusedChannelId)?.kind === 'notes');
+const visiblePlaylists = computed(() => content.playlists.filter(playlist => {
+  const channels = content.channels.filter(channel => channel.playlistId === playlist.id);
+  return notesMode.value ? channels.some(channel => channel.kind === 'notes') : !channels.length || channels.some(channel => !['scripture', 'lyrics', 'notes'].includes(channel.kind));
+}));
+const channelFor = (playlistId: string) => content.channels.find(channel => channel.playlistId === playlistId && (notesMode.value ? channel.kind === 'notes' : !['scripture', 'lyrics', 'notes'].includes(channel.kind)));
 const isSelected = (playlistId: string) => channelFor(playlistId)?.id === engines.focusedChannelId;
 const canEditPlaylist = (playlistId: string) => {
   const channel = channelFor(playlistId);
@@ -41,7 +45,7 @@ async function commitAdd() {
   }
   busy.value = true;
   try {
-    const created = await content.addChannel(newName.value.trim(), 'presentation');
+    const created = await content.addChannel(newName.value.trim(), notesMode.value ? 'notes' : 'presentation');
     engines.focusChannel(created.channelId);
     newName.value = '';
     adding.value = false;
@@ -110,14 +114,14 @@ const emit = defineEmits<{ (e: 'open-settings'): void }>();
 </script>
 
 <template>
-  <aside class="panel playlist-rail" aria-label="Presentation playlists">
+  <aside class="panel playlist-rail" :aria-label="notesMode ? 'Notes channels' : 'Presentation playlists'">
     <header class="playlist-heading">
       <div class="flex items-center gap-2 min-w-0">
-        <ListVideo :size="15" class="text-white/55 shrink-0" />
-        <h2 class="text-[12px] font-semibold text-white">Playlists</h2>
+        <component :is="notesMode ? NotebookPen : ListVideo" :size="15" class="text-white/55 shrink-0" />
+        <h2 class="text-[12px] font-semibold text-white">{{ notesMode ? 'Notes channels' : 'Playlists' }}</h2>
         <span class="playlist-count">{{ visiblePlaylists.length }}</span>
       </div>
-      <Button variant="ghost" size="icon" class="!h-7 !w-7" title="Presentation settings" aria-label="Presentation settings" @click="emit('open-settings')">
+      <Button v-if="!notesMode" variant="ghost" size="icon" class="!h-7 !w-7" title="Presentation settings" aria-label="Presentation settings" @click="emit('open-settings')">
         <SettingsIcon :size="14" />
       </Button>
     </header>
@@ -134,14 +138,14 @@ const emit = defineEmits<{ (e: 'open-settings'): void }>();
             v-if="renamingId === p.id"
             ref="renameInput"
             v-model="renameDraft"
-            aria-label="Rename presentation"
+            :aria-label="notesMode ? 'Rename notes channel' : 'Rename presentation'"
             class="w-full bg-white/[0.06] border border-hairglow rounded-lg px-2 py-1 text-sm text-white outline-none focus:border-accent/60 transition-colors"
             @click.stop
             @keydown.enter.prevent="commitRename"
             @keydown.escape.prevent="cancelRename"
             @blur="commitRename"
           />
-          <button v-else type="button" class="playlist-select" :aria-current="isSelected(p.id) ? 'true' : undefined" :aria-label="channelFor(p.id) ? `Open presentation ${p.name}` : `Open ${p.name} as presentation`" @click="selectPlaylist(p)">
+          <button v-else type="button" class="playlist-select" :aria-current="isSelected(p.id) ? 'true' : undefined" :aria-label="channelFor(p.id) ? `Open ${notesMode ? 'notes' : 'presentation'} ${p.name}` : `Open ${p.name} as presentation`" @click="selectPlaylist(p)">
             <span class="truncate">{{ p.name }}</span>
             <small>{{ p.items.length }} {{ p.items.length === 1 ? 'slide' : 'slides' }}<span v-if="!channelFor(p.id)"> · Not linked</span></small>
           </button>
@@ -171,17 +175,17 @@ const emit = defineEmits<{ (e: 'open-settings'): void }>();
           </button>
         </div>
       </li>
-      <li v-if="visiblePlaylists.length === 0" class="playlist-empty">Create a presentation to organise your slides.</li>
+      <li v-if="visiblePlaylists.length === 0" class="playlist-empty">{{ notesMode ? 'Create a Notes channel for your sermon or session.' : 'Create a presentation to organise your slides.' }}</li>
     </ul>
 
     <div class="playlist-footer">
       <form v-if="adding" class="grid gap-2" @submit.prevent="commitAdd">
-        <input v-model="newName" autofocus :disabled="busy" aria-label="Presentation name" class="w-full rounded-lg bg-white/[0.06] border border-hairglow px-3 py-2 text-xs text-white placeholder:text-white/35 outline-none focus:border-accent/60 transition-colors" placeholder="Presentation name…" @keydown.escape.prevent="adding = false" />
+        <input v-model="newName" autofocus :disabled="busy" :aria-label="notesMode ? 'Notes channel name' : 'Presentation name'" class="w-full rounded-lg bg-white/[0.06] border border-hairglow px-3 py-2 text-xs text-white placeholder:text-white/35 outline-none focus:border-accent/60 transition-colors" :placeholder="notesMode ? 'e.g. Sunday notes…' : 'Presentation name…'" @keydown.escape.prevent="adding = false" />
         <div class="flex gap-2"><Button type="button" variant="ghost" size="sm" :disabled="busy" @click="adding = false">Cancel</Button><Button type="submit" variant="accent" size="sm" class="flex-1" :disabled="busy || !newName.trim()">Create</Button></div>
       </form>
       <Button v-else variant="default" size="md" class="w-full justify-start !text-xs" :disabled="!canCreate" @click="adding = true">
         <Plus :size="14" />
-        New presentation
+        {{ notesMode ? 'New notes channel' : 'New presentation' }}
       </Button>
     </div>
   </aside>
@@ -194,7 +198,7 @@ const emit = defineEmits<{ (e: 'open-settings'): void }>();
   </Dialog>
   <Dialog :open="!!deletingPlaylist" @update:open="value => { if (!value && !busy) deletingPlaylist = null; }">
     <DialogContent class="sm:max-w-md" :show-close-button="!busy" @escape-key-down="event => { if (busy) event.preventDefault(); }" @interact-outside="event => { if (busy) event.preventDefault(); }">
-      <DialogHeader><DialogTitle>Delete {{ deletingPlaylist && channelFor(deletingPlaylist.id) ? 'presentation' : 'playlist' }}?</DialogTitle><DialogDescription>“{{ deletingPlaylist?.name }}” and its {{ deletingPlaylist?.items.length }} slides will be removed. {{ deletingPlaylist && channelFor(deletingPlaylist.id) ? 'Its channel and routes will also be removed.' : '' }} This cannot be undone here.</DialogDescription></DialogHeader>
+      <DialogHeader><DialogTitle>Delete {{ deletingPlaylist && channelFor(deletingPlaylist.id) ? notesMode ? 'notes channel' : 'presentation' : 'playlist' }}?</DialogTitle><DialogDescription>“{{ deletingPlaylist?.name }}” and its {{ deletingPlaylist?.items.length }} slides will be removed. {{ deletingPlaylist && channelFor(deletingPlaylist.id) ? 'Its channel and routes will also be removed.' : '' }} This cannot be undone here.</DialogDescription></DialogHeader>
       <DialogFooter><Button variant="ghost" :disabled="busy" @click="deletingPlaylist = null">Cancel</Button><Button variant="destructive" :disabled="busy" @click="deletePlaylist">{{ busy ? 'Deleting…' : 'Delete permanently' }}</Button></DialogFooter>
     </DialogContent>
   </Dialog>

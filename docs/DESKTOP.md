@@ -51,10 +51,23 @@ recordings or screenshots.
 
 ## Daily use and saved data
 
+In Studio output setup, use **Find displays** and assign a connected screen.
+The desktop app opens assigned outputs fullscreen automatically, including after
+reopening Lumen. **Esc** exits fullscreen; **F** or the Fullscreen button toggles
+it. **Manual window** opens windowed. Assignments stay on this computer; if an
+assigned display disconnects, its output closes rather than moving onto the
+operator's screen. Reconnect the screen and open the output again.
+
 Open Lumen using its app icon. The backend and required runtimes start with the
 app; there is no command window to keep open. Keep the Lumen app running during
 production. Stopping a recording before quitting lets it finish saving. Quitting
 the desktop app stops its local engine and outputs.
+
+While the engine is starting/running or a recording is active, the desktop app
+prevents idle display sleep, including when its controls are minimized. It
+releases that protection after stopping. This does not disable manual locking,
+override lid closure, or change system power settings; rehearse with the display
+awake before a service.
 
 Use **File → Open data folder** to locate this station's data. It is separate
 from the installed application, under the operating system's per-user application
@@ -62,6 +75,24 @@ data folder. Application upgrades reuse that station rather than replacing its
 library. A fresh install on another computer creates a fresh station. Make a
 `.lumen` export or copy the station folder while Lumen is closed before moving
 machines or removing local data.
+
+For AssemblyAI listening, place `ASSEMBLYAI_API_KEY=your-key` in a private `.env`
+file inside the station folder shown by **File → Open data folder**. The default
+Mac location is `~/Library/Application Support/Lumen/station/.env`. Restrict the
+file to your user (`chmod 600` on macOS). This station setting survives app
+updates and works when opening Lumen from Finder. Only the AssemblyAI key is
+read from this file; it is not sent to the interface or copied into an installer.
+A process environment key takes precedence, followed by a project-root `.env`
+key, then the station key. Listening checks the setting when starting a session.
+Choose **AssemblyAI** in Scripture listening controls;
+Notes can link to that same active transcript without another microphone stream.
+
+Notes is also a dedicated channel in the dock. Existing Notes-only channels
+upgrade in place, preserving their slides, private drafts and transcripts;
+Notes in mixed presentations stay where they are. In Studio, use **New source →
+Lumen channel** to add Notes, select its layer, then choose **Full screen**, **Bottom** or
+**Top** in the inspector. Full screen uses the saved slide design. Bottom and
+Top use the layer's own text and background controls over the scene.
 
 Original recordings are in the `recordings` subfolder of that station folder.
 The **Recordings → Storage** window shows its exact path. To put future
@@ -89,6 +120,19 @@ the local Whisper runtime and the **Base English** listening model. Larger and
 multilingual listening models are optional; installing them is separate from
 the core desktop setup. Cloud collaboration and remote streaming still need
 their normal network/service configuration.
+
+Full audience outputs prefer H.264 when both endpoints support it. Once the
+running sender confirms H.264, it may use up to 8 Mbps; congestion control still
+adapts to available bandwidth. Other negotiated codecs retain their previous
+bitrate settings. Compact operator previews, Multiview, phone monitoring, input
+publishing and recording keep their existing encoding settings. Output
+diagnostics report the negotiated codec and configured bitrate ceiling. Initial
+connection bandwidth estimation can briefly reduce resolution before full HD
+settles; a frame-rate check alone does not prove full-resolution delivery.
+If a connected preferred encoder repeatedly reports zero frames, the affected
+viewer retries with the browser's default codec and bitrate. That decision is
+retained for that viewer until it disconnects, while other viewers keep their
+encoding settings. Missing or failed stats alone do not trigger a codec change.
 
 ## Building a desktop package
 
@@ -220,7 +264,15 @@ The smoke check restricts PATH to system tools, runs two disposable stations,
 checks bundled native dependencies, warms up the bundled Whisper model without
 a microphone, signs in, exports and imports a synthetic
 `.lumen` archive, starts the bundled production browser, makes a short recording,
-and checks shutdown. It never reads the operator's station or opens a physical
+and checks shutdown. While recording generated 1080p motion, it measures the
+output for 12 seconds with the operator window visible and another 12 seconds
+with that window minimized. Both phases require at least 20 presented frames per
+second, no one-second frame gap, and changes in the decoded picture. The retained
+`output-continuity.json` includes actual received resolution, frame gaps, dropped
+frames and renderer diagnostics; WebRTC may reduce transmitted resolution under
+load, so passing this check does not establish full-HD delivery or a sustained
+30 fps service. It tests the package selected by `--app`, not unbundled source
+changes. It never reads the operator's station or opens a physical
 camera/microphone. Its artifacts remain in temporary directories for diagnosis.
 
 Automated checks do not establish compatibility with every capture card, audio
@@ -228,3 +280,50 @@ device, display or GPU. Test those on the actual church computer, including a
 restart and a longer recording. A build is ready to distribute only after its
 native packaged smoke check succeeds. Signing and notarization are separate
 release steps.
+
+### Test current desktop source with existing runtimes
+
+For a quick performance regression run, build the current source and supply an
+already-installed or checksum-verified Electron runtime matching the exact
+version in `desktop/package.json`:
+
+```sh
+npm run build
+LUMEN_DESKTOP_OUTPUT_SECONDS=30 node desktop/scripts/smoke.mjs --source /absolute/path/to/Electron.app
+```
+
+`--source` clones `desktop/build/resources` into a temporary directory, verifies
+that its backend lockfile matches the current checkout, and overlays the newly
+built frontend, backend and shared modules. It rejects stale builds. It launches
+the current `desktop/app` code with disposable stations; it does not patch an
+installed app or use the operator's library. Existing native runtimes must
+already be prepared for the current platform and architecture. No downloads or
+native rebuilds occur in this mode.
+
+The duration is per phase (12–300 seconds): output plus recording with the
+operator visible, then with the operator minimized. The report identifies
+`source` versus `packaged` mode and retains frame measurements and renderer
+diagnostics. Source mode supports quick comparisons; validate the finished
+package separately with the default packaged smoke command before distribution.
+
+To qualify full-HD output on a target machine, add
+`LUMEN_DESKTOP_OUTPUT_PROFILE=1080p30`. Each phase then requires at least 28
+presented fps, 1920×1080 for at least 95% of the measured time, no frame gap of
+250 ms or longer, and a 95th-percentile gap of at most 70 ms. The default
+`continuity` profile remains the broader startup/recovery check described above.
+Neither short profile replaces a service-length test with the actual displays,
+capture devices and content.
+
+### Local Mac update retention
+
+Use `node desktop/scripts/update-mac.mjs /absolute/path/to/Lumen.app` for future
+local updates. Quit Lumen first. The updater verifies signatures, stages an APFS
+clone, and retains the previous app for rollback. It never writes to Application
+Support, notes databases, media, recordings or training data.
+
+Launch the installed app and check Studio and Notes. Once it works, run
+`node desktop/scripts/update-mac.mjs --confirm-working`. This retains exactly
+one recent working app backup and removes older timestamped app backups only.
+A pending update blocks another installation until confirmed, preventing backup
+accumulation. On a failed launch, restore the previous app; do not confirm it.
+Station-data snapshots are deliberately outside app-retention cleanup.

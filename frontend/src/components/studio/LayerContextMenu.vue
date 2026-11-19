@@ -3,11 +3,13 @@ import { computed } from 'vue';
 import { ContextMenuRoot, ContextMenuTrigger, ContextMenuPortal, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuSub, ContextMenuSubTrigger, ContextMenuSubContent, ContextMenuLabel } from 'reka-ui';
 import { ChevronRight, SlidersHorizontal, Pencil, Copy, CopyPlus, ClipboardPaste, Eye, EyeOff, Lock, Unlock, Trash2, Layers, AlignHorizontalJustifyCenter, LayoutTemplate } from 'lucide-vue-next';
 import { useStudioStore } from '@/stores/studio';
+import { useCachedOverlay } from '@/composables/useCachedOverlay';
 import type { LayerAlignment, LayerArrangeAction, LayerPreset } from '@/lib/studio/layer-layout';
 
 const props = defineProps<{ layerId: string | null }>();
 const emit = defineEmits<{ inspect: []; rename: []; 'open-change': [open: boolean] }>();
 const studio = useStudioStore();
+const active = useCachedOverlay(() => emit('open-change', false));
 const layer = computed(() => studio.selectedScene?.layers.find(item => item.id === props.layerId) ?? null);
 const index = computed(() => studio.selectedScene?.layers.findIndex(item => item.id === props.layerId) ?? -1);
 const atFront = computed(() => index.value === (studio.selectedScene?.layers.length ?? 0) - 1);
@@ -34,7 +36,7 @@ function arrange(action: LayerArrangeAction) { if (layer.value) run(studio.arran
 </script>
 
 <template>
-  <ContextMenuRoot @update:open="onOpen">
+  <ContextMenuRoot v-if="active" @update:open="onOpen">
     <ContextMenuTrigger as-child :disabled="!layer"><slot /></ContextMenuTrigger>
     <ContextMenuPortal>
       <ContextMenuContent v-if="layer" class="studio-layer-menu" data-studio-layer-menu :collision-padding="8" :loop="true" @keydown="menuKeydown">

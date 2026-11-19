@@ -75,7 +75,12 @@ function spokenTail(book: number, tail: string): (Omit<ParsedReference, 'book'> 
   // malformed citation. Sentence punctuation followed by prose or a new exact
   // book span remains harmless, but punctuation plus another number is not.
   const moreNumbers = /^[\s,.;/]*(?:(?:and|or)(?=\s|\d)\s*)?(?:(?:verses?|v|to|through)(?=\s|\d)\s*)?(?:\d|zero\b)/.test(rest);
-  if (moreNumbers || /^\s*(?::|[-–—]|verses?\b|v\b)/.test(rest)) { pending = true; invalid = true; }
+  // A speaker may correct only the number, without repeating the book name.
+  // Neither the first nor the corrected number is safe to publish as a guessed
+  // resolution. Ordinary verse text ("should not perish") does not match this
+  // immediate correction-plus-number grammar.
+  const correctedNumber = /^[\s,.;:!–—-]*(?:no|not|sorry|rather|actually|correction|i\s+mean|make\s+that)\b[\s,.;:!–—-]*(?:(?:chapter|verses?|v)\b[\s,]*)?(?:\d|zero\b|$)/.test(rest);
+  if (moreNumbers || correctedNumber || /^\s*(?::|[-–—]|verses?\b|v\b)/.test(rest)) { pending = true; invalid = true; }
   return { chapter, verse, endVerse, complete: verse !== undefined && !pending, invalid };
 }
 
@@ -126,5 +131,22 @@ export function analyzeSpokenReferences(text: string): { references: ParsedRefer
 }
 export function parseReferences(text: string): ParsedReference[] { return analyzeSpokenReferences(text).references; }
 export function parseReference(text: string): ParsedReference | null {return parseReferences(text)[0]??null;}
+/**
+ * Complete an immediately preceding partial citation only when the new audio
+ * supplies an explicit chapter/verse marker. An isolated number or unrelated
+ * sermon sentence is not enough evidence to inherit a book from earlier audio.
+ */
+export function continueSpokenReference(previous: ParsedReference, text: string): ReturnType<typeof analyzeSpokenReferences> | null {
+  if (previous.complete || previous.verse !== undefined) return null;
+  const value = normalizeSpokenNumbers(text).replace(/^[\s,.;:]+/, '');
+  const marker = /^(chapter|verses?|v)\b/.exec(value)?.[1];
+  if (!marker || (marker !== 'chapter' && previous.chapter === undefined)) return null;
+  const prefix = `${BOOK_NAMES[previous.book - 1]}${marker !== 'chapter' ? ` chapter ${previous.chapter}` : ''}`;
+  const evidence = analyzeSpokenReferences(`${prefix} ${value}`);
+  // A new chapter is a fresh instruction; do not silently pair it with an old
+  // incomplete chapter when audio windows disagree.
+  if (previous.chapter !== undefined && evidence.references.some(reference => reference.chapter !== previous.chapter)) return null;
+  return evidence;
+}
 export function searchWords(text: string) { return (text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).slice(0, 40); }
 export function ftsQuery(text: string) { return searchWords(text).map(word => `"${word}"*`).join(' AND '); }

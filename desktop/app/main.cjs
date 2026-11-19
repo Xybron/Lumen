@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, dialog, ipcMain, desktopCapturer, shell, session, systemPreferences, powerSaveBlocker } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, desktopCapturer, shell, session, systemPreferences, powerSaveBlocker, screen } = require('electron');
 const fs = require('node:fs/promises');
 const syncFs = require('node:fs');
 const path = require('node:path');
@@ -8,6 +8,10 @@ const os = require('node:os');
 const { spawn } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 const { isLocalUrl, isExternalUrl, isPreviewUrl, canGrantPermission, childEnvironment, runtimePaths, availablePort } = require('./runtime.cjs');
+const { registerVirtualDevices } = require('./virtual-devices.cjs');
+const { preventDisplaySleepWhileLive } = require('./power.cjs');
+const { registerDisplayOutputs } = require('./display-outputs.cjs');
+const { registerProductionTelemetry } = require('./production-telemetry.cjs');
 
 app.setName('Lumen');
 const smokeDirectory = process.env.LUMEN_DESKTOP_SMOKE_DIR;
@@ -32,7 +36,11 @@ let quitting = false;
 let quitRequested = false;
 let pickerState;
 let sleepBlocker;
+let stopDisplaySleepProtection;
 let logFile;
+let virtualDevices;
+let displayOutputs;
+let productionTelemetry;
 const desktopSessionName = 'persist:lumen-desktop';
 const webPreferences = () => ({
   nodeIntegration: false, nodeIntegrationInWorker: false, contextIsolation: true,
@@ -78,7 +86,11 @@ async function quit() {
     }
     quitting = true;
     pickerState?.finish(null);
+    virtualDevices?.close();
+    displayOutputs?.close();
+    productionTelemetry?.close();
     await stopBackend();
+    stopDisplaySleepProtection?.();
     if (sleepBlocker !== undefined) powerSaveBlocker.stop(sleepBlocker);
     app.quit();
   } finally { quitRequested = false; }
@@ -190,6 +202,8 @@ async function launchBackend(runtime, port, stationDirectory) {
     LUMEN_DESKTOP_RUNTIME_ROOT: runtime.root,
     LUMEN_DATA_DIR: stationDirectory, LUMEN_CHROME_PATH: runtime.chromium,
     LUMEN_WHISPER_SERVER: runtime.whisper, LUMEN_DESKTOP_MODEL: runtime.model,
+    ...(runtime.vad?{LUMEN_DESKTOP_VAD:runtime.vad}:{}),
+    ...(runtime.soffice?{LUMEN_SOFFICE_PATH:runtime.soffice}:{}),
     PORT: String(port), HOST: '127.0.0.1', NODE_ENV: 'production',
   });
   const child = spawn(runtime.node, [bootstrap], { env, cwd: path.join(runtime.root, 'lumen'), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
@@ -239,7 +253,17 @@ async function start() {
   origin = `http://127.0.0.1:${port}`;
   await fs.writeFile(settingsFile, JSON.stringify({ port }) + '\n');
   configurePermissions(session.fromPartition(desktopSessionName));
+  displayOutputs = registerDisplayOutputs({ BrowserWindow, screen, ipcMain, origin, trustedSender, webPreferences, attachWindow });
+  productionTelemetry = registerProductionTelemetry({ app, ipcMain, origin, trustedSender,
+    session: session.fromPartition(desktopSessionName) });
+  virtualDevices = registerVirtualDevices({ app, BrowserWindow, ipcMain, shell,
+    session: session.fromPartition(desktopSessionName), origin, trustedSender, log });
   sleepBlocker = powerSaveBlocker.start('prevent-app-suspension');
+  stopDisplaySleepProtection = preventDisplaySleepWhileLive({ powerSaveBlocker, readStatus: async signal => {
+    const response = await fetch(`${origin}/api/studio/status`, { signal: AbortSignal.any([signal, AbortSignal.timeout(1500)]) });
+    if (!response.ok) throw new Error('Studio status unavailable.');
+    return response.json();
+  } });
   mainWindow = new BrowserWindow({ title: 'Lumen', width: 1440, height: 960, minWidth: 1000, minHeight: 680, show: false, backgroundColor: '#101113', webPreferences: webPreferences() });
   attachWindow(mainWindow, { primary: true });
   mainWindow.once('ready-to-show', () => mainWindow.show());

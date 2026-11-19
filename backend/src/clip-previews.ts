@@ -56,7 +56,9 @@ export async function createClipPreviews(options: {
   const pending = new Map<string, ClipPreviewJob>(), queue: ClipPreviewJob[] = [];
   const claimed = new Set<string>();
   const activeJobs = new Map<string, Promise<void>>();
-  const working = new Set<{ work: ClipPreviewWork; done: Promise<void> }>();
+  const working = new Set<{ work: ClipPreviewWork; done: Promise<void>; job: ClipPreviewJob }>();
+  const deleting = new Set<string>(), owners = new Map<string, string>();
+  const sourceKey = (source: ClipSourceRef) => `${source.kind}:${source.id}`;
   let closed = false, cacheBytes = 0, cacheWrites: Promise<unknown> = Promise.resolve();
   const mimeFor = (type: ClipPreviewType) => type === 'frame' ? 'image/jpeg' as const : 'image/png' as const;
   const filenameFor = (job: Pick<ClipPreviewJob, 'key' | 'type'>) => path.join(dir, `${job.key}.${job.type === 'frame' ? 'jpg' : 'png'}`);
@@ -76,6 +78,7 @@ export async function createClipPreviews(options: {
     for (const [key, file] of sorted) {
       if (files.size <= PREVIEW_CACHE_FILES && cacheBytes <= PREVIEW_CACHE_BYTES) break;
       files.delete(key); cacheBytes -= file.size;
+      owners.delete(key);
       await fs.unlink(file.path).catch(() => {});
     }
   }
@@ -99,6 +102,7 @@ export async function createClipPreviews(options: {
       throw new ClipPreviewError(422, 'Choose a valid source, preview type and time.');
     }
     if (closed) return { status: 'unavailable', reason: 'shutting-down' };
+    if (deleting.has(sourceKey(source))) throw new ClipPreviewError(404, 'The requested media is being removed.');
     const resolved = await resolveSource({ kind: source.kind, id: source.id });
     if (closed) return { status: 'unavailable', reason: 'shutting-down' };
     if (!resolved || !path.isAbsolute(resolved.path)) throw new ClipPreviewError(404, 'The requested media is unavailable.');
@@ -106,6 +110,7 @@ export async function createClipPreviews(options: {
     if (type === 'frame' && resolved.kind !== 'video') return { status: 'unavailable', reason: 'not-video' };
     const stat = await fs.lstat(resolved.path);
     if (closed) return { status: 'unavailable', reason: 'shutting-down' };
+    if (deleting.has(sourceKey(source))) throw new ClipPreviewError(404, 'The requested media is being removed.');
     if (!stat.isFile() || stat.isSymbolicLink()) throw new ClipPreviewError(404, 'The requested media is unavailable.');
     const identity = createHash('sha256').update(JSON.stringify([source.kind, source.id, stat.size, stat.mtimeMs, stat.ctimeMs])).digest('hex');
     const quantized = Math.floor(atMs / (type === 'frame' ? PREVIEW_FRAME_MS : PREVIEW_WAVEFORM_MS)) * (type === 'frame' ? PREVIEW_FRAME_MS : PREVIEW_WAVEFORM_MS);
@@ -113,6 +118,7 @@ export async function createClipPreviews(options: {
     const job: ClipPreviewJob = { id: key, key, identity, source: { ...source }, type, atMs: quantized, resolved };
     const cacheName = path.basename(filenameFor(job)), cached = files.get(cacheName);
     if (cached) {
+      owners.set(cacheName, sourceKey(source));
       cached.used = Date.now();
       return { status: 'ready', path: cached.path, mime: mimeFor(type) };
     }
@@ -141,7 +147,7 @@ export async function createClipPreviews(options: {
     const existing = activeJobs.get(job.key); if (existing) return existing;
     const operation = processJob(job, work);
     activeJobs.set(job.key, operation);
-    const entry = { work, done: operation }; working.add(entry);
+    const entry = { work, done: operation, job }; working.add(entry);
     void operation.finally(() => { working.delete(entry); activeJobs.delete(job.key); });
     return operation;
   }
@@ -150,7 +156,7 @@ export async function createClipPreviews(options: {
     const partial = `${filenameFor(job)}.partial`, target = filenameFor(job);
     const stop = () => {
       if (isProtected() && !work.reason) work.reason = 'live';
-      return closed || !!work.reason;
+      return closed || !!work.reason || deleting.has(sourceKey(job.source));
     };
     const run = async (args: string[], timeout: number) => {
       if (stop()) return null;
@@ -213,6 +219,7 @@ export async function createClipPreviews(options: {
         await fs.rename(partial, target);
         if (stop()) { await fs.unlink(target).catch(() => {}); return; }
         const name = path.basename(target), previous = files.get(name);
+        owners.set(name, sourceKey(job.source));
         cacheBytes -= previous?.size ?? 0;
         files.set(name, { path: target, size: outputStat.size, used: Date.now() }); cacheBytes += outputStat.size;
         await evict(); completed = true;
@@ -235,5 +242,25 @@ export async function createClipPreviews(options: {
     for (const entry of working) { entry.work.reason ??= 'shutdown'; entry.work.process?.stop('Preview worker is shutting down.'); }
     await Promise.allSettled([...working].map(entry => entry.done)); await cacheWrites; pending.clear();
   }
-  return { request, nextJob, process, close };
+  async function withSourceDeletion<T>(source: ClipSourceRef, operation: () => Promise<T>): Promise<T> {
+    const key = sourceKey(source); deleting.add(key);
+    try {
+      for (let index = queue.length - 1; index >= 0; index--) if (sourceKey(queue[index].source) === key) queue.splice(index, 1);
+      for (const [id, job] of pending) if (sourceKey(job.source) === key) pending.delete(id);
+      const active = [...working].filter(entry => sourceKey(entry.job.source) === key);
+      for (const entry of active) { entry.work.reason = 'cancel'; entry.work.process?.stop('The imported media is being removed.'); }
+      await Promise.allSettled(active.map(entry => entry.done));
+      await cacheSerial(async () => {
+        // Only files whose source was verified in this process can be attributed
+        // safely. Older opaque cache entries remain covered by bounded eviction.
+        for (const [name, owner] of owners) if (owner === key) {
+          const file = files.get(name);
+          if (file) { await fs.unlink(file.path).catch(() => {}); files.delete(name); cacheBytes -= file.size; }
+          owners.delete(name);
+        }
+      });
+      return await operation();
+    } finally { deleting.delete(key); }
+  }
+  return { request, nextJob, process, close, withSourceDeletion };
 }

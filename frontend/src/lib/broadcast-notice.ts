@@ -1,6 +1,6 @@
 import type { BroadcastSession, BroadcastSinkStatus } from '../../../shared/broadcast';
 
-const names = { youtube: 'YouTube', facebook: 'Facebook', watch: 'Lumen Watch' };
+const names = { youtube: 'YouTube', facebook: 'Facebook', instagram: 'Instagram', watch: 'Lumen Watch' };
 export interface BroadcastNotice {
   key: string;
   tone: 'danger' | 'warning' | 'info';

@@ -42,6 +42,7 @@ starting = (async () => {
   const root = process.env.LUMEN_DESKTOP_RUNTIME_ROOT;
   if (!root || !path.isAbsolute(root) || !process.env.LUMEN_DATA_DIR || !process.env.LUMEN_WHISPER_SERVER || !process.env.LUMEN_DESKTOP_MODEL) throw new Error('The desktop runtime configuration is incomplete.');
   await installModel(process.env.LUMEN_DESKTOP_MODEL, path.join(process.env.LUMEN_DATA_DIR, 'ai', 'models'));
+  if(process.env.LUMEN_DESKTOP_VAD)await installModel(process.env.LUMEN_DESKTOP_VAD, path.join(process.env.LUMEN_DATA_DIR, 'ai', 'models'));
   const { startLumenServer } = await import(pathToFileURL(path.join(root, 'lumen', 'backend', 'dist', 'server.js')).href);
   station = await startLumenServer({ port: Number(process.env.PORT), host: '127.0.0.1', development: false });
   send({ type: 'ready', port: station.server.address().port });

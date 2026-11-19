@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 import { VueDraggable } from 'vue-draggable-plus';
 import {
   Play,
+  LoaderCircle,
   Pause,
   SkipForward,
   Music2,
@@ -13,6 +14,7 @@ import {
   Repeat,
   Shuffle,
   CircleSlash2,
+  Headphones,
 } from 'lucide-vue-next';
 import { Slider } from '@/components/ui/slider';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -21,12 +23,30 @@ import { useContentStore } from '@/stores/content';
 import { api } from '@/lib/api';
 import { toast } from 'vue-sonner';
 import type { MusicMode } from '@/types';
+import MediaImagePicker from '@/components/media/MediaImagePicker.vue';
+import { mediaAssetReference, type MediaLibraryAsset } from '@/lib/media-library';
+import { useIdentityStore } from '@/stores/identity';
+
+// The media picker is a second root. Responsive layout attributes belong on
+// the player itself, otherwise its hidden phone/desktop copy enters the grid.
+defineOptions({ inheritAttrs: false });
 
 const music = useMusicStore();
 const content = useContentStore();
+const identity = useIdentityStore(), mediaPickerOpen = ref(false);
 
 const queueOpen = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
+
+async function chooseTrack(asset: MediaLibraryAsset) {
+  if (!identity.can('*', 'author') || asset.origin !== 'library' || asset.kind !== 'audio') return;
+  const path = mediaAssetReference(asset);
+  const saved = await content.save(draft => {
+    if (!draft.music.queue.includes(path)) draft.music.queue.push(path);
+    if (!draft.music.current) draft.music.current = path;
+  });
+  if (saved) { mediaPickerOpen.value = false; toast.success(`Added “${asset.displayName}” to music.`); }
+}
 
 const trackName = computed(() => {
   const t = music.currentTrack ?? content.content.music.current;
@@ -44,7 +64,7 @@ function setVolume(v: number[] | undefined) {
 }
 
 const MODES: { value: MusicMode; label: string; icon: typeof Repeat }[] = [
-  { value: 'off', label: 'Off', icon: CircleSlash2 },
+  { value: 'off', label: 'Single', icon: CircleSlash2 },
   { value: 'loop', label: 'Loop', icon: Repeat },
   { value: 'playlist', label: 'Playlist', icon: Shuffle },
 ];
@@ -86,25 +106,31 @@ async function onQueueSorted(e: { oldIndex?: number; newIndex?: number }) {
 </script>
 
 <template>
-  <div class="music-mini-player flex items-center gap-2 panel-soft px-2 py-1 h-9 min-w-0 md:min-w-[220px] w-full md:w-auto">
+  <div v-bind="$attrs" class="music-mini-player flex items-center gap-2 panel-soft px-2 py-1 h-9 min-w-0 md:min-w-[220px] w-full md:w-auto">
     <Music2 :size="14" class="text-white/55" />
     <button
       class="h-6 w-6 rounded-md flex items-center justify-center bg-white/[0.06] hover:bg-white/[0.12] transition-colors disabled:opacity-40"
-      :disabled="music.mode === 'off' || !music.currentTrack && content.content.music.queue.length === 0"
-      :title="music.playing ? 'Pause' : 'Play'"
+      :disabled="music.starting || !music.currentTrack && !content.content.music.current && content.content.music.queue.length === 0"
+      :title="music.playing ? 'Pause music' : 'Play music'"
+      :aria-label="music.starting ? 'Preparing music' : music.playing ? 'Pause music' : 'Play music'"
       @click="music.toggle"
     >
-      <Pause v-if="music.playing" :size="11" />
+      <LoaderCircle v-if="music.starting" :size="11" class="animate-spin" /><Pause v-else-if="music.playing" :size="11" />
       <Play v-else :size="11" />
     </button>
     <button
       class="h-6 w-6 rounded-md flex items-center justify-center hover:bg-white/10 transition-colors text-white/60 disabled:opacity-30"
-      :disabled="music.mode !== 'playlist'"
+      :disabled="music.queue.length < 2"
       title="Skip"
       @click="music.skip"
     >
       <SkipForward :size="11" />
     </button>
+
+    <button type="button" class="music-auto shrink-0 text-[10px] px-1.5 py-1 rounded-md border border-hair"
+      :class="music.autoEnabled ? 'text-accent bg-accent/10' : 'text-white/55'"
+      :aria-pressed="music.autoEnabled" aria-label="Music Auto" title="Automatically repeat or advance tracks"
+      @click="music.setAutoEnabled(!music.autoEnabled)">Auto {{ music.autoEnabled ? 'on' : 'off' }}</button>
 
     <Popover v-model:open="queueOpen">
       <PopoverTrigger as-child>
@@ -135,6 +161,16 @@ async function onQueueSorted(e: { oldIndex?: number; newIndex?: number }) {
           </label>
         </header>
 
+        <button v-if="identity.can('*', 'author')" type="button" class="my-2 flex w-full items-center justify-center gap-2 rounded-lg border border-hair px-3 py-2 text-xs text-accent hover:bg-white/5" @click="mediaPickerOpen = true"><ListMusic :size="13" />Choose from Media</button>
+
+        <div class="flex items-center justify-between gap-2 my-3 text-xs text-white/60">
+          <span>Music feeds Program’s Main mix.</span>
+          <button type="button" class="flex items-center gap-1.5 px-2 py-1 rounded-md border border-hair"
+            :class="{ 'text-accent': music.monitorEnabled }" :aria-pressed="music.monitorEnabled"
+            aria-label="Monitor music locally" title="Use headphones to avoid feedback"
+            @click="music.setMonitorEnabled(!music.monitorEnabled)"><Headphones :size="12" />Monitor</button>
+        </div>
+        <p class="text-[11px] text-white/50 mb-2">When Auto is on</p>
         <div class="flex gap-1.5">
           <button
             v-for="m in MODES"
@@ -217,6 +253,7 @@ async function onQueueSorted(e: { oldIndex?: number; newIndex?: number }) {
       />
     </div>
   </div>
+  <MediaImagePicker v-model:open="mediaPickerOpen" :accepted-kinds="['audio']" @select="chooseTrack" />
 </template>
 
 <style scoped>

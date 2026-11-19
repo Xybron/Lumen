@@ -6,24 +6,24 @@ import { useMediaQuery } from '@vueuse/core';
 import PlaylistRail from '@/components/dashboard/PlaylistRail.vue';
 import TransportBar from '@/components/dashboard/TransportBar.vue';
 import UpNextRail from '@/components/dashboard/UpNextRail.vue';
+import NotesWorkspaceDialog from '@/components/channel/NotesWorkspaceDialog.vue';
 import EditItemDialog from '@/components/dashboard/EditItemDialog.vue';
 import SettingsDialog from '@/components/dashboard/SettingsDialog.vue';
-import MusicMiniPlayer from '@/components/dashboard/MusicMiniPlayer.vue';
 import ChannelEditor from '@/components/channel/ChannelEditor.vue';
 import MobileTransportStrip from '@/components/channel/MobileTransportStrip.vue';
 import ShortcutsDialog from '@/components/channel/ShortcutsDialog.vue';
 
 import { useContentStore } from '@/stores/content';
 import { useEnginesStore } from '@/stores/engines';
-import { useMusicStore } from '@/stores/music';
 import { useIdentityStore } from '@/stores/identity';
 import { usePresenceStore } from '@/stores/presence';
 import { useChannelKeyboard } from '@/composables/useChannelKeyboard';
+import { orderPresentationGroups } from '@/lib/presentation-groups';
+import { notesRoot, notesSeries, replaceNotesSeries } from '@/lib/notes-slides';
 import type { Item } from '@/types';
 
 const content = useContentStore();
 const engines = useEnginesStore();
-const music = useMusicStore();
 const identity = useIdentityStore();
 const presence = usePresenceStore();
 
@@ -33,6 +33,12 @@ const channel = computed(() => content.channels.find((c) => c.id === engines.foc
 const editing = ref<Item | null>(null);
 const editDestination = ref<{ channelId: string; playlistId: string } | null>(null);
 const editOpen = ref(false);
+const notesOpen = ref(false);
+const editingChannel = computed(() => content.channels.find(c => c.id === editDestination.value?.channelId) ?? null);
+const editingSeries = computed(() => {
+  const items = content.playlists.find(playlist => playlist.id === editDestination.value?.playlistId)?.items;
+  return editing.value && items ? notesSeries(items, editing.value) : [];
+});
 const shortcutsOpen = ref(false);
 const settingsOpen = ref(false);
 
@@ -63,24 +69,40 @@ function openUpNext() { animateSheets.value = true; upNextSheetOpen.value = true
 
 function openEdit(item: Item) {
   if (!channel.value || !identity.can(channel.value.id, 'author') || presence.controlledByOther(channel.value.id)) return;
-  if (!content.playlistForChannel(channel.value.id)?.items.some(slide => slide.id === item.id)) return;
-  editing.value = item;
+  const playlist = content.playlistForChannel(channel.value.id);
+  if (!playlist?.items.some(slide => slide.id === item.id)) return;
+  editing.value = item.type === 'notes' ? notesRoot(playlist.items, item) : item;
   editDestination.value = { channelId: channel.value.id, playlistId: channel.value.playlistId };
-  editOpen.value = true;
+  if (item.type === 'notes') notesOpen.value = true; else editOpen.value = true;
 }
 async function saveEdit(item: Item) {
   const destination = editDestination.value;
   if (!destination || !identity.can(destination.channelId, 'author') || presence.controlledByOther(destination.channelId)) return;
   await content.updateItem(destination.playlistId, item.id, item);
 }
+async function commitNotes(items: Item[]): Promise<boolean> {
+  const destination = editDestination.value;
+  const rootId = editing.value?.id;
+  if (!destination || !rootId || !items.length || !identity.can(destination.channelId, 'author') || presence.controlledByOther(destination.channelId)) return false;
+  const saved = await content.save(draft => {
+    // Saves are queued. Recheck the destination and access at execution time.
+    if (!identity.can(destination.channelId, 'author') || presence.controlledByOther(destination.channelId)
+      || !draft.channels.some(channel => channel.id === destination.channelId && channel.playlistId === destination.playlistId))
+      throw new Error('This channel changed. Reopen the Note before updating.');
+    const playlist = draft.playlists.find(p => p.id === destination.playlistId);
+    if (!playlist) throw new Error('This channel no longer exists.');
+    playlist.items = replaceNotesSeries(playlist.items, rootId, items);
+    orderPresentationGroups(playlist);
+  });
+  if (saved && editing.value?.id === rootId && editDestination.value?.playlistId === destination.playlistId)
+    editing.value = content.playlists.find(playlist => playlist.id === destination.playlistId)?.items.find(item => item.id === rootId) ?? editing.value;
+  return saved;
+}
 
 useChannelKeyboard({ onToggleShortcuts: () => (shortcutsOpen.value = !shortcutsOpen.value) });
 
 onMounted(async () => {
   await content.load();
-  if (content.content.music.mode !== 'off' && content.content.music.current) {
-    void music.play();
-  }
 });
 </script>
 
@@ -115,11 +137,9 @@ onMounted(async () => {
       </button>
     </div>
 
-    <!-- Center column wrapper. md:contents collapses it so the main panel
-         becomes a direct grid child at md+. -->
-    <div class="flex flex-col gap-2 sm:gap-3 min-h-0 md:contents">
+    <!-- Keep the editor and its mobile controls in one grid column. -->
+    <div class="presentation-center flex flex-col gap-2 sm:gap-3 min-h-0 min-w-0">
       <MobileTransportStrip />
-      <MusicMiniPlayer class="md:hidden shrink-0" />
       <ChannelEditor :channel="channel" @edit="openEdit" @open-shortcuts="shortcutsOpen = true" />
     </div>
 
@@ -157,7 +177,8 @@ onMounted(async () => {
       <div v-if="showBackdrop" class="fixed inset-0 z-40 bg-black/55 backdrop-blur-sm" @click="closeSheets" />
     </Transition>
 
-    <EditItemDialog v-model:open="editOpen" :item="editing" @save="saveEdit" />
+    <EditItemDialog v-model:open="editOpen" :item="editing" :playlist-id="editDestination?.playlistId" @save="saveEdit" />
+    <NotesWorkspaceDialog v-model:open="notesOpen" :channel="editingChannel" :item="editing" :series="editingSeries" :commit="commitNotes" />
     <SettingsDialog v-model:open="settingsOpen" />
     <ShortcutsDialog v-model:open="shortcutsOpen" />
 

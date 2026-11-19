@@ -136,3 +136,22 @@ test('explicit correction markers before exact citations are separate from verse
     'John 3:16. The speaker said not to worry.', 'I am not the shepherd',
   ]) assert.equal(analyzeSpokenReferences(input).negated, false, input);
 });
+
+test('split citation continuation requires an explicit marker and a compatible preceding partial', async()=>{
+  const {continueSpokenReference}=await import('../src/scripture-reference.js');
+  assert.deepEqual(continueSpokenReference(reference(43,3),'verse sixteen')?.references,[reference(43,3,16)]);
+  assert.deepEqual(continueSpokenReference(reference(43),'chapter three verse sixteen')?.references,[reference(43,3,16)]);
+  assert.deepEqual(continueSpokenReference(reference(43,3),'chapter three verses sixteen through eighteen')?.references,[reference(43,3,16,18)]);
+  for(const text of ['sixteen','we have sixteen people here','not verse sixteen','chapter four verse one','let us think about verse sixteen'])assert.equal(continueSpokenReference(reference(43,3),text),null,text);
+  assert.equal(continueSpokenReference(reference(43,3,16,undefined,false),'verse eighteen'),null,'Dangling ranges must not be repaired by guessing.');
+  assert.equal(continueSpokenReference(reference(43),'verse sixteen'),null,'No inferred chapter.');
+  assert.equal(continueSpokenReference(reference(43,3,16),'verse seventeen'),null,'Complete historic citations are not inherited.');
+  assert.equal(continueSpokenReference(reference(43,3),'verse zero')?.invalid,true);
+});
+
+test('immediate spoken numeric corrections cannot publish the uncorrected reference',()=>{
+  for(const text of ['John 3:16, sorry, verse seventeen','John 3:16 no seventeen','John chapter three verse sixteen, I mean seventeen','John 3:16; not seventeen','John 3:16 actually verse zero','John 3:16 make that seventeen','John 3:16, sorry']){
+    const evidence=analyzeSpokenReferences(text);assert.equal(evidence.invalid,true,text);assert.ok(evidence.references.every(reference=>!reference.complete),text);
+  }
+  for(const text of ['John 3:16 says you should not perish','John 3:16 no man can dispute this','John 3:16 sorry for the delay'])assert.equal(analyzeSpokenReferences(text).invalid,false,text);
+});

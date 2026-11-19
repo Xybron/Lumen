@@ -5,12 +5,12 @@ import { reactiveOmit } from '@vueuse/core'
 import {
   CircleCheckIcon,
   InfoIcon,
-  Loader2Icon,
   OctagonXIcon,
   TriangleAlertIcon,
   XIcon,
 } from 'lucide-vue-next'
 import { Toaster as Sonner } from 'vue-sonner'
+import { SkeletonIndicator } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 
 const props = defineProps<ToasterProps>()
@@ -48,7 +48,7 @@ const forwarded = reactiveOmit(props, 'toastOptions', 'class')
     </template>
     <template #loading-icon>
       <div>
-        <Loader2Icon class="size-4 animate-spin" />
+        <SkeletonIndicator />
       </div>
     </template>
     <template #close-icon>

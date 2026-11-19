@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { LoadingSkeleton, Skeleton, SkeletonIndicator } from '@/components/ui/skeleton';
 import { computed, ref, watch } from 'vue';
-import { UserPlus, Shield, Loader2 } from 'lucide-vue-next';
+import { UserPlus, Shield } from 'lucide-vue-next';
 import { toast } from 'vue-sonner';
 import {
   Dialog,
@@ -146,7 +147,7 @@ function channelName(id: string) {
               <input v-model="draft.isAdmin" type="checkbox" class="accent-accent" /> Admin
             </label>
             <Button type="submit" variant="accent" size="md" :disabled="creating" class="ml-auto">
-              <Loader2 v-if="creating" :size="13" class="animate-spin" />
+              <SkeletonIndicator v-if="creating" />
               <UserPlus v-else :size="13" />
               Add
             </Button>
@@ -154,10 +155,13 @@ function channelName(id: string) {
         </form>
 
         <!-- list -->
-        <div v-if="loading" class="text-sm text-white/45 px-1 py-4 flex items-center gap-2">
-          <Loader2 :size="14" class="animate-spin" /> Loading…
-        </div>
-        <ul v-else class="flex flex-col gap-2">
+        <LoadingSkeleton v-if="loading && !users.length" class="flex flex-col gap-2" label="Loading team members">
+          <div v-for="n in 3" :key="n" class="panel-soft p-3 flex flex-col gap-3" aria-hidden="true">
+            <div class="flex items-center gap-2"><Skeleton :width="28" :height="28" radius="50%" /><div class="flex-1 flex flex-col gap-2"><Skeleton :width="n % 2 ? '38%' : '52%'" :height="12" /><Skeleton width="28%" :height="9" /></div></div>
+            <Skeleton width="48%" :height="9" /><div class="flex gap-2"><Skeleton width="38%" :height="30" /><Skeleton width="26%" :height="30" /><Skeleton :width="60" :height="30" /></div>
+          </div>
+        </LoadingSkeleton>
+        <ul v-else class="flex flex-col gap-2" :aria-busy="loading">
           <li v-for="u in users" :key="u.id" class="panel-soft p-3 flex flex-col gap-2">
             <div class="flex items-center gap-2">
               <span class="h-7 w-7 rounded-full bg-accent/15 text-accent text-xs font-semibold flex items-center justify-center uppercase">

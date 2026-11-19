@@ -2,14 +2,15 @@ import { ref, reactive, watch } from 'vue';
 import { defineStore } from 'pinia';
 import { toast } from 'vue-sonner';
 import { subscribeTopics, subscribeWs } from '@/lib/ws';
-import { worshipRequest, WorshipRequestError } from '@/lib/worship/api';
-import { captureListening,listeningInputError,type ListeningInputInfo,type ListeningProcessing } from '@/lib/worship/audio';
+import { worshipRequest } from '@/lib/worship/api';
+import { captureListening,captureStreaming,listeningInputError,type ListeningInputInfo,type ListeningProcessing } from '@/lib/worship/audio';
 import { useIdentityStore } from './identity';
 import { usePresenceStore } from './presence';
+import { useSharedListeningStore } from './shared-listening';
 import type { BibleVersion, WorshipWorkspace, WorshipCommand, CueSelection, LiveCue, ListeningStatus, ListeningSession, ListeningResult, ScripturePin, ScriptureSelection } from '../../../shared/worship';
 
 interface ListeningView { session:ListeningSession|null; starting:boolean; busy:boolean; level:number; peak:number; clipping:boolean; inputInfo:ListeningInputInfo|null; result:ListeningResult|null; error:string }
-interface ListeningControls { mode:'assisted'|'automatic'; commands:boolean }
+interface ListeningControls { provider:'local'|'assemblyai'; providerSelected?:boolean; mode:'assisted'|'automatic'; commands:boolean }
 export const useWorshipStore=defineStore('worship',()=>{
   const scripturePins=ref<ScripturePin[]>([]),pinsBusy=ref(false);
   let pinsRequest=0;
@@ -27,13 +28,32 @@ export const useWorshipStore=defineStore('worship',()=>{
   // the capture/session, in memory only: a reload must not restore auto mode.
   const listeningControls=reactive<Record<string,ListeningControls>>({});
   function listeningControlsFor(id:string){
-    if(!listeningControls[id])listeningControls[id]={mode:'assisted',commands:false};
+    if(!listeningControls[id])listeningControls[id]={provider:'local',mode:'assisted',commands:false};
     return listeningControls[id];
   }
+  const cloudSockets=new Map<string,WebSocket>();
+  const cloudDraining=new Set<string>(),producerReleases=new Map<string,()=>void>();
+  const shared=useSharedListeningStore(),sharedTargets=new Set<string>(),sharedFrames=new Map<string,string>();
+  function followShared(id:string){sharedTargets.add(id);applyShared();shared.connect();}
+  function applyShared(){
+    const snapshot=shared.snapshot;
+    if(snapshot.session?.mode){const session=listening[snapshot.session.channelId]?.session;if(session?.id===snapshot.session.id)session.mode=snapshot.session.mode;}
+    if(!snapshot.session||!snapshot.result){sharedFrames.clear();return;}
+    const frame=JSON.stringify([snapshot.session.id,snapshot.turn,snapshot.result.transcript,snapshot.result.candidate?.selection??null,snapshot.result.reason]);
+    for(const id of sharedTargets){
+      if(!identity.can(id,'author')||sharedFrames.get(id)===frame)continue;
+      sharedFrames.set(id,frame);drafts[id]=snapshot.result.candidate;
+      // A shared result's workspace belongs to its producer, never the viewer.
+    }
+  }
+  const examples=reactive<Record<string,any[]>>({});
+  const exampleBusy=reactive<Record<string,boolean>>({});
   const captures=new Map<string,{stop:()=>void;heartbeat:number;abort:AbortController}>();
   const stopping=new Map<string,Promise<void>>();
   const prepareVersion=new Map<string,number>();
   const identity=useIdentityStore(),presence=usePresenceStore();
+  watch(()=>shared.snapshot,applyShared,{deep:false});
+  watch(()=>shared.session?.state,state=>{if(state==='finishing')for(const [id] of cloudSockets)if(listening[id]?.session?.id===shared.session?.id)void stopListening(id);});
   watch(()=>[identity.isAuthenticated,presence.owners] as const,()=>{
     for(const id of captures.keys())if(!identity.isAuthenticated||presence.controlledByOther(id))void stopListening(id);
   },{deep:true});
@@ -61,13 +81,29 @@ export const useWorshipStore=defineStore('worship',()=>{
     }finally{if(prepareVersion.get(id)===version)preparing[id]=false;}
   }
   async function stopListening(id:string,notifyServer=true){
-    const capture=captures.get(id);capture?.stop();capture?.abort.abort();clearInterval(capture?.heartbeat);captures.delete(id);
-    if(listening[id]){listening[id].session=null;listening[id].starting=false;listening[id].busy=false;listening[id].level=0;listening[id].peak=0;listening[id].clipping=false;}
-    if(!notifyServer){await stopping.get(id);return;}
-    if(stopping.has(id)){await stopping.get(id);return;}
-    const request=worshipRequest(`/channels/${id}/listening`,{method:'DELETE'}).then(()=>{},()=>{});
-    stopping.set(id,request);
-    try{await request;}finally{if(stopping.get(id)===request)stopping.delete(id);}
+    const capture=captures.get(id),socket=cloudSockets.get(id),session=listening[id]?.session;
+    capture?.stop();clearInterval(capture?.heartbeat);
+    if(stopping.has(id)){if(!notifyServer){capture?.abort.abort();socket?.close();}await stopping.get(id);return;}
+    const finish=notifyServer&&socket?.readyState===WebSocket.OPEN&&!!session;
+    const request=(async()=>{
+      if(finish){
+        cloudDraining.add(id);let timeout:number|undefined;
+        const closed=new Promise<void>(resolve=>socket.addEventListener('close',()=>resolve(),{once:true}));
+        try{
+          if(shared.session?.id===session.id)await fetch(`/api/listening/shared?session=${encodeURIComponent(session.id)}`,{method:'DELETE'});
+          else socket.send(JSON.stringify({type:'stop'}));
+          await Promise.race([closed,new Promise<void>(resolve=>{timeout=window.setTimeout(resolve,4000);})]);
+        }catch{/* Closing below releases the source on connection failure. */}finally{clearTimeout(timeout);}
+      }
+      capture?.abort.abort();socket?.close();cloudSockets.delete(id);cloudDraining.delete(id);exampleBusy[id]=false;captures.delete(id);
+      producerReleases.get(id)?.();producerReleases.delete(id);
+      if(listening[id]){listening[id].session=null;listening[id].starting=false;listening[id].busy=false;listening[id].level=0;listening[id].peak=0;listening[id].clipping=false;}
+      // Cancelled CONNECTING sockets may never reach the bridge. End their
+      // captured lease by ID without touching a replacement session.
+      if(notifyServer&&session?.provider==='assemblyai')await fetch(`/api/listening/shared?session=${encodeURIComponent(session.id)}`,{method:'DELETE'}).catch(()=>{});
+      else if(notifyServer&&!socket)await worshipRequest(`/channels/${id}/listening`,{method:'DELETE'}).catch(()=>{});
+    })();
+    stopping.set(id,request);try{await request;}finally{if(stopping.get(id)===request)stopping.delete(id);}
   }
   async function command(id:string,command:WorshipCommand){
     if(saving[id])return;
@@ -78,7 +114,7 @@ export const useWorshipStore=defineStore('worship',()=>{
     const stepVersion=followLyrics?(prepareVersion.get(id)??0)+1:undefined;
     if(stepVersion!==undefined){prepareVersion.set(id,stepVersion);preparing[id]=false;}
     try{
-      await stopListening(id,false);
+      if(listening[id]?.session?.provider!=='assemblyai')await stopListening(id,false);
       const state=workspaces[id];
       const result=await worshipRequest<WorshipWorkspace>(`/channels/${id}/command`,{method:'POST',body:JSON.stringify({revision:state.revision,command})});
       if(result.revision>=(workspaces[id]?.revision??-1)){
@@ -91,31 +127,37 @@ export const useWorshipStore=defineStore('worship',()=>{
   }
   async function take(id:string){if(preparing[id])return;const draft=drafts[id];if(draft)await command(id,{type:'take',selection:{...draft.selection}});}
   async function startListening(id:string,deviceId:string,mode:'assisted'|'automatic',commands:boolean,processing:ListeningProcessing='speech'){
+    if(listeningControlsFor(id).provider==='assemblyai')return startCloudListening(id,deviceId,processing,mode);
     await stopping.get(id);
     if(captures.has(id))return;
     Object.assign(listeningControlsFor(id),{mode,commands});
     const view=reactive<ListeningView>({session:null,starting:true,busy:false,level:0,peak:0,clipping:false,inputInfo:null,result:null,error:''});listening[id]=view;
     let stopCapture:(()=>void)|undefined;
-    const abort=new AbortController();let sequence=0,failures=0;
+    const abort=new AbortController();let sequence=0;
     const capture={stop:()=>{stopCapture?.();},heartbeat:0,abort};captures.set(id,capture);
     try{
       // Capture permission is requested by the user's explicit Listen click.
       // No audio is sent until the authenticated station session is ready.
+      // Startup windows are intentionally consumed during model warmup: the
+      // listening session starts with current speech, not a stale startup queue.
       stopCapture=await captureListening(deviceId,(audio,level)=>{
         const current=listening[id];if(abort.signal.aborted||captures.get(id)!==capture||!current?.session)return;
-        if(current.busy||level<.003)return;
+        if(current.busy)return false;
+        // Silence breaks partial reference context even though no WAV is sent.
+        if(level<.003){sequence++;return;}
         current.busy=true;
         const session=current.session;
-        void worshipRequest<ListeningResult>(`/channels/${id}/listening/audio?session=${session.id}&sequence=${sequence++}`,{method:'POST',headers:{'Content-Type':'audio/wav'},body:audio,signal:abort.signal}).then(result=>{
+        return worshipRequest<ListeningResult>(`/channels/${id}/listening/audio?session=${session.id}&sequence=${sequence++}`,{method:'POST',headers:{'Content-Type':'audio/wav'},body:audio,signal:abort.signal}).then(result=>{
           if(listening[id]?.session?.id!==session.id)return;
-          current.result=result;current.error='';failures=0;
+          current.result=result;current.error='';
           if(!workspaces[id]||result.workspace.revision>=workspaces[id].revision)workspaces[id]=result.workspace;
           if(result.candidate)drafts[id]=result.candidate;
         }).catch(error=>{
           if(abort.signal.aborted)return;
-          current.error=error.message;
-          if(error instanceof WorshipRequestError&&error.status===429)return;
-          if(++failures>=3 || error.status===409 || error.status===403){void stopListening(id);toast.error('Listening stopped. Manual controls remain available.');}
+          // Continuing after a failed window silently loses speech and can
+          // stitch a later verse number onto unrelated reference context.
+          current.error=`Listening stopped because this audio could not be processed. ${error.message}`;
+          void stopListening(id);toast.error('Listening stopped. Manual controls remain available.');
         }).finally(()=>{current.busy=false;});
       },()=>{
         if(captures.get(id)!==capture)return;
@@ -125,6 +167,11 @@ export const useWorshipStore=defineStore('worship',()=>{
         signal:abort.signal,processing,
         onInfo:info=>{if(captures.get(id)===capture)view.inputInfo=info;},
         onLevels:levels=>{if(captures.get(id)!==capture)return;view.level=levels.rms;view.peak=levels.peak;view.clipping=levels.clipping;},
+        onOverflow:()=>{
+          if(captures.get(id)!==capture)return;
+          view.error='Recognition could not keep up with the speaker. Listening stopped because audio arrived faster than it could be processed. Choose a faster model or reduce other work on this station, then start again.';
+          void stopListening(id);
+        },
       });
       if(abort.signal.aborted){stopCapture();return;}
       const session=await worshipRequest<ListeningSession>(`/channels/${id}/listening`,{method:'POST',body:JSON.stringify({mode,commands,language:'en'}),signal:abort.signal});
@@ -134,6 +181,54 @@ export const useWorshipStore=defineStore('worship',()=>{
       capture.heartbeat=heartbeat;void refreshAi().catch(()=>{});
     }catch(error){stopCapture?.();if(captures.get(id)===capture)captures.delete(id);if(abort.signal.aborted)return;view.starting=false;view.error=listeningInputError(error);toast.error(view.error);}
   }
+  async function startCloudListening(id:string,deviceId:string,processing:ListeningProcessing,mode:'assisted'|'automatic'){
+    await stopping.get(id);if(captures.has(id))return;
+    Object.assign(listeningControlsFor(id),{provider:'assemblyai',mode,commands:false});
+    const view=reactive<ListeningView>({session:null,starting:true,busy:false,level:0,peak:0,clipping:false,inputInfo:null,result:null,error:''});listening[id]=view;
+    const abort=new AbortController();let stopInput:(()=>void)|undefined,ready=false;
+    const capture={stop:()=>stopInput?.(),heartbeat:0,abort};captures.set(id,capture);
+    const fail=(message:string)=>{if(abort.signal.aborted)return;view.error=message;shared.reportError(message);void stopListening(id);};
+    try {
+      stopInput=await captureStreaming(deviceId,pcm=>{
+        const socket=cloudSockets.get(id);if(!ready||abort.signal.aborted||!socket)return;
+        if(socket.readyState!==WebSocket.OPEN||socket.bufferedAmount>64000){fail('The network cannot keep up with microphone audio. Listening stopped.');return;}socket.send(pcm);
+      },()=>fail('The microphone disconnected. Reconnect it and start listening again.'),{
+        processing,signal:abort.signal,onInfo:info=>view.inputInfo=info,onLevels:levels=>{view.level=levels.rms;view.peak=levels.peak;view.clipping=levels.clipping;},
+      });
+      if(abort.signal.aborted){stopInput();return;}
+      const session=await worshipRequest<ListeningSession>(`/channels/${id}/listening`,{method:'POST',body:JSON.stringify({provider:'assemblyai',mode,commands:false,language:'en'}),signal:abort.signal});
+      if(abort.signal.aborted){stopInput();return;}view.session=session;
+      producerReleases.set(id,shared.registerProducer(session.id,()=>stopListening(id)));shared.connect();void shared.refresh().catch(()=>{});
+      const url=new URL('/worship/listening/stream',location.href);url.protocol=location.protocol==='https:'?'wss:':'ws:';url.searchParams.set('channel',id);url.searchParams.set('session',session.id);
+      const socket=new WebSocket(url);cloudSockets.set(id,socket);
+      const deadline=window.setTimeout(()=>fail('Streaming did not start. Check your internet connection and try again.'),20000);
+      socket.onmessage=event=>{
+        if(abort.signal.aborted||captures.get(id)!==capture)return;
+        let message:any;try{message=JSON.parse(event.data);}catch{fail('The station returned an invalid streaming response.');return;}
+        if(message.type==='ready'){clearTimeout(deadline);ready=true;view.starting=false;}
+        else if(message.type==='finishing'){capture.stop();void stopListening(id);}
+        else if(message.type==='result'){
+          view.result=message.result;view.error='';drafts[id]=message.result.candidate;
+          if(message.result.workspace.revision>=(workspaces[id]?.revision??-1))workspaces[id]=message.result.workspace;
+        }else if(message.type==='error')fail(message.message);
+        else if(message.type==='example'){exampleBusy[id]=false;(examples[id]??=[]).unshift(message.example);examples[id]=examples[id].slice(0,20);}
+        else if(message.type==='save-error'){exampleBusy[id]=false;toast.error(message.message);}
+      };
+      socket.onerror=()=>fail('The streaming connection failed. Check your connection and restart listening.');
+      socket.onclose=()=>{clearTimeout(deadline);if(!abort.signal.aborted&&!cloudDraining.has(id))fail('Streaming disconnected. Listening stopped.');};
+      abort.signal.addEventListener('abort',()=>{clearTimeout(deadline);socket.close();},{once:true});
+    }catch(error){if(!abort.signal.aborted)fail(listeningInputError(error));else stopInput?.();}
+  }
+  async function refreshListeningExamples(id:string){examples[id]=await worshipRequest<any[]>(`/listening/examples?channel=${encodeURIComponent(id)}`);}
+  function saveListeningExample(id:string){
+    const socket=cloudSockets.get(id);if(socket?.readyState!==WebSocket.OPEN||exampleBusy[id])return;
+    exampleBusy[id]=true;socket.send(JSON.stringify({type:'save-example'}));
+  }
+  async function reviewListeningExample(id:string,exampleId:string,review:unknown){
+    const saved=await worshipRequest<any>(`/listening/examples/${exampleId}`,{method:'PATCH',body:JSON.stringify(review)});
+    const index=examples[id]?.findIndex(e=>e.id===exampleId)??-1;if(index>=0)examples[id][index]=saved;return saved;
+  }
+  async function deleteListeningExample(id:string,exampleId:string){await worshipRequest(`/listening/examples/${exampleId}`,{method:'DELETE'});examples[id]=(examples[id]??[]).filter(e=>e.id!==exampleId);}
   window.addEventListener('beforeunload',()=>{for(const capture of captures.values())capture.stop();});
-  return{scripturePins,pinsBusy,refreshPins,savePin,workspaces,drafts,versions,aiStatus,saving,preparing,listening,listeningControlsFor,load,refreshVersions,refreshAi,selectListeningModel,prepare,command,take,startListening,stopListening};
+  return{followShared,examples,exampleBusy,refreshListeningExamples,saveListeningExample,reviewListeningExample,deleteListeningExample,scripturePins,pinsBusy,refreshPins,savePin,workspaces,drafts,versions,aiStatus,saving,preparing,listening,listeningControlsFor,load,refreshVersions,refreshAi,selectListeningModel,prepare,command,take,startListening,stopListening};
 });

@@ -1,5 +1,7 @@
 import type { ProductionState, SceneLayer, StudioScene, StudioSource } from '../../../../shared/production';
 import type { Item } from '@/types';
+import { drawPresentationGraphics } from '../presentation-graphics';
+import { clearPresentationTextLayouts, drawPresentationGradient, drawPresentationText, hasStructuredPresentation, type PresentationRenderContext } from '../presentation-slide';
 import { SourceBank, type MediaInput, type SceneSourceBank } from './sources';
 import { blendScenes, sceneSourceWeights, transitionProgress, weightedScene, type SceneWeight } from './transition';
 import { AnimationRunTracker, sampleAnimation } from './animation';
@@ -103,19 +105,22 @@ function fittedSlideText(ctx: CanvasRenderingContext2D, item: Item, w: number, h
   return layout;
 }
 
-function drawItem(ctx: CanvasRenderingContext2D, item: Item, bank: SceneSourceBank, video: HTMLVideoElement | null, w: number, h: number) {
+export function drawPresentationItem(ctx: CanvasRenderingContext2D, item: Item, bank: SceneSourceBank, video: HTMLVideoElement | null, w: number, h: number, context: PresentationRenderContext = {}) {
   const bg = item.background;
-  ctx.fillStyle = bg?.color ?? '#121820'; ctx.fillRect(0, 0, w, h);
+  const structured = hasStructuredPresentation(item);
+  ctx.fillStyle = bg?.color ?? (structured ? '#0a0a0c' : '#121820'); ctx.fillRect(0, 0, w, h);
   if (bg?.kind === 'image' && bg.src) drawFitted(ctx, bank.image(bg.src), 0, 0, w, h, bg.fit ?? 'cover');
   if (bg?.kind === 'video' && video) drawFitted(ctx, video, 0, 0, w, h, bg.fit ?? 'cover');
-  if (bg?.kind === 'gradient') {
+  if (bg?.kind === 'gradient' && !(structured && drawPresentationGradient(ctx, bg.gradient, w, h))) {
     const colors = bg.gradient?.match(/#[a-fA-F0-9]{6}/g) ?? ['#101923', '#243a40'];
     const gradient = ctx.createLinearGradient(0, 0, w, h);
     colors.forEach((color, i) => gradient.addColorStop(i / Math.max(1, colors.length - 1), color));
     ctx.fillStyle = gradient; ctx.fillRect(0, 0, w, h);
   }
-  if (bg?.overlayOpacity) { ctx.fillStyle = `rgba(0,0,0,${bg.overlayOpacity})`; ctx.fillRect(0, 0, w, h); }
+  const overlay = bg?.overlayOpacity ?? (structured ? .35 : 0);
+  if (overlay) { ctx.fillStyle = `rgba(0,0,0,${overlay})`; ctx.fillRect(0, 0, w, h); }
   if (['image', 'video'].includes(item.type)) return;
+  if (structured) { drawPresentationText(ctx, item, context, w, h); return; }
   const layout = fittedSlideText(ctx, item, w, h);
   ctx.save(); ctx.translate(w * 0.07, h * 0.14);
   drawText(ctx, layout.body, w * 0.86, h * 0.66); ctx.restore();
@@ -206,7 +211,7 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: SceneLayer, bank
   // that once requested a channel theme. Studio owns every design property.
   const styledText = channel && (bank.isTextChannel(input) || layer.channelStyle === 'overlay');
   // Clearing live content reveals underlying camera/media, never a stale fill.
-  if (styledText && !item) return;
+  if (!item && (styledText || channel && bank.isNotesChannel?.(input))) return;
   ctx.save();
   ctx.beginPath(); ctx.roundRect(0, 0, w, h, Math.min(layer.radius, w / 2, h / 2)); ctx.clip();
   ctx.fillStyle = layer.background; ctx.fillRect(0, 0, w, h);
@@ -220,7 +225,9 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: SceneLayer, bank
   else if (layer.kind === 'source' && layer.sourceId) {
     if (channel) {
       if (item && styledText) drawChannelOverlay(ctx, item, layer, bank, input, w, h);
-      else if (item) { ctx.save(); ctx.scale(w / 1920, h / 1080); drawItem(ctx, item, bank, input.element instanceof HTMLVideoElement ? input.element : null, 1920, 1080); ctx.restore(); }
+      else if (item) { ctx.save(); ctx.scale(w / 1920, h / 1080); drawPresentationItem(ctx, item, bank, input.element instanceof HTMLVideoElement ? input.element : null, 1920, 1080, bank.channelPresentationContext?.(input)); ctx.restore(); }
+      const graphics = item ? bank.channelGraphics?.(input) : undefined;
+      if (graphics) drawPresentationGraphics(ctx, graphics, w, h);
     } else if (input?.element && !(input.element instanceof HTMLAudioElement)) {
       drawFitted(ctx, input.element, 0, 0, w, h, layer.fit);
     }
@@ -269,6 +276,7 @@ function paintStyledText(ctx: CanvasRenderingContext2D, bank: SceneSourceBank | 
 function clearTextLayouts() {
   wrappedText = new WeakMap();
   slideText = new WeakMap();
+  clearPresentationTextLayouts();
   overlayLayouts = new WeakMap();
   styledTextSurfaces = new WeakMap();
   textLayoutIds = new WeakMap();
@@ -281,7 +289,8 @@ function drawChannelOverlay(ctx: CanvasRenderingContext2D, item: Item, layer: Sc
   // measured layout rather than wrapping and measuring it 30 times a second.
   let layouts = overlayLayouts.get(item);
   if (!layouts) { layouts = new Map(); overlayLayouts.set(item, layouts); }
-  const key = `${w}:${h}:${layer.fontSize}:${layer.fontWeight}:${textMetricsKey(layer)}`;
+  const key = JSON.stringify([w, h, layer.fontSize, layer.fontWeight, textMetricsKey(layer),
+    item.type, item.layout, item.title, item.body, item.reference, item.subtitle, item.stanzas]);
   let layout = layouts.get(key);
   if (!layout) {
     const measured = layoutChannelOverlay(item, w, h, layer.fontSize, layer.fontWeight,
@@ -377,7 +386,7 @@ export class StudioCompositor {
       this.heldProgram = { mix: [], pictures: [{ ...weightedScene(null, 1), inserts: [] }], sources: [] };
     }
     this.bus('program');
-    void this.audio.resume();
+    void this.audio.resume().catch(() => {});
     this.timer = window.setInterval(() => this.draw(), 1000 / 30);
     this.draw();
   }
@@ -549,7 +558,7 @@ export class StudioCompositor {
       for (const layer of layers) {
         if (!layer.mediaBackground || !layer.visible || layer.opacity <= 0 || sampleAnimation(layer.animation, elapsedMs).opacity <= 0) continue;
         const input = layer.kind === 'source' && layer.sourceId ? this.bank.inputs.get(layer.sourceId) : undefined;
-        if (input?.source.kind === 'channel' && (this.bank.isTextChannel(input) || layer.channelStyle === 'overlay') && !this.bank.channelItem(input, false)) continue;
+        if (input?.source.kind === 'channel' && (this.bank.isTextChannel(input) || this.bank.isNotesChannel?.(input) || layer.channelStyle === 'overlay') && !this.bank.channelItem(input, false)) continue;
         active.push(layer);
       }
     };
@@ -712,7 +721,12 @@ export class StudioCompositor {
     }
     data.levels.master = Math.min(1, this.heldMasterLevel);
     this.heldMasterLevel = 0;
-    return { fps: this.timing.fps, ...data };
+    // A Take can hold the outgoing image while its channel cue arrives, then
+    // fade it out. Let the server release those media references only after
+    // the renderer has actually finished using the previous picture.
+    const mediaSettledRevision = !this.fade && !this.heldProgram && this.cueWaitAt === null
+      ? this.state.revision : null;
+    return { fps: this.timing.fps, ...data, mediaSettledRevision };
   }
   private dispose(bus: Bus) {
     for (const route of bus.routes.values()) { try { route.input.disconnect(route.gain); } catch { /* removed input */ } route.gain.disconnect(); }

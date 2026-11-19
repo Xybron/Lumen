@@ -8,6 +8,10 @@ import { liveInputStatus } from './device-capture';
 import { api } from '@/lib/api';
 import { LayerBackgroundMedia } from './layer-background-media';
 import { mediaAssetUrl } from './media-library';
+import { presentationElapsed, presentationGraphics, type PresentationClock, type PresentationGraphicsFrame } from '../presentation-graphics';
+import type { PresentationRenderContext } from '../presentation-slide';
+import { computePrayerLabels } from '../prayers';
+import { presentationItem, samePresentationItem } from '../presentation-state';
 
 export interface MediaInput {
   source: StudioSource;
@@ -35,6 +39,9 @@ export interface SceneSourceBank {
   image(url: string): HTMLImageElement;
   channelItem(input: MediaInput): Item | undefined;
   isTextChannel(input: MediaInput): boolean;
+  isNotesChannel?(input: MediaInput): boolean;
+  channelGraphics?(input: MediaInput): PresentationGraphicsFrame | undefined;
+  channelPresentationContext?(input: MediaInput): PresentationRenderContext;
   layerBackground?(layer: SceneLayer): HTMLImageElement | HTMLVideoElement | undefined;
 }
 
@@ -43,12 +50,14 @@ interface CachedImage { image: HTMLImageElement; lastUsedAt: number }
 const artworkGraceMs = 10_000;
 const standbyImageLimit = 12;
 const standbyPixelLimit = 16 * 1024 * 1024; // About 64 MiB at four bytes per pixel.
+const playlistPrayerLabels = new WeakMap<Item[], ReturnType<typeof computePrayerLabels>>();
 
 export class SourceBank {
   readonly inputs = new Map<string, MediaInput>();
   private heldLevels = new Map<string, number>();
   private content: Content | null = null;
   private channelStates = new Map<string, ProjectionState>();
+  private channelClocks = new Map<string, PresentationClock>();
   private subscribed = new Set<string>();
   private stopWs: () => void;
   private images = new Map<string, CachedImage>();
@@ -65,11 +74,18 @@ export class SourceBank {
     startWs();
     this.stopWs = subscribeWs(message => {
       if (message.t === 'state' && message.channel && acceptChannelProjection(message.channel, this.channelStates.get(message.channel), message.payload)) {
+        const previous = this.channelStates.get(message.channel), now = performance.now();
+        const sameItem = samePresentationItem(previous, message.payload);
+        const elapsed = Number.isFinite(message.payload.elapsedMs) ? Math.max(0, message.payload.elapsedMs!)
+          : sameItem ? presentationElapsed(this.channelClocks.get(message.channel), previous!.durationMs, previous!.playing, now) : 0;
+        this.channelClocks.set(message.channel, { elapsedMs: elapsed, receivedAt: now });
         this.channelStates.set(message.channel, message.payload);
         for (const input of this.inputs.values()) if (input.source.channelId === message.channel)
           this.applyChannelAudio(input, this.channelItem(input, false));
         this.pruneMultiviewVideos();
       }
+      if (message.t === 'tick' && message.channel && this.channelStates.has(message.channel) && Number.isFinite(message.elapsedMs))
+        this.channelClocks.set(message.channel, { elapsedMs: Math.max(0, message.elapsedMs), receivedAt: performance.now() });
       if (message.t === 'content-updated') void this.loadContent();
     });
     void this.loadContent();
@@ -293,6 +309,32 @@ export class SourceBank {
     return !!id && (Object.prototype.hasOwnProperty.call(this.channelStates.get(id) ?? {}, 'cue') ||
       ['scripture', 'lyrics'].includes(this.content?.channels.find(c => c.id === id)?.kind ?? ''));
   }
+  isNotesChannel(input: MediaInput): boolean {
+    return this.content?.channels.find(channel => channel.id === input.source.channelId)?.kind === 'notes';
+  }
+  channelGraphics(input: MediaInput): PresentationGraphicsFrame | undefined {
+    const id = input.source.channelId, channel = this.content?.channels.find(c => c.id === id);
+    if (!id || !channel || this.isTextChannel(input) || channel.kind === 'notes') return;
+    const state = this.channelStates.get(id), item = this.channelItem(input, false);
+    if (!item || state?.blanked) return;
+    const durationMs = state?.durationMs ?? item.durationMs;
+    return { graphics: presentationGraphics(channel.presentationGraphics), durationMs,
+      elapsedMs: presentationElapsed(this.channelClocks.get(id), durationMs, state?.playing ?? false, performance.now()),
+      countdownAtMs: this.content!.settings.countdownAtMs, warningAtMs: this.content!.settings.warningAtMs,
+      title: item.title || channel.name };
+  }
+  channelPresentationContext(input: MediaInput): PresentationRenderContext {
+    const id = input.source.channelId;
+    if (!id || !this.content || this.isTextChannel(input)) return {};
+    const state = this.channelStates.get(id);
+    const playlistId = state?.playlistId ?? this.content.channels.find(channel => channel.id === id)?.playlistId;
+    const items = this.content.playlists.find(playlist => playlist.id === playlistId)?.items;
+    if (!items) return {};
+    let labels = playlistPrayerLabels.get(items);
+    if (!labels) { labels = computePrayerLabels(items); playlistPrayerLabels.set(items, labels); }
+    const item = presentationItem(items, state);
+    return { prayerLabel: item ? labels[item.id]?.display : undefined };
+  }
   channelItem(input: MediaInput, prepareMedia = true): Item | undefined {
     const channelId = input.source.channelId;
     if (!channelId || !this.content) return;
@@ -301,7 +343,7 @@ export class SourceBank {
     if (state && 'cue' in state) return state.cue ?? undefined;
     if (['scripture','lyrics'].includes(this.content.channels.find(c=>c.id===channelId)?.kind??'')) return;
     const playlistId = state?.playlistId ?? this.content.channels.find(c => c.id === channelId)?.playlistId;
-    const item = this.content.playlists.find(p => p.id === playlistId)?.items[state?.index ?? 0];
+    const item = presentationItem(this.content.playlists.find(p => p.id === playlistId)?.items, state);
     if (!prepareMedia) return item;
     const background = item?.background?.kind === 'video' ? item.background : undefined;
     const url = background?.src;
@@ -364,7 +406,10 @@ export class SourceBank {
     if (!this.multiviewBank) this.multiviewBank = {
       inputs: this.multiviewInputs,
       image: url => this.image(url), isTextChannel: input => this.isTextChannel(input),
+      isNotesChannel: input => this.isNotesChannel(input),
       channelItem: input => this.channelItem(input, false),
+      channelGraphics: input => this.channelGraphics(input),
+      channelPresentationContext: input => this.channelPresentationContext(input),
       layerBackground: layer => this.multiviewLayerBackground(layer),
     };
     return this.multiviewBank;

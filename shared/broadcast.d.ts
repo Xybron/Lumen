@@ -1,17 +1,31 @@
 export type BroadcastProfile = '720p' | '1080p';
 export type BroadcastMode = 'local-watch';
-export type BroadcastDestinationId = 'youtube' | 'facebook';
+export type BroadcastDestinationId = 'youtube' | 'facebook' | 'instagram';
 export type BroadcastSinkState = 'disabled' | 'unconfigured' | 'connecting' | 'live' | 'retrying' | 'stopped' | 'error';
+export interface BroadcastIncident {
+  at: string;
+  reason: 'input-stalled' | 'input-backlog' | 'encoder-exit' | 'source-stalled' | 'destinations-failed';
+  encoder: 'worker-h264' | 'videotoolbox' | 'mediafoundation' | 'software' | null;
+  encoderFailure: 'protocol' | 'certificate' | 'publish-rejected' | 'network' | 'encoder' | 'input' | 'storage' | 'backpressure' | 'unknown';
+  profile: BroadcastProfile;
+  destinations: number;
+  queuedBytes: number;
+  pendingInputBytes: number;
+  maxInputWaitMs: number;
+  inputAgeMs: number | null;
+  outputAgeMs: number | null;
+}
 export interface BroadcastConfig {
   profile: BroadcastProfile;
   recordOnStart: boolean;
-  destinations: Array<{ id: BroadcastDestinationId; enabled: boolean; configured: boolean }>;
+  /** Instagram exposes its non-secret server URL and whether a separate key is saved. */
+  destinations: Array<{ id: BroadcastDestinationId; enabled: boolean; configured: boolean; streamUrl?: string; hasKey?: boolean }>;
   watch: { enabled: boolean; configured: boolean; publicUrl?: string };
 }
 export interface BroadcastConfigInput {
   profile?: BroadcastProfile;
   recordOnStart?: boolean;
-  destinations?: Array<{ id: BroadcastDestinationId; enabled: boolean; streamKey?: string; clearKey?: boolean }>;
+  destinations?: Array<{ id: BroadcastDestinationId; enabled: boolean; streamUrl?: string; streamKey?: string; clearKey?: boolean }>;
   watch?: { enabled: boolean };
 }
 export interface BroadcastSinkStatus {

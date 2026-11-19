@@ -2,6 +2,8 @@
 import { computed } from 'vue';
 import type { Item } from '@/types';
 import CueCanvas from './CueCanvas.vue';
+import PresentationTextCanvas from './PresentationTextCanvas.vue';
+import { hasStructuredPresentation } from '@/lib/presentation-slide';
 
 const props = defineProps<{ item?: Item; prayerLabel?: string }>();
 
@@ -16,21 +18,6 @@ const sizeClass = computed(() => {
   }[s];
 });
 
-// Prayer titles are usually full sentences (not single verses), so the default
-// sits between scripture body size and the full scripture hero size — bigger
-// than the supporting verse but small enough to accommodate long topics in 2-3
-// balanced lines.
-const prayerTitleSizeClass = computed(() => {
-  const s = props.item?.typography?.size ?? 'lg';
-  return {
-    sm: 'text-3xl md:text-4xl',
-    md: 'text-4xl md:text-[3.25rem]',
-    lg: 'text-[2.75rem] md:text-[3.75rem]',
-    xl: 'text-5xl md:text-7xl',
-    '2xl': 'text-6xl md:text-8xl',
-  }[s];
-});
-
 const alignClass = computed(() => {
   const a = props.item?.typography?.align ?? 'center';
   return { left: 'text-left items-start', center: 'text-center items-center', right: 'text-right items-end' }[a];
@@ -38,9 +25,6 @@ const alignClass = computed(() => {
 
 const weight = computed(() => props.item?.typography?.weight ?? 500);
 
-const isPrayer = computed(
-  () => props.item?.type === 'prayer' || props.item?.type === 'prayer-sub',
-);
 const isLyrics = computed(() => props.item?.type === 'lyrics');
 const isAnnouncement = computed(() => props.item?.type === 'announcement');
 
@@ -58,27 +42,7 @@ const lyricStanzas = computed(() =>
   <!-- Prayer point — number/letter on top, prayer point as hero, supporting
        scripture and reference rendered smaller below. -->
   <CueCanvas v-if="item?.id.startsWith('cue_')" :text="item.body ?? ''" :reference="item.reference" :attribution="item.subtitle" :theme="{background:item.background?.color ?? '#0a0a0c',color:item.color ?? '#f4f4f5',size:item.typography?.size ?? 'lg',align:item.typography?.align ?? 'center'}" />
-  <div v-else-if="item && isPrayer" class="absolute inset-0 flex flex-col justify-center px-16 md:px-32" :class="alignClass">
-    <div class="w-full max-w-8xl space-y-6">
-      <div v-if="prayerLabel"
-        class="text-2xl md:text-3xl font-semibold tracking-[0.18em] uppercase text-accent drop-shadow-[0_2px_18px_rgba(125,211,252,0.45)]"
-        :class="alignClass">
-        Prayer {{ prayerLabel }}
-      </div>
-      <div v-if="item.title" class="tracking-tight leading-[1.2] text-white drop-shadow-2xl text-balance"
-        :class="[prayerTitleSizeClass, alignClass]" :style="{ fontWeight: weight }">
-        {{ item.title }}
-      </div>
-      <div v-if="item.body" class="text-xl md:text-3xl leading-[1.5] text-white/80 max-w-4xl mx-auto"
-        :class="alignClass">
-        {{ item.body }}
-      </div>
-      <div v-if="item.reference" class="text-lg md:text-2xl font-medium text-accent/90 tracking-wide"
-        :class="alignClass">
-        {{ item.reference }}
-      </div>
-    </div>
-  </div>
+  <PresentationTextCanvas v-else-if="item && hasStructuredPresentation(item)" :item="item" :prayer-label="prayerLabel" />
 
   <!-- Lyrics — stanzas stacked, centered, large. One slide = one projected group. -->
   <div v-else-if="item && isLyrics" class="absolute inset-0 flex flex-col justify-center px-16 md:px-32" :class="alignClass">

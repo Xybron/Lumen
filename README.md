@@ -51,15 +51,60 @@ This starts the Express API + WebSocket on `http://127.0.0.1:3000` and the
 Vite dev server on `http://127.0.0.1:5173`. Open the dashboard at
 [http://127.0.0.1:5173](http://127.0.0.1:5173).
 
-To project: open [Studio](http://127.0.0.1:5173/studio), start the engine and
-take a scene to Program. **Open Live View** in every workspace opens the same
-final Program at `/studio/output/program`. Move that tab to your display and
-press **F** for fullscreen. To project a channel independently, use its
-**Open channel output** control instead.
+To project a presentation, select it and choose **Send to Program** beside its
+local controls. The shared header provides **Outputs**, **Record** and **Go live**
+in Presentation, Worship, Studio and Media. **Outputs** opens one shared panel
+for Program Screen/Lumen Share setup, named output routing, and virtual devices.
+Opening setup does not start playback; opening a display starts Program as needed,
+and Share setup offers **Start Program** when stopped. Screen and Share use the
+finished Program at `/studio/output/program`; use **F** for fullscreen on a browser
+display. Studio's lower destination summary is read-only. Mobile control,
+recordings, fullscreen and Start/Stop Program are in the header's **More** menu.
+
+Studio's bottom status bar shows save status, measured render FPS, the station
+and stream connection state, and independent recording/live elapsed times. In
+the desktop app, Lumen RAM reports resident memory for the Electron desktop
+processes; separate production/backend services are excluded. Browsers show
+**Unavailable** for this reading. Click a status item for its scope and details.
+To project a channel independently, use **Open channel output** instead.
+
+## Media library
+
+Open **Media** in the channel dock to manage uploaded images, videos, and audio.
+Search by name, switch between grid and list views, filter by media type, or
+filter **All**, **In use**, and **Unused**. Video and audio previews play only
+when requested and stop when another file is selected.
+The library includes shared station files and private Clip-editor imports;
+pending contributor uploads stay in the approval inbox. Managing the combined
+library requires author access to all channels.
+
+Select a file to see its usage locations and open the exact slide, Studio
+source, layer, output, music queue, or Clip project. **Back to Media** returns to the file
+and refreshes its usage. Opening a location does not start playback or take
+content live. **Choose from Media** in source, presentation, background, and
+music editors reuses uploads of the supported type.
+Renaming changes the display name without moving the file or breaking links.
+
+Deletion is available only when there are no saved or live references. Remove
+or replace the file at each listed location first; Program and pinned outputs
+can retain a reference after the saved scene changes. Bulk cleanup preserves
+files that become used before deletion. The server checks usage again while
+holding the content, Studio, and Clips mutation locks, including requests to
+the legacy media-delete endpoint. If usage cannot be checked, deletion stays
+disabled. Confirmed deletion permanently removes the file and its thumbnails.
+Converted MOV playback copies belong to their original video and share its
+usage protection. A file being prepared cannot be deleted until preparation
+has finished.
+
+Dock utility labels appear on hover, keyboard focus, or while active. The dock
+respects reduced-motion preferences and keeps the active action visible on
+smaller screens.
+
+Run `npm run test:media` for the isolated library and navigation browser checks.
 
 ## Scripture, Lyrics and local listening
 
-Use **+** in the channel dock to create a Presentation, Scripture or Lyrics
+Use **+** in the channel dock to create a Presentation, Scripture, Lyrics or Notes
 channel. Presentation handles prayer marathons, announcements, media and normal
 slides, with manual or timed progression. Existing prayer and announcement
 channels/decks remain intact. Existing Scripture/Lyrics decks are preserved;
@@ -76,8 +121,18 @@ slides to a song** to review and save older stanza-based slides.
 - Use **Import** or drag media into the slide editor. List/grid view preferences
   are local to the controller. Current/Next labels show the playback order;
   double-click a slide (or press Enter on its focused card) to show it.
-- Manual/Auto, blanking, audio and the current slide counter stay in the compact
-  transport. **Open Live View** remains in the shared main header. The channel
+- Presentation sessions start **Manual** with the timer paused, including legacy
+  channels previously saved with Auto. **Start timer** runs the prayer clock
+  without advancing slides; Manual holds at zero. Explicitly choosing **Auto**
+  enables advancement. Switching back to Manual preserves the current clock.
+- **Graphics** opens a draft preview with separate progress bar, timer, final
+  countdown and warning controls. Choose Minimal, Broadcast, Segmented or Ember,
+  elapsed/remaining time, colour, size and top/bottom position. Save named presets
+  per presentation. **Apply to Program** saves the graphics for Program, streams,
+  recordings and channel displays; Cancel leaves them unchanged. Operator timing
+  remains visible when audience graphics are hidden.
+- Manual/Auto, blanking, music and the current slide counter stay in the compact
+  transport. The channel
   toolbar switches between channels and opens Studio through its clapperboard
   icon. It can be moved, collapsed or reset, with the same position and state
   retained across channels and Studio. Small-screen panels use closable drawers.
@@ -143,7 +198,7 @@ already-live cue. Only use lyrics you are authorised to display.
 Each channel has its own live cue and content clearing. Design belongs to its
 Studio layers; dedicated channel outputs are neutral text proofs. These cues
 persist in `data/worship.db` across station restarts and feed both
-`/live/:channelId` and Studio **Presentation channel** sources. Search/prepared
+`/live/:channelId` and Studio **Lumen channel** sources. Search/prepared
 selections are local to each operator; only authorised live changes are shared.
 Concurrent live edits reject stale revisions; another channel's output is not
 affected. Back up `worship.db` with the station stopped (or use a SQLite online
@@ -223,6 +278,13 @@ use `LUMEN_WHISPER_SERVER` and `LUMEN_WHISPER_MODEL`; `LUMEN_CMAKE` overrides th
 installer's CMake executable. No global packages or background services are
 installed. First model load may be slower than subsequent inference.
 
+New installations also include a verified local Silero speech detector to avoid
+transcribing non-speech audio. For an existing installation, run
+`npm run setup:ai -- --vad-only`, then restart the Lumen station if it is already
+running. This adds the small detector without changing your selected speech
+model. Desktop bundles include the detector and install it into station data
+without a download on the operator's computer.
+
 The default remains Base English. The installer also supports Small English,
 Small multilingual, Medium English, Medium multilingual, and quantised
 Large v3 Turbo. Downloads are checked against pinned sizes and SHA-256 hashes;
@@ -279,10 +341,17 @@ browser never downloads a model automatically or accepts arbitrary model paths.
    remembering a selection never rearms listening. Closing the tab releases the input
    and the server lease expires. You can stop listening at any time.
 
-Audio windows (up to five seconds, every 2.5 seconds) travel only from the
-operator browser to your configured station; the speech worker binds to
-127.0.0.1. Audio is not retained and is not sent to a cloud transcription service.
-Inference is serial to bound station load; busy windows are skipped, not queued.
+Audio windows normally advance every 2.5 seconds with 2.5 seconds of preceding
+context. Their timing follows captured samples, including in background tabs.
+They travel only from the operator browser to your configured station; the speech
+worker binds to 127.0.0.1. Audio is held briefly in memory, never saved or sent to
+a cloud transcription service. Inference is serial: speech arriving during a
+request is retained in a bounded 12-second buffer and included in the next window.
+If recognition falls behind that limit or a request fails, listening stops with
+an explicit error instead of silently dropping speech. Choose a faster model or
+reduce other work on the station before restarting after overload. Silent windows
+break partial-reference context. Audio captured during model startup is discarded;
+the authenticated listening session begins with current speech after warmup.
 This is near-live recognition, not word-by-word prediction. End-to-end delay
 includes capture windows and model inference (plus a second confirmation window
 for Lyrics). Scripture does not wait for a second copy of a clear reference.
@@ -524,12 +593,84 @@ remain effective; picture blanking does not mute audio.
 
 Selecting another main feed mutes the previous main and unmutes the new one,
 without resetting final-output mute or deliberately enabled secondary inputs.
-New sources always start muted, including imported videos/music and connected
+New Studio sources start muted, including imported videos/music and connected
 cameras/microphones. Existing saved mixes are preserved; no source is selected
 or silenced automatically on upgrade. To delete the chosen feed, select another
 or **Clear Main audio** first. A disconnected main feed stays selected with a
 compact warning in its mixer row and no automatic fallback—reconnect it or
 explicitly choose another input.
+
+The **Music queue** in Studio's Audio panel is started explicitly with **Play music**; its **Auto** option
+starts off on each operator session. Selecting a track or returning from Studio
+does not start it. Play connects a dedicated **Presentation music** input to the
+Main mix, using the player's volume and fades, without replacing the selected
+Main microphone. The player remains active during workspace navigation. **Monitor**
+in the music menu enables local listening separately and defaults off; avoid
+monitoring the same music through both this control and Program monitoring.
+Keep the operator tab open while it supplies music. Sign-out or loss of production
+access stops delivery; the Studio mixer can also mute the music input.
+
+Presentation's **New slide** menu offers Prayer, Media (images and videos), PDF,
+PowerPoint and Notes. **New group** organizes mixed content; select a destination
+group to nest another group or add slides inside it. Collapsing a group only
+hides its editor rows. The group's play button shows its first slide, and
+ungrouping keeps every slide. Existing playlists and prayer sub-numbering remain
+compatible. Slide layout and group membership are separate settings.
+
+PDF and PowerPoint imports render locally, show selectable page previews, then
+add the selected pages as image slides in a named group. PPT/PPTX animations,
+builds, transitions and embedded audio/video do not play. Review fonts and slide
+artwork before sending to Program. Imports support up to 200 pages and 100 MB.
+Desktop builds include LibreOffice; source-based stations can install it or set
+`LUMEN_SOFFICE_PATH` to the converter executable. PDF import needs no converter.
+
+Prayer previews and Program use the same text renderer. **Graphics** restores the
+original flame progress bar by default and offers visibility, timer, countdown,
+caption, colour/gradient, thickness, position and tip controls. Previously chosen
+custom graphics remain configured. Presentation opens in Manual; starting its
+timer does not enable automatic slide advance.
+
+Notes has its own channel in the dock. **New note** opens the writing workspace
+directly. On upgrade, existing channels containing only Notes become Notes
+channels with their names, slides, private drafts and transcripts preserved.
+Notes inside mixed presentations stay in those presentations and remain editable.
+
+In Studio, use **New source → Lumen channel**, choose your Notes channel, and
+select its layer. Choose
+**Full screen** to use the Note's slide design, or **Bottom** / **Top** to place
+its text over the scene. Overlays use that layer's typography, background,
+spacing and dimensions; the saved Note's design stays available for full-screen
+use. Each scene can show the same Notes channel with a different layout.
+
+Use **Transcript** when you need
+speech alongside your draft. AssemblyAI has one shared listening session for the
+preacher: start it in Scripture or Notes, and optionally **Link live transcript**
+on any Note. Linked Notes append new completed phrases from that point forward;
+earlier speech is not copied. Linking never opens another microphone or paid
+transcription connection. Closing or unlinking a Note leaves shared listening
+running. The shared listening bar shows the linked Notes count and an explicit
+**Stop listening** control. Scripture can listen with no Notes created, and
+ordinary Scripture Take/step actions preserve the shared session.
+
+AssemblyAI requires the station's `ASSEMBLYAI_API_KEY` and internet access; audio
+is sent to AssemblyAI while listening. Choose a microphone/audio interface or,
+when starting in Notes, the running Program mix. The local Whisper option
+remains separate and stops when its Notes workspace closes. Live words are
+provisional until finalized. Linked transcripts and editable drafts stay private
+in `notes.db`; Notes that remain manual receive no transcript. Detected verses
+show their text and reference, and **Use reference** copies only the citation
+into your private draft. Notes shows an immediate slide preview beside your
+writing, with inline layout and appearance controls. Draft changes save privately
+automatically. Insert selected transcript words at the cursor or append a passage
+without replacing your existing points. Choose one slide or one slide per line;
+the preview lets you move through the resulting slides before updating them.
+
+**Update slide** or **Update slides** (Cmd/Ctrl+Enter) saves the displayed draft to the channel
+and keeps the editor open. Repeated updates reuse the same slide set, so adding
+or correcting a point does not create duplicates. Editing a generated slide
+reopens its source Notes. Typing and transcript updates do not publish content;
+the channel's **Send to Program** control remains separate. Updating a
+slide already displayed changes that slide's saved content.
 
 ### Requirements and first service
 
@@ -756,7 +897,7 @@ video connections or changing Program, recording or audio routing.
 - OBS can be selected as a **Virtual Camera** input when installed/enabled.
   Add its audio through an available audio interface/loopback device separately.
   Studio does not start OBS or ingest native SRT/NDI feeds. Go Live sends the
-  composed Program and its audio mix to Facebook/YouTube over RTMPS.
+  composed Program and its audio mix to Facebook, YouTube and Instagram over RTMPS.
 - Presentation sources mirror existing channel state. Keep the existing
   **Present** controls running for automated slide timing. Studio does not yet
   reproduce every legacy presentation effect or background music playlist.
@@ -800,7 +941,7 @@ Reverse proxies must forward both `/ws` and `/studio/ws` WebSocket upgrades.
 
 To test your actual Studio Program and Main audio with Watch on this computer,
 stop `npm run dev` and run **`npm run dev:watch`** instead. It adds local Watch
-alongside Facebook and YouTube, using your normal station data and a private
+alongside Facebook, YouTube and Instagram, using your normal station data and a private
 temporary copy of your saved streaming setup/keys. Choose destinations and
 confirm Go Live as usual; social platforms stream publicly while Watch stays
 local. Your normal saved streaming settings remain unchanged. See the
@@ -814,8 +955,9 @@ scene data; leave it in place, including after shutdown. Never delete runtime
 lease files to bypass a running backend.
 
 Open **Go Live** from the Studio or channel top bar. Administrators configure
-Facebook/YouTube stream keys, enable destinations, choose 720p or 1080p at 30 fps,
-and set whether new broadcasts also record locally. Operators review the
+Facebook/YouTube stream keys or an Instagram Stream URL and key, enable
+destinations, choose 720p or 1080p at 30 fps, and set whether new broadcasts also
+record locally. Operators review the
 prepared Program, existing Main audio and readiness checks, then deliberately
 start sending. The engine starts if necessary; a scene must already be on
 Program. This never chooses another scene or changes Main audio routing.
@@ -828,7 +970,7 @@ while broadcasting. Ending defaults to **Keep recording**; choosing **Stop
 stream and recording** explicitly ends both. The engine cannot be stopped
 while recording or broadcasting.
 
-Streaming is real FFmpeg H.264/AAC encoding of the compositor's Program stream,
+Streaming is real H.264/AAC encoding of the compositor's Program stream,
 not capture of the operator interface or the legacy channel page. One network
 encode feeds independently bounded RTMPS remuxers and rolling HLS. Recording
 retains its separate WebM encoder/storage path. A destination disconnect, slow
@@ -840,20 +982,72 @@ Post-production work remains deferred while the production engine is active.
 720p streaming captures a dedicated 1280×720 feed instead of encoding 1080p and
 then downscaling it. The Go Live confidence monitor is a shared, video-only
 640×360/15 fps feed; public Program outputs and local recordings retain their
-full resolution and frame rate. Apple VideoToolbox H.264 is used only after a
-real hardware-only encode probe succeeds; other stations use the compatible
-software encoder. Recording and streaming still require separate encoders, and
+full resolution and frame rate. Where supported, a dedicated browser worker
+encodes H.264 once and FFmpeg passes that video through while encoding AAC audio.
+On macOS the worker uses software H.264 because the native browser encoder can
+stall at startup. The compatibility path uses FFmpeg, with native encoding only
+after a real hardware-only encode probe succeeds. Recording and streaming still require separate encoders, and
 CPU usage depends on the scene, inputs, open monitors and recording activity.
 
+The stream passthrough processes run at normal scheduling priority. Input writes
+may recover from a temporary delay while output continues, with an eight-second
+idle timeout, a sixteen-second absolute limit and unchanged bounded queues.
+The renderer upload deadline exceeds that server deadline to avoid duplicate
+retries during recovery. These protections do not compensate for sustained CPU
+or upload saturation. Running another streaming application on the station adds
+its own encoding and upload workload.
+
+The engine waits for the Program audio clock to advance before announcing that
+it is ready. A stalled initial audio context is disposed and rebuilt once, with
+a four-second limit per attempt. This recovery happens before the renderer
+connects or any stream, recording or output starts; it never restarts an active
+Program. Engine diagnostics include the number of startup attempts and wait time.
+While Go Live covers Studio, its visible Program monitor remains active and the
+covered Preview and silent Program monitors disconnect. Closing the dialog
+restores them. Enabled headphone monitoring keeps its existing audio connection.
+
+**Program health** retains the last stream interruption after the session ends
+and across backend restarts. It distinguishes a stalled input, full queue,
+encoder exit, interrupted Program feed and failed destinations, with elapsed
+input/output times and queue measurements saved privately in
+`data/broadcast/broadcast-health.json`. Only finite failure codes and measurements
+are saved; no keys, URLs, raw encoder errors or media are included. The upload
+figure in readiness is an estimate, not a measured available connection speed.
+
+After `npm run build`, run
+`LUMEN_REHEARSAL_SECONDS=60 LUMEN_REHEARSAL_COMPETING_ENCODE=1 node backend/test/broadcast-browser.mjs`
+for a generated-media rehearsal with three loopback TLS destinations, Watch,
+local recording and a second 1080p encode. It writes a report and startup samples
+to its temporary directory and never publishes to real accounts. This is not a
+TikTok or internet-bandwidth benchmark. `node backend/test/broadcast-encoder-benchmark.mjs`
+compares worker encoder availability and process CPU using generated media;
+failed encoders producing no media are not valid performance comparisons.
+
+`LUMEN_STRESS_CAMERA=1 LUMEN_STARTUP_CYCLES=10 LUMEN_STRESS_SECONDS=900 node backend/test/broadcast-stress.mjs`
+checks ten cold starts followed by a fifteen-minute run with generated camera
+input, monitoring, three social receivers, Watch and 1080p recording. Add
+`LUMEN_STRESS_COMPETING_ENCODE=1` for an additional synthetic 1080p encoder.
+It checks that stream cadence stays at 30 fps and the configured
+720p bitrate is retained, saving periodic diagnostics and final media checks.
+Add `LUMEN_FIXTURE_STALL_FIRST_AUDIO=1` to deterministically exercise startup
+recovery on every cold start. That fault injection exists only in the isolated
+fixture. Running TikTok LIVE Studio's local recording alongside the test exercises
+the real application's encoding load, but does not test TikTok publishing or the
+internet uplink. After a successful run, use
+`node backend/test/verify-broadcast-stress.mjs /path/from/test/report.json` to
+check the received files and independent recording for full duration, actual
+frame rate, motion at the start/middle/end and audible stereo audio at the end.
+
 Social destinations use a single-client loopback RTMP connection from FFmpeg
-to a bounded Node.js TLS bridge. Only the two fixed platform ingest hosts are
-reachable, and outgoing RTMPS uses normal certificate/hostname verification.
+to a bounded Node.js TLS bridge. Only the fixed YouTube/Facebook hosts and
+validated Instagram upload hosts are reachable, and outgoing RTMPS uses normal
+certificate/hostname verification.
 Plain RTMP never leaves loopback. This avoids the bundled macOS sender's native
 TLS write stall. Connection errors are reduced to safe categories, not private
 URLs or stream keys. Repeated failures pause automatic retries; if every
 destination has failed, network encoding stops while local recording continues.
 
-This first release sends Facebook and YouTube directly from the station and
+Lumen sends Facebook, YouTube and Instagram directly from the station and
 publishes HLS to the independent Watch relay. **Upload use adds up across enabled
 destinations**; the displayed estimate is not an internet speed test. A single
 cloud upload with social restreaming, adaptive-bitrate viewing and Windows/Linux
@@ -861,6 +1055,17 @@ hardware encoding are not implemented. Social status **Sending** confirms encode
 not that a platform has published an event; configure the provider's event,
 visibility/auto-start and live permissions in its dashboard. Account OAuth,
 event scheduling and platform viewer/chat APIs are not included yet.
+
+For Instagram, open **Instagram Live Producer** in a desktop browser and copy
+its **Stream URL** and **Stream key** into the Instagram destination. Lumen accepts
+secure `live-upload.instagram.com` and Meta `edge-upload-*.xx.fbcdn.net` /
+`edgetee-upload-*.xx.fbcdn.net` ingest URLs on port 443. Save setup, start the stream
+in Lumen, then click **Go Live** in Instagram once its preview appears. Keep Live
+Producer open and end the live video there before stopping the feed in Lumen.
+Replace a single-use key for each broadcast, or use a persistent key if offered
+by the account. Instagram receives the same landscape Program; a separate
+portrait composition is not included. Existing saved YouTube/Facebook settings
+load with Instagram disabled; the next save writes the upgraded settings format.
 
 No destination is enabled by default. Stream keys are stored in a private
 mode-0600 station file and are never returned by the API or logged in FFmpeg

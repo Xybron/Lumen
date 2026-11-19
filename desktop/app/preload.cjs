@@ -1,9 +1,33 @@
 'use strict';
 
-const { ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer } = require('electron');
 
-// No Node or Electron API is exposed to the application. Only trusted clicks
-// on external links reach the main process; programmatic navigation is denied.
+contextBridge.exposeInMainWorld('lumenDisplays', {
+  list: () => ipcRenderer.invoke('lumen:displays:list'),
+  open: request => ipcRenderer.invoke('lumen:displays:open', request),
+  toggleFullscreen: () => ipcRenderer.invoke('lumen:displays:toggle-fullscreen'),
+  exitFullscreen: () => ipcRenderer.invoke('lumen:displays:exit-fullscreen'),
+  onChanged: listener => {
+    const changed = () => listener();
+    ipcRenderer.on('lumen:displays:changed', changed);
+    return () => ipcRenderer.removeListener('lumen:displays:changed', changed);
+  },
+});
+
+// Narrow desktop capabilities only; no general IPC, filesystem or Node access.
+contextBridge.exposeInMainWorld('lumenVirtualDevices', {
+  status: () => ipcRenderer.invoke('lumen:devices:control', 'status'),
+  start: () => ipcRenderer.invoke('lumen:devices:control', 'start'),
+  stop: () => ipcRenderer.invoke('lumen:devices:control', 'stop'),
+  activateCamera: () => ipcRenderer.invoke('lumen:devices:control', 'activate'),
+  installAudio: () => ipcRenderer.invoke('lumen:devices:control', 'install-audio'),
+});
+
+contextBridge.exposeInMainWorld('lumenProduction', {
+  memory: () => ipcRenderer.invoke('lumen:production:memory'),
+});
+
+// Only trusted clicks open external links; programmatic navigation is denied.
 function externalClick(event) {
   if (!event.isTrusted || event.defaultPrevented || event.button > 1) return;
   const anchor = event.composedPath().find(node => node instanceof HTMLAnchorElement);

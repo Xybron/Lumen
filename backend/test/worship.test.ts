@@ -37,6 +37,9 @@ test('FTS lookup, exact verse ranges, edition import atomicity and revision cont
     assert.equal(db.searchScripture('KJV','" OR *').verses.length,0);
     const selection={kind:'scripture' as const,versionId:'KJV',book:43,chapter:3,verse:16,endVerse:17};
     assert.match(db.cue(selection).text,/16 For God.*\n\n17 For God/s);
+    assert.equal(db.cue(selection).attribution,'KJV');
+    db.importBible({version:{id:'CUSTOM',name:'Custom edition',attribution:'Custom edition credit'},verses:[{book:43,chapter:3,verse:16,text:'Custom verse text'}]});
+    assert.equal(db.cue({...selection,versionId:'CUSTOM',endVerse:undefined}).attribution,'Custom edition credit');
     assert.throws(()=>db.cue({...selection,endVerse:18}),/not present/);
     assert.throws(()=>db.cue({...selection,endVerse:30}),/1–12/);
     let state=db.command('scripture',0,{type:'take',selection});assert.equal(state.revision,1);

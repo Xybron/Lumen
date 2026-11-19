@@ -158,6 +158,8 @@
 .w-listening-trigger.armed,.w-listening-trigger.needs-attention{color:#e3ba66}
 .w-listening-dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0}
 .w-listener-popover.panel{width:320px;max-width:calc(100vw - 24px);max-height:min(560px,var(--reka-popover-content-available-height,calc(100dvh - 24px)));min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:16px;gap:12px;border:1px solid var(--border-hair);border-radius:10px;background:var(--surface-1,#18191c);color:var(--text-primary);box-shadow:0 10px 34px #0005;backdrop-filter:none;box-sizing:border-box}
+.w-listener-popover.is-cloud>*{flex-shrink:0}
+.w-listener-popover.is-cloud .w-transcript{min-height:85px}
 .w-listener-popover.armed{border-color:#e3ba6666}
 .w-listener-popover .w-listener-title{gap:8px}
 .w-listener-popover .w-listener-title>div{flex:1}
@@ -233,8 +235,7 @@
 .w-decision-dot{width:5px;height:5px;border-radius:50%;background:var(--text-subtle)}
 .w-listener-decision[data-decision="sent-live"] .w-decision-dot,.w-listener-decision[data-decision="already-live"] .w-decision-dot{background:#82d6af}
 .w-listener-decision[data-decision="review"] .w-decision-dot,.w-listener-decision[data-decision="conflict"] .w-decision-dot,.w-listener-decision[data-decision="unavailable"] .w-decision-dot{background:#e3ba66}
-.w-spin{animation:w-spin 1s linear infinite}
-@keyframes w-spin{to{transform:rotate(360deg)}}
+
 
 /* Songs use the same selection language as passages and Studio layers. */
 .w-setlist-song>button,.w-song-select,.w-section-cue{touch-action:manipulation}
@@ -468,3 +469,4 @@
 .w-pinned-row .w-verse-result>span:first-child{padding-right:0;flex-wrap:wrap}
 .w-scripture-result-row>.w-icon[aria-pressed="true"]{color:var(--accent)}
 @media(pointer:coarse){.w-passage-tabs .w-button,.w-pinned-row>.w-icon,.w-scripture-result-row>.w-icon{min-width:44px;min-height:44px}}
+.w-program-action{display:flex;justify-content:flex-end;margin-bottom:12px}

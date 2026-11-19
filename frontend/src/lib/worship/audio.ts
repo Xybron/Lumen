@@ -2,10 +2,14 @@ export type ListeningProcessing = 'speech' | 'mixer';
 export interface ListeningLevels { rms:number; peak:number; clipping:boolean }
 export interface ListeningInputInfo { deviceId:string; label:string; sampleRate:number; processing:ListeningProcessing }
 export interface ListeningCaptureOptions {
+  /** Existing Program audio. Only cloned tracks are owned/stopped by listening. */
+  stream?:MediaStream;
   signal?:AbortSignal;
   processing?:ListeningProcessing;
   onInfo?:(info:ListeningInputInfo)=>void;
   onLevels?:(levels:ListeningLevels)=>void;
+  /** Called after capture stops because recognition cannot keep up with live audio. */
+  onOverflow?:()=>void;
 }
 
 export function listeningInputError(error:unknown):string {
@@ -33,7 +37,7 @@ export function wav16k(samples:Float32Array,rate:number):Blob {
 /** getUserMedia cannot be aborted by browsers; a late stream is stopped before
  * it can be attached to an audio graph. Every graph produces only silence. */
 async function openListeningInput(deviceId:string,onSamples:(samples:Float32Array,rate:number)=>void,onEnded:()=>void,options:ListeningCaptureOptions) {
-  if(!navigator.mediaDevices?.getUserMedia)throw new Error('Listening requires localhost or HTTPS and a browser with microphone support.');
+  if(!options.stream&&!navigator.mediaDevices?.getUserMedia)throw new Error('Listening requires localhost or HTTPS and a browser with microphone support.');
   const signal=options.signal,processing=options.processing??'speech';
   let stopped=false,stream:MediaStream|undefined,context:AudioContext|undefined,source:MediaStreamAudioSourceNode|undefined,node:AudioWorkletNode|undefined;
   let effectiveDeviceId='',deviceCheckSequence=0;
@@ -63,7 +67,9 @@ async function openListeningInput(deviceId:string,onSamples:(samples:Float32Arra
   signal?.addEventListener('abort',stop,{once:true});
   try {
     check();
-    const acquired=await navigator.mediaDevices.getUserMedia(listeningAudioConstraints(deviceId,processing));
+    const acquired=options.stream
+      ?new MediaStream(options.stream.getAudioTracks().map(track=>track.clone()))
+      :await navigator.mediaDevices.getUserMedia(listeningAudioConstraints(deviceId,processing));
     if(stopped||signal?.aborted){acquired.getTracks().forEach(track=>track.stop());throw abortError();}
     stream=acquired;
     const track=stream.getAudioTracks()[0];
@@ -74,7 +80,7 @@ async function openListeningInput(deviceId:string,onSamples:(samples:Float32Arra
     // The live capture outlives channel panels. Guard its actual device here,
     // not only in the settings component: a browser may keep a default track
     // alive after unplugging it and otherwise switch microphones silently.
-    if(effectiveDeviceId&&!['default','communications'].includes(effectiveDeviceId))navigator.mediaDevices.addEventListener?.('devicechange',deviceChange);
+    if(!options.stream&&effectiveDeviceId&&!['default','communications'].includes(effectiveDeviceId))navigator.mediaDevices.addEventListener?.('devicechange',deviceChange);
     else effectiveDeviceId='';
     context=new AudioContext();
     await context.audioWorklet.addModule('/listening-worklet.js');check();
@@ -103,21 +109,68 @@ export function monitorListeningInput(deviceId:string,onEnded:()=>void,options:L
   return openListeningInput(deviceId,()=>{},onEnded,options);
 }
 
-export async function captureListening(deviceId:string,onWindow:(audio:Blob,level:number)=>void,onEnded:()=>void,options:ListeningCaptureOptions={}) {
-  let rate=0,ring=new Float32Array(0),cursor=0,count=0,timer:number|undefined;
-  const reset=()=>{clearInterval(timer);timer=undefined;};
-  const stopInput=await openListeningInput(deviceId,(samples,sampleRate)=>{
-    if(rate!==sampleRate){rate=sampleRate;ring=new Float32Array(Math.round(rate*5));cursor=0;count=0;}
+/** Continuous, non-overlapping 100 ms PCM packets for cloud streaming. */
+export function captureStreaming(deviceId:string,onPacket:(pcm:ArrayBuffer)=>void,onEnded:()=>void,options:ListeningCaptureOptions={}){
+  let pending=new Float32Array(0),used=0,rate=0;
+  return openListeningInput(deviceId,(samples,sampleRate)=>{
+    if(rate!==sampleRate){rate=sampleRate;pending=new Float32Array(Math.round(rate/10));used=0;}
+    for(const sample of samples){
+      pending[used++]=sample;
+      if(used===pending.length){
+        const bytes=new ArrayBuffer(3200),view=new DataView(bytes),ratio=rate/16000;
+        for(let i=0;i<1600;i++){
+          const from=Math.floor(i*ratio),to=Math.max(from+1,Math.floor((i+1)*ratio));let value=0;
+          for(let j=from;j<to;j++)value+=pending[j]??0;
+          value=Math.max(-1,Math.min(1,value/(to-from)));view.setInt16(i*2,value<0?value*32768:value*32767,true);
+        }
+        used=0;onPacket(bytes);
+      }
+    }
+  },onEnded,options);
+}
+
+/** Return false to defer a window, or a promise to hold subsequent windows until
+ * recognition completes. Audio continues accumulating while that promise runs.
+ * Scheduling follows captured samples, so background-tab timer throttling cannot
+ * repeatedly submit the same audio or silently skip the intervening speech. */
+export async function captureListening(deviceId:string,onWindow:(audio:Blob,level:number)=>void|boolean|Promise<unknown>,onEnded:()=>void,options:ListeningCaptureOptions={}) {
+  let rate=0,ring=new Float32Array(0),cursor=0,count=0,fresh=0,busy=false,stopped=false;
+  let stopInput:(()=>void)|undefined;
+  const stop=()=>{
+    if(stopped)return;
+    stopped=true;stopInput?.();options.signal?.removeEventListener('abort',stop);
+    ring=new Float32Array(0);count=0;fresh=0;
+  };
+  const emit=()=>{
+    if(stopped||busy||!rate||fresh<rate*2.5)return;
+    // Keep 2.5 seconds of previously submitted context when there is room.
+    // Under load, extend the window to include every unsubmitted sample, up to
+    // the station's 12-second limit, rather than dropping busy-time windows.
+    const length=Math.min(count,Math.round(fresh+rate*2.5)),samples=new Float32Array(length),start=(cursor-length+ring.length)%ring.length;
+    let power=0;
+    for(let i=0;i<length;i++){const sample=ring[(start+i)%ring.length];samples[i]=sample;power+=sample*sample;}
+    const submitted=fresh,result=onWindow(wav16k(samples,rate),Math.sqrt(power/length));
+    if(result===false||stopped)return;
+    fresh-=submitted;
+    if(result&&typeof result==='object'&&'then' in result){
+      busy=true;
+      // The caller handles request errors; completion always releases the next
+      // buffered window. A stopped capture cannot restart from this callback.
+      void Promise.resolve(result).catch(()=>{}).finally(()=>{busy=false;emit();});
+    }
+  };
+  stopInput=await openListeningInput(deviceId,(samples,sampleRate)=>{
+    if(stopped)return;
+    if(rate!==sampleRate){rate=sampleRate;ring=new Float32Array(Math.round(rate*12));cursor=0;count=0;fresh=0;}
+    if(fresh+samples.length>ring.length){
+      stop();
+      if(options.onOverflow)options.onOverflow();else onEnded();
+      return;
+    }
     for(const sample of samples){ring[cursor]=sample;cursor=(cursor+1)%ring.length;count=Math.min(ring.length,count+1);}
-  },()=>{reset();onEnded();},options);
-  const stop=()=>{reset();stopInput();options.signal?.removeEventListener('abort',reset);};
-  if(options.signal?.aborted){stop();return stop;}
-  options.signal?.addEventListener('abort',reset,{once:true});
-  timer=window.setInterval(()=>{
-    if(!rate||count<rate*2.5)return;
-    const samples=new Float32Array(count),start=(cursor-count+ring.length)%ring.length;let power=0;
-    for(let i=0;i<count;i++){const sample=ring[(start+i)%ring.length];samples[i]=sample;power+=sample*sample;}
-    onWindow(wav16k(samples,rate),Math.sqrt(power/count));
-  },2500);
+    fresh+=samples.length;emit();
+  },()=>{stop();onEnded();},options);
+  if(stopped||options.signal?.aborted){stopInput();stop();return stop;}
+  options.signal?.addEventListener('abort',stop,{once:true});
   return stop;
 }

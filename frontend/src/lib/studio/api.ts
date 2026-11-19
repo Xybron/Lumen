@@ -1,4 +1,5 @@
 import type { ProductionState, StudioCommand, StudioRecording, StudioStatus } from '../../../../shared/production';
+import type { BroadcastIncident } from '../../../../shared/broadcast';
 
 export interface RendererDiagnostics {
   timing?: { fps: number; pauses: number; longestPauseMs: number; lastPauseAt: number | null };
@@ -19,7 +20,8 @@ export async function studioRequest<T>(path: string, init?: RequestInit): Promis
 export const studioApi = {
   get: () => studioRequest<ProductionState>(''),
   status: () => studioRequest<StudioStatus>('/status'),
-  diagnostics: (signal?: AbortSignal) => studioRequest<{ renderer: RendererDiagnostics | null }>('/diagnostics', { signal }),
+  diagnostics: (signal?: AbortSignal) => studioRequest<{ renderer: RendererDiagnostics | null;
+    broadcast?: { maxInputWaitMs: number; lastFailure: BroadcastIncident | null } | null }>('/diagnostics', { signal }),
   save: (state: ProductionState) => studioRequest<ProductionState>('', { method: 'PUT', body: JSON.stringify(state) }),
   command: (revision: number, command: StudioCommand) => studioRequest<ProductionState>('/command', { method: 'POST', body: JSON.stringify({ revision, command }) }),
   start: () => studioRequest<StudioStatus>('/engine/start', { method: 'POST' }),

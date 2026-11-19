@@ -21,6 +21,9 @@ export const MAX_MEDIA_BYTES = 512 * 1024 * 1024;
 export function mediaDisplayName(name: string): string {
   return name.replace(/^\d{13}-/, '');
 }
+export function mediaFileLabel(file: Pick<MediaLibraryFile, 'name' | 'displayName'>): string {
+  return file.displayName || mediaDisplayName(file.name);
+}
 export function mediaSourceName(name: string): string {
   return mediaDisplayName(name).replace(/\.[^.]+$/, '').slice(0, 100);
 }
@@ -37,6 +40,6 @@ export function mediaFileSize(bytes: number | undefined): string {
 }
 export function mediaFilesForKind(files: MediaLibraryFile[], kind: MediaAssetKind, query = ''): MediaLibraryFile[] {
   const search = query.trim().toLocaleLowerCase();
-  return files.filter(file => mediaExtensions[kind].test(file.name) && (!search || mediaDisplayName(file.name).toLocaleLowerCase().includes(search)))
+  return files.filter(file => mediaExtensions[kind].test(file.name) && (!search || mediaFileLabel(file).toLocaleLowerCase().includes(search) || mediaDisplayName(file.name).toLocaleLowerCase().includes(search)))
     .sort((a, b) => (Date.parse(b.modifiedAt ?? '') || 0) - (Date.parse(a.modifiedAt ?? '') || 0) || a.name.localeCompare(b.name));
 }

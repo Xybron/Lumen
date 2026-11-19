@@ -131,21 +131,21 @@ try {
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.evaluate(() => document.fonts.ready);
     await page.waitForTimeout(180);
-    const headerLiveView = page.locator('.lumen-header').getByRole('button', { name: 'Open Live View', exact: true });
-    assert.equal(await page.getByRole('button', { name: 'Open Live View', exact: true }).count(), 1, `One consistent live-view button at ${width}px`);
-    await headerLiveView.click({ trial: true });
+    const headerScreen = page.locator('.lumen-header').getByRole('button', { name: 'Open Outputs', exact: true });
+    assert.equal(await page.getByRole('button', { name: 'Open Outputs', exact: true }).count(), 1, `One consistent Outputs button at ${width}px`);
+    await headerScreen.click({ trial: true });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `No horizontal viewport overflow at ${width}px`);
     const sidebar = await page.getByRole('complementary', { name: 'Scenes', exact: true }).boundingBox();
     assert.ok(sidebar.x >= 0 && sidebar.x + sidebar.width <= width, `Scene browser remains inside ${width}px viewport`);
     await page.screenshot({ path: path.join(dir, `studio-${width}.png`), fullPage: true });
   }
-  checks.push('real rendered Studio at 1728px, 1366px, 1024px and 390px, bounded sidebar and single accessible live-view action');
+  checks.push('real rendered Studio at 1728px, 1366px, 1024px and 390px, bounded sidebar and single accessible Outputs action');
 
   const touch = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, storageState: await context.storageState() });
   const touchPage = await touch.newPage(); touchPage.on('pageerror', error => errors.push(error.message));
   await touchPage.goto(`${base}/studio`); await touchPage.getByRole('heading', { name: 'Production Studio', exact: true }).waitFor();
   assert.ok(await touchPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Coarse touch controls do not cause mobile horizontal overflow');
-  await touchPage.locator('.lumen-header').getByRole('button', { name: 'Open Live View', exact: true }).click({ trial: true });
+  await touchPage.locator('.lumen-header').getByRole('button', { name: 'Open Outputs', exact: true }).click({ trial: true });
   await touchPage.screenshot({ path: path.join(dir, 'studio-mobile-touch.png'), fullPage: true });
   await touch.close();
   const finalState = await get();

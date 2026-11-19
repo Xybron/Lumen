@@ -34,7 +34,5 @@
 .clip-delivery-more { display: flex !important; width: 100%; min-height: 32px; border: 0; border-top: 1px solid #ffffff0d; background: transparent; font-size: 11px !important; color: #94a6b4 !important; }
 .clip-delivery-overlay.is-collapsed { width: 260px; }
 .clip-delivery-overlay.is-collapsed .clip-delivery-heading { border-bottom: 0; }
-.clip-delivery-spin { animation: clip-delivery-rotate 1s linear infinite; }
-@keyframes clip-delivery-rotate { to { transform: rotate(360deg); } }
 @media (max-width: 600px) { .clip-delivery-overlay { top: 65px; right: 10px; width: 352px; max-width: calc(100vw - 20px); } .clip-delivery-cards { max-height: calc(100dvh - 130px); } }
-@media (prefers-reduced-motion: reduce) { .clip-delivery-spin { animation: none; } .clip-delivery-progress > span { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .clip-delivery-progress > span { transition: none; } }

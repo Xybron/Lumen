@@ -6,15 +6,19 @@ import { studioRequest } from '@/lib/studio/api';
 import type { ProductionState, StudioSignalMessage, StudioRecording } from '../../../shared/production';
 import { StudioBroadcastRecorder } from '@/lib/studio/broadcast-recorder';
 import { ProgramBroadcastCapture } from '@/lib/studio/broadcast-capture';
+import { prepareProgramMedia } from '@/lib/studio/program-readiness';
+import { OutputEncodingPolicy } from '@/lib/studio/output-encoding';
 
 const message = ref('Starting production renderer…');
 let compositor: StudioCompositor | null = null;
 let signal: StudioSignal | null = null;
 let heartbeat: number | undefined;
 const peers = new Map<string, StudioPeer>();
+const outputEncodingPolicy = new OutputEncodingPolicy();
 const inputOwners = new Map<string, StudioPeer>();
 let recorder: MediaRecorder | null = null;
 let currentRecording: StudioRecording | null = null;
+const startupController = new AbortController();
 const broadcast = new ProgramBroadcastCapture({
   createRecorder: (stream, profile) => new StudioBroadcastRecorder(stream, profile),
   upload: (id, sequence, data, abort) => studioRequest(`/engine/broadcast/${id}/chunks/${sequence}`, {
@@ -25,7 +29,7 @@ const broadcast = new ProgramBroadcastCapture({
   }),
 });
 
-function closePeer(key: string) {
+function closePeer(key: string, preserveOutput = false) {
   const peer = peers.get(key);
   if (!peer) return;
   peers.delete(key);
@@ -35,7 +39,23 @@ function closePeer(key: string) {
     inputOwners.delete(sourceId); compositor?.bank.setStream(sourceId, null);
   }
   peer.close();
-  if (peer.key.startsWith('out:') && ![...peers.values()].some(p => p.key === peer.key)) compositor?.releaseOutput(peer.key.slice(4));
+  if (!preserveOutput && peer.key.startsWith('out:') && ![...peers.values()].some(p => p.key === peer.key)) compositor?.releaseOutput(peer.key.slice(4));
+}
+
+async function offerOutput(peerId: string, outputKey: string, outputId: string, compactProgram = false) {
+  if (!compositor || !signal) return;
+  const key = `${peerId}:${outputKey}`;
+  const previous = peers.get(key);
+  const policy = outputEncodingPolicy.configuration(key, outputId, compactProgram, previous?.preferredVideoStartupFailed);
+  // Replacing an encoder must keep the shared compositor canvas and tracks.
+  closePeer(key, true);
+  const peer = new StudioPeer(signal, peerId, outputKey); peers.set(key, peer);
+  peer.onPreferredVideoStartupFailed = () => {
+    if (peers.get(key) !== peer) return;
+    void offerOutput(peerId, outputKey, outputId, compactProgram).catch(error => console.error('Output codec recovery:', error));
+  };
+  try { await peer.offer(compositor.stream(outputId), policy.encoding, policy.codec); }
+  catch (error) { if (peers.get(key) === peer) closePeer(key); throw error; }
 }
 
 async function receive(m: StudioSignalMessage) {
@@ -46,10 +66,7 @@ async function receive(m: StudioSignalMessage) {
   }
   const key = `${m.peerId}:${m.key}`;
   if (m.t === 'watch' && m.peerId && m.key && m.outputId) {
-    closePeer(key);
-    const peer = new StudioPeer(signal, m.peerId, m.key); peers.set(key, peer);
-    try { await peer.offer(compositor.stream(m.outputId), m.compactProgram ? { scaleResolutionDownBy: 2, maxFramerate: 30 } : undefined); }
-    catch (error) { if (peers.get(key) === peer) closePeer(key); throw error; }
+    await offerOutput(m.peerId, m.key, m.outputId, m.compactProgram);
   } else if (m.t === 'publish' && m.peerId && m.key && m.sourceId) {
     closePeer(key);
     const peer = new StudioPeer(signal, m.peerId, m.key); peers.set(key, peer);
@@ -69,8 +86,11 @@ async function receive(m: StudioSignalMessage) {
       else if (peer.pc.connectionState === 'connected' && stream.getTracks().length) compositor?.bank.setStream(sourceId, stream);
     };
   } else if (m.t === 'signal') await peers.get(key)?.receive(m);
-  else if (m.t === 'unwatch' || m.t === 'unpublish') closePeer(key);
-  else if (m.t === 'peer-left') for (const [id, peer] of peers) { if (peer.peerId === m.peerId) closePeer(id); }
+  else if (m.t === 'unwatch' || m.t === 'unpublish') { outputEncodingPolicy.forget(key); closePeer(key); }
+  else if (m.t === 'peer-left') {
+    if (m.peerId) outputEncodingPolicy.forgetPeer(m.peerId);
+    for (const [id, peer] of peers) { if (peer.peerId === m.peerId) closePeer(id); }
+  }
   else if (m.t === 'record-start' && m.recording) startRecording(m.recording);
   else if (m.t === 'record-stop' && m.recording?.id === currentRecording?.id && recorder?.state !== 'inactive') recorder?.stop();
   else if (m.t === 'broadcast-start' && m.broadcast) {
@@ -137,12 +157,15 @@ onMounted(async () => {
   try {
     const state = await studioRequest<ProductionState>('/engine/bootstrap');
     await document.fonts.ready;
-    compositor = new StudioCompositor(state);
+    const prepared = await prepareProgramMedia(() => new StudioCompositor(state), { signal: startupController.signal });
+    compositor = prepared.program;
     (window as unknown as { __lumenDiagnostics: () => Promise<unknown> }).__lumenDiagnostics = async () => ({
       renderedOutputs: compositor?.renderedOutputs,
       timing: compositor && { fps: compositor.timing.fps, pauses: compositor.timing.pauses,
         longestPauseMs: compositor.timing.longestPauseMs, lastPauseAt: compositor.timing.lastPauseAt },
       audioState: compositor?.audio.state, audioTime: compositor?.audio.currentTime,
+      mediaStartup: { attempts: prepared.attempts, waitMs: prepared.waitMs },
+      recording: { id: currentRecording?.id ?? null, state: recorder?.state ?? null },
       broadcast: { id: broadcast.activeId, queuedBytes: broadcast.queuedBytes,
         capture: broadcast.settings ? { ...broadcast.settings, videoEncoder: broadcast.videoEncoder, effectiveFrameRate: compositor?.broadcastFrameRate } : null },
       inputs: [...(compositor?.bank.inputs.values() ?? [])].map(input => ({
@@ -150,19 +173,29 @@ onMounted(async () => {
         tracks: input.stream?.getTracks().map(t => ({ kind: t.kind, enabled: t.enabled, muted: t.muted, state: t.readyState })),
       })),
       peers: await Promise.all([...peers.values()].map(async peer => {
-        const stats: unknown[] = [];
-        let videoScale: number | undefined;
+        const stats: unknown[] = [], codecs: unknown[] = [];
+        let videoScale: number | undefined, videoMaxBitrate: number | undefined;
         try {
-          (await peer.pc.getStats()).forEach(s => { if (s.type === 'inbound-rtp' || s.type === 'outbound-rtp') stats.push(s); });
+          (await peer.pc.getStats()).forEach(s => {
+            // RTP reports retain encoderImplementation/powerEfficientEncoder
+            // when the browser exposes them; codecId resolves through codecs.
+            if (s.type === 'inbound-rtp' || s.type === 'outbound-rtp') stats.push(s);
+            else if (s.type === 'codec') codecs.push(s);
+          });
           const sender = peer.pc.getSenders().find(sender => sender.track?.kind === 'video');
-          if (sender) videoScale = sender.getParameters().encodings?.[0]?.scaleResolutionDownBy ?? 1;
+          if (sender) {
+            const encoding = sender.getParameters().encodings?.[0];
+            videoScale = encoding?.scaleResolutionDownBy ?? 1;
+            videoMaxBitrate = encoding?.maxBitrate;
+          }
         } catch { /* A viewer can disconnect during the sample. */ }
-        return { key: peer.key, state: peer.pc.connectionState, stats, videoScale };
+        return { key: peer.key, state: peer.pc.connectionState, stats, codecs, videoScale, videoMaxBitrate,
+          videoEncoding: { ...peer.videoEncodingDiagnostic, retryReason: outputEncodingPolicy.reason(`${peer.peerId}:${peer.key}`) } };
       })),
     });
     signal = new StudioSignal();
     signal.subscribe(m => { void receive(m).catch(e => console.error('Renderer signaling:', e)); });
-    signal.onDisconnected = () => { broadcast.stop(); for (const id of peers.keys()) closePeer(id); };
+    signal.onDisconnected = () => { broadcast.stop(); outputEncodingPolicy.clear(); for (const id of peers.keys()) closePeer(id); };
     let reporting = false;
     heartbeat = window.setInterval(() => {
       if (!compositor || reporting) return;
@@ -173,7 +206,7 @@ onMounted(async () => {
     message.value = 'Lumen production renderer is running.';
   } catch { message.value = 'This renderer is managed by the station. Open Studio to start it.'; }
 });
-onBeforeUnmount(() => { clearInterval(heartbeat); broadcast.stop(); signal?.close(); for (const id of peers.keys()) closePeer(id); compositor?.close(); });
+onBeforeUnmount(() => { startupController.abort(); clearInterval(heartbeat); broadcast.stop(); signal?.close(); for (const id of peers.keys()) closePeer(id); compositor?.close(); });
 </script>
 
 <template><div class="h-screen bg-black text-white/40 grid place-items-center text-sm">{{ message }}</div></template>

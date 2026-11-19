@@ -1,19 +1,28 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue';
-import { Smartphone, Copy, Check, LoaderCircle, ShieldCheck, X } from 'lucide-vue-next';
+import { LoadingSkeleton, Skeleton, SkeletonIndicator } from '@/components/ui/skeleton';
+import { onBeforeUnmount, onDeactivated, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
+import { Smartphone, Copy, Check, ShieldCheck, X } from 'lucide-vue-next';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useConfirmation } from '@/composables/useConfirmation';
 import { mobileRequest } from '@/lib/mobile/controller';
 import type { MobileManagement, MobilePairing, MobilePermissions } from '../../../../shared/mobile-controller';
+defineProps<{ hideTrigger?: boolean }>();
+const route = useRoute();
 
-const open = ref(false), management = ref<MobileManagement | null>(null), pairing = ref<MobilePairing | null>(null), busy = ref(false), error = ref(''), copied = ref('');
+const open = ref(false), management = ref<MobileManagement | null>(null), pairing = ref<MobilePairing | null>(null), loading = ref(false), busy = ref(false), error = ref(''), copied = ref('');
+defineExpose({ show: () => { open.value = true; } });
+watch(() => route.fullPath, () => { open.value = false; });
+onDeactivated(() => { open.value = false; });
 const name = ref('Phone operator'), permissions = ref<MobilePermissions>({ studio: true, channels: true, audio: true });
 const { confirmAction } = useConfirmation();
 let timer: ReturnType<typeof setInterval> | undefined, disposed = false;
 async function refresh() {
-  if (!open.value || busy.value || document.hidden) return;
+  if (!open.value || busy.value || loading.value || document.hidden) return;
+  loading.value = true;
   try { const value = await mobileRequest<MobileManagement>('/manage'); if (!disposed && open.value) management.value = value; }
   catch (cause) { if (!disposed && open.value) error.value = cause instanceof Error ? cause.message : 'Mobile access is unavailable.'; }
+  finally { loading.value = false; }
 }
 watch(open, value => { clearInterval(timer); error.value = ''; pairing.value = null; copied.value = ''; if (value) { void refresh(); timer = setInterval(() => { void refresh(); }, 5000); } });
 onBeforeUnmount(() => { disposed = true; clearInterval(timer); });
@@ -39,17 +48,22 @@ function expiry(value: number) { return new Date(value).toLocaleTimeString([], {
 </script>
 
 <template>
-  <button type="button" class="s-button mobile-control-entry" aria-label="Mobile control" title="Pair a phone for emergency control" @click="open = true"><Smartphone :size="15" /><span class="button-label">Mobile</span></button>
+  <button v-if="!hideTrigger" type="button" class="s-button mobile-control-entry" aria-label="Mobile control" title="Pair a phone for emergency control" @click="open = true"><Smartphone :size="15" /><span class="button-label">Mobile</span></button>
   <Dialog :open="open" @update:open="open = $event"><DialogContent class="mobile-management"><DialogHeader><DialogTitle><span class="mobile-management-title"><Smartphone :size="21" />Mobile control</span></DialogTitle><DialogDescription>A focused phone controller. Rendering, recording and streaming stay on this station.</DialogDescription></DialogHeader>
-    <div v-if="management" class="mobile-management-status"><ShieldCheck :size="18" /><div><b>{{ management.enabled ? 'Secure phone listener enabled' : 'Local controller available' }}</b><p>{{ management.enabled ? 'Connect your phone to the station’s network and use the secure address below.' : 'For phone access, run the secure mobile startup command. The ordinary station API stays private.' }}</p><a v-if="management.url" :href="management.url" target="_blank" rel="noopener noreferrer">{{ management.url }}</a><RouterLink v-else to="/remote" target="_blank">Open controller on this computer ↗</RouterLink></div></div>
-    <section class="mobile-management-pair"><h3>Pair a device</h3><label>Device label<input v-model="name" maxlength="60" placeholder="e.g. Emergency operator" /></label><fieldset><legend>Allow this phone to control</legend><label><input v-model="permissions.studio" type="checkbox" />Scenes and Cut/Fade</label><label><input v-model="permissions.channels" type="checkbox" />Scripture, lyrics and presentations</label><label><input v-model="permissions.audio" type="checkbox" />Main audio mute and volume</label></fieldset><button class="mobile-management-primary" :disabled="busy || !Object.values(permissions).some(Boolean)" @click="createPairing"><LoaderCircle v-if="busy" :size="15" />Create one-time pairing</button>
+    <LoadingSkeleton v-if="loading && !management" class="mobile-management-skeleton" label="Loading mobile access"><Skeleton width="64%" :height="13" /><Skeleton :height="10" /><Skeleton width="82%" :height="10" /><Skeleton width="48%" :height="11" /></LoadingSkeleton>
+    <div v-else-if="management" class="mobile-management-status"><ShieldCheck :size="18" /><div><b>{{ management.enabled ? 'Secure phone listener enabled' : 'Local controller available' }}</b><p>{{ management.enabled ? 'Connect your phone to the station’s network and use the secure address below.' : 'For phone access, run the secure mobile startup command. The ordinary station API stays private.' }}</p><a v-if="management.url" :href="management.url" target="_blank" rel="noopener noreferrer">{{ management.url }}</a><RouterLink v-else to="/remote" target="_blank">Open controller on this computer ↗</RouterLink></div></div>
+    <section class="mobile-management-pair"><h3>Pair a device</h3><label>Device label<input v-model="name" maxlength="60" placeholder="e.g. Emergency operator" /></label><fieldset><legend>Allow this phone to control</legend><label><input v-model="permissions.studio" type="checkbox" />Scenes and Cut/Fade</label><label><input v-model="permissions.channels" type="checkbox" />Scripture, lyrics and presentations</label><label><input v-model="permissions.audio" type="checkbox" />Main audio mute and volume</label></fieldset><button class="mobile-management-primary" :disabled="busy || !Object.values(permissions).some(Boolean)" @click="createPairing"><SkeletonIndicator v-if="busy" />Create one-time pairing</button>
       <div v-if="pairing" class="mobile-pairing-result" data-team-private data-mobile-private><span>Expires at {{ expiry(pairing.expiresAt) }} · single use</span><label>Pairing code<input :value="pairing.code" readonly spellcheck="false" @focus="($event.target as HTMLInputElement).select()" /></label><button @click="copy(pairing.code, 'code')"><Check v-if="copied === 'code'" :size="14" /><Copy v-else :size="14" />{{ copied === 'code' ? 'Code copied' : 'Copy code' }}</button><template v-if="pairing.url"><label>Private pairing link<input :value="pairing.url" readonly spellcheck="false" @focus="($event.target as HTMLInputElement).select()" /></label><button @click="copy(pairing.url!, 'link')"><Check v-if="copied === 'link'" :size="14" /><Copy v-else :size="14" />{{ copied === 'link' ? 'Link copied' : 'Copy pairing link' }}</button></template><small>Share only with your operator. Watch links never grant control.</small></div>
     </section>
-    <section class="mobile-management-devices"><h3>Paired devices <span>{{ management?.devices.length ?? 0 }}</span></h3><div v-for="device in management?.devices ?? []" :key="device.id" class="mobile-management-device"><Smartphone :size="17" /><div><b>{{ device.name }}</b><small>{{ management?.lease?.deviceId === device.id ? 'Has phone control' : 'Monitor only' }} · expires {{ expiry(device.expiresAt) }}</small></div><button :disabled="busy" :aria-label="`Disconnect ${device.name}`" @click="revoke(device.id, device.name)"><X :size="17" /></button></div><p v-if="!management?.devices.length">No phones paired. Pairing and control leases expire automatically.</p></section><p v-if="error" class="mobile-management-error" role="alert">{{ error }}</p><p class="mobile-management-note">Desktop control remains available. Phone access is temporary, scoped to this station and revoked when its backend restarts.</p>
+    <section class="mobile-management-devices"><h3>Paired devices <span v-if="management">{{ management.devices.length }}</span></h3><LoadingSkeleton v-if="loading && !management" class="mobile-device-skeletons" label="Loading paired devices"><div v-for="n in 2" :key="n" class="mobile-device-skeleton" aria-hidden="true"><Skeleton :width="28" :height="34" /><div><Skeleton width="55%" :height="11" /><Skeleton width="80%" :height="9" /></div></div></LoadingSkeleton><div v-for="device in management?.devices ?? []" :key="device.id" class="mobile-management-device"><Smartphone :size="17" /><div><b>{{ device.name }}</b><small>{{ management?.lease?.deviceId === device.id ? 'Has phone control' : 'Monitor only' }} · expires {{ expiry(device.expiresAt) }}</small></div><button :disabled="busy" :aria-label="`Disconnect ${device.name}`" @click="revoke(device.id, device.name)"><X :size="17" /></button></div><p v-if="management && !management.devices.length">No phones paired. Pairing and control leases expire automatically.</p></section><p v-if="error" class="mobile-management-error" role="alert">{{ error }}</p><p class="mobile-management-note">Desktop control remains available. Phone access is temporary, scoped to this station and revoked when its backend restarts.</p>
   </DialogContent></Dialog>
 </template>
 
 <style scoped>
+.mobile-management-skeleton { display: grid; gap: 11px; padding: 16px; border: 1px solid var(--border-hair); border-radius: 9px; background: var(--surface-1); }
+.mobile-device-skeletons { display: grid; gap: 16px; }
+.mobile-device-skeleton { display: flex; align-items: center; gap: 12px; }
+.mobile-device-skeleton > div { display: grid; flex: 1; gap: 9px; }
 .mobile-management { max-width: 520px; gap: 22px; }
 .mobile-management-title { display: flex; align-items: center; gap: 10px; }
 .mobile-management-title svg { color: var(--accent); }

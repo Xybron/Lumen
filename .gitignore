@@ -77,10 +77,15 @@ data/recordings/
 data/clips/
 data/broadcast/
 data/outputs/
+data/document-imports/
+data/document-uploads/
+data/presentation-documents/
 watch-relay/data/
 watch-relay/tenants.json
 data/worship.db*
 data/ai/
+# Locally supplied sermon recordings and annotations.
+training/
 agent/dist/
 
 # Quarantined phone/contributor uploads awaiting approval
@@ -98,3 +103,11 @@ data/media/thumbnails/*
 # User-uploaded audio — don't commit large binaries
 data/media/music/*
 !data/media/music/.gitkeep
+
+# Private station data and local release/rollback artifacts
+desktop/backups/
+desktop/dist-*/
+artifacts/
+data/notes.db*
+data/media/backgrounds/*
+!data/media/backgrounds/.gitkeep

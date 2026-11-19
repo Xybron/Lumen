@@ -8,13 +8,13 @@ import ChannelPoster from './ChannelPoster.vue';
 import type { Item } from '@/types';
 import type { SceneLayer, StudioScene, StudioSource } from '../../../../shared/production';
 const props = withDefaults(defineProps<{ scene: StudioScene; sources?: StudioSource[]; animationTime?: number | null; animationLayerId?: string | null;
-  channels?: Record<string, { item?: Item; textChannel: boolean }>; posterForMedia?: (path: string | undefined, kind: 'image' | 'video') => string | undefined;
+  channels?: Record<string, { item?: Item; textChannel: boolean; notesChannel?: boolean }>; posterForMedia?: (path: string | undefined, kind: 'image' | 'video') => string | undefined;
   sourceStills?: Readonly<Record<string, string>>;
   previewMedia?: boolean; streamForSource?: (id: string) => MediaStream | null }>(), { animationTime: null, animationLayerId: null, previewMedia: false });
 const layers = computed(() => props.scene.layers.filter(layer => {
   if (!layer.visible) return false;
   const channel = channelFor(layer.sourceId);
-  return !channel || !!channel.item || !(channel.textChannel || layer.channelStyle === 'overlay');
+  return !channel || !!channel.item || !(channel.textChannel || channel.notesChannel || layer.channelStyle === 'overlay');
 }));
 // Design/offline previews use the same static catalog as scene cards. Motion
 // belongs to the renderer; mounting a card must never start a video decoder.

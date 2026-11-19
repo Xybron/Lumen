@@ -27,6 +27,7 @@ const channels = computed(() => Object.fromEntries(channelIds.value.map(id => {
   const engine = engines.engineFor(id);
   return [id, {
     item: engine?.blanked.value ? undefined : engine?.current.value,
+    notesChannel: content.channels.find(channel => channel.id === id)?.kind === 'notes',
     textChannel: ['scripture', 'lyrics'].includes(content.channels.find(channel => channel.id === id)?.kind ?? ''),
   }];
 })));

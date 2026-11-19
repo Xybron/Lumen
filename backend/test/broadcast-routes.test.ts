@@ -57,6 +57,7 @@ test('Broadcast routes protect stream keys and never mutate production on config
     assert.equal((await snapshot()).session, null);
   });
   await t.test('unconfigured independent Watch fails preflight and engine-only ingest is not a public upload API', async () => {
+    for (const action of ['stop', 'retry']) assert.equal((await request(`/studio/broadcast/destinations/instagram/${action}`, 'POST', {})).status, 409, 'Instagram controls reach the service and report no active session, rather than rejecting the platform');
     assert.equal((await request('/studio/broadcast/config', 'PUT', { destinations: [{ id: 'youtube', enabled: false }], watch: { enabled: true } })).status, 200);
     const preflight = await (await request('/studio/broadcast/preflight')).json();
     assert.equal(preflight.ready, false); assert.equal(preflight.checks.find((item: { id: string }) => item.id === 'watch').ok, false);

@@ -10,6 +10,8 @@
   "scripts": {
     "start": "electron .",
     "prepare:bundle": "node scripts/prepare.mjs",
+    "prepare:virtual-devices": "node scripts/prepare-virtual-devices.mjs",
+    "test:virtual-devices": "node scripts/test-virtual-devices.mjs",
     "package": "node scripts/package.mjs",
     "package:dir": "node scripts/package.mjs --dir",
     "smoke": "node scripts/smoke.mjs",

@@ -33,10 +33,11 @@ export async function makeImageThumb(srcAbs: string, basename: string): Promise<
 // Pull a single frame ~1s into the video, downscale to 320px wide. Resolves to
 // null on failure (missing codec, corrupt file, ffmpeg not available) rather
 // than throwing — thumbnails are best-effort.
-export async function makeVideoThumb(srcAbs: string, basename: string): Promise<string | null> {
+export async function makeVideoThumb(srcAbs: string, basename: string, mediaDir = MEDIA_DIR): Promise<string | null> {
   try {
-    await fs.mkdir(THUMB_DIR, { recursive: true });
-    const out = thumbOutPath(basename);
+    const directory = path.join(mediaDir, 'thumbnails');
+    await fs.mkdir(directory, { recursive: true });
+    const out = path.join(directory, basename.replace(/\.[^.]+$/, '') + '.jpg');
     await new Promise<void>((resolve, reject) => {
       ffmpeg(srcAbs)
         .on('end', () => resolve())
@@ -48,7 +49,7 @@ export async function makeVideoThumb(srcAbs: string, basename: string): Promise<
           size: '320x?',
         });
     });
-    return relFromMedia(out);
+    return path.relative(path.dirname(mediaDir), out);
   } catch {
     return null;
   }

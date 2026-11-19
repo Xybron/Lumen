@@ -14,7 +14,7 @@ import { canvasSnapTargets, moveRect, resizeRect, type CanvasRect, type ResizeHa
 import { textPaddingForLayer } from '@/lib/studio/text-padding';
 import type { SceneLayer, StudioScene, StudioSource } from '../../../../shared/production';
 
-const props = defineProps<{ scene: StudioScene | null; sources: StudioSource[]; engineRunning: boolean }>();
+const props = defineProps<{ scene: StudioScene | null; sources: StudioSource[]; engineRunning: boolean; monitorSuspended?: boolean }>();
 const emit = defineEmits<{ inspect: [] }>();
 const studio = useStudioStore();
 const content = useContentStore(), engines = useEnginesStore();
@@ -59,6 +59,7 @@ watch(() => channelIds.value.filter(id => !!engines.engineFor(id)), ids => subsc
 const channels = computed(() => Object.fromEntries(channelIds.value.map(id => {
   const engine = engines.engineFor(id);
   return [id, { item: engine?.blanked.value ? undefined : engine?.current.value,
+    notesChannel: content.channels.find(channel => channel.id === id)?.kind === 'notes',
     textChannel: ['scripture', 'lyrics'].includes(content.channels.find(channel => channel.id === id)?.kind ?? '') }];
 })));
 const layers = computed(() => props.scene?.layers.filter(layer => layer.visible) ?? []);
@@ -229,7 +230,7 @@ onBeforeUnmount(() => { cancel(); motion.stop(); motion.setOverride(null); });
     <ScenePoster v-if="animationScene && (!previewReady || isAnimationPreview)" :scene="animationScene" :sources="sources" :channels="channels"
       :animation-time="isAnimationPreview ? motion.elapsedMs.value : null" :animation-layer-id="motion.layerId.value"
       :preview-media="isAnimationPreview" :stream-for-source="studio.sourceStream" :class="{ 'animation-preview': isAnimationPreview }" :data-animation-preview="isAnimationPreview ? '' : undefined" />
-    <StudioMonitor output-id="preview" @ready="previewReady = $event" />
+    <StudioMonitor v-if="!monitorSuspended" output-id="preview" @ready="previewReady = $event" />
     <div v-show="!isAnimationPreview" class="canvas-selection" @pointerdown.self="clearSelection">
       <LayerContextMenu v-for="layer in layers" :key="layer.id" :layer-id="layer.id" @inspect="emit('inspect')" @rename="emit('inspect')" @open-change="opened">
         <div :class="['layer-hitbox', { selected: studio.selectedLayerId === layer.id, locked: layer.locked }]" :style="layerStyle(layer)"

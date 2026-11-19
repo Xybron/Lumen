@@ -5,9 +5,7 @@ import { useFullscreen, useIdle, useWakeLock, useEventListener } from '@vueuse/c
 import { Music2 } from 'lucide-vue-next';
 import BackgroundLayer from '@/components/live/BackgroundLayer.vue';
 import ContentLayer from '@/components/live/ContentLayer.vue';
-import ProgressBar from '@/components/live/ProgressBar.vue';
-import WarningPill from '@/components/live/WarningPill.vue';
-import CountdownChip from '@/components/live/CountdownChip.vue';
+import PresentationGraphics from '@/components/live/PresentationGraphics.vue';
 import { useContentStore } from '@/stores/content';
 import { useChannelMirror } from '@/lib/useChannelMirror';
 import { useBroadcast } from '@/lib/broadcast';
@@ -123,13 +121,10 @@ useEventListener(document, 'dblclick', () => {
         </div>
       </Transition>
 
-      <ProgressBar v-if="!mirror.state.value.blanked" :clock="mirror.clock.value" :duration-ms="mirror.state.value.durationMs" :playing="mirror.state.value.playing" :manual="mirror.state.value.mode === 'manual'" />
-      <WarningPill :visible="mirror.showWarning.value" :remaining-ms="mirror.remainingMs.value" />
-      <CountdownChip
-        :visible="mirror.showCountdown.value"
-        :remaining-ms="mirror.remainingMs.value"
-        :threshold-ms="mirror.settings.value.countdownAtMs"
-      />
+      <PresentationGraphics v-if="!mirror.state.value.blanked && mirror.currentItem.value && !['scripture', 'lyrics', 'notes'].includes(content.channels.find(c => c.id === channelId)?.kind ?? '')"
+        :graphics="content.channels.find(c => c.id === channelId)?.presentationGraphics" :clock="mirror.clock.value"
+        :duration-ms="mirror.state.value.durationMs" :playing="mirror.state.value.playing" :countdown-at-ms="mirror.settings.value.countdownAtMs"
+        :warning-at-ms="mirror.settings.value.warningAtMs" :title="mirror.currentItem.value.title" />
 
       <div v-if="mirror.state.value.blanked" class="absolute inset-0 bg-black z-40" />
     </template>

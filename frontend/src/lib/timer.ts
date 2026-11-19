@@ -11,6 +11,7 @@ export interface TimerHandle {
   pause(): void;
   resume(): void;
   stop(): void;
+  reset(durationMs: number): void;
   onComplete(cb: () => void): void;
 }
 
@@ -51,17 +52,20 @@ export function createTimer(tickHz = 8): TimerHandle {
 
   function start(durationMs: number) {
     clear();
-    total = durationMs;
-    endAt = performance.now() + durationMs;
-    remaining.value = durationMs;
+    total = Math.max(0, durationMs);
+    pausedRemaining = 0;
+    endAt = performance.now() + total;
+    remaining.value = total;
     elapsed.value = 0;
-    running.value = durationMs > 0;
+    running.value = total > 0;
     if (running.value) timer = window.setTimeout(tick, tickMs);
   }
 
   function pause() {
     if (!running.value) return;
     pausedRemaining = Math.max(0, endAt - performance.now());
+    remaining.value = pausedRemaining;
+    elapsed.value = total - pausedRemaining;
     running.value = false;
     clear();
   }
@@ -73,6 +77,15 @@ export function createTimer(tickHz = 8): TimerHandle {
     running.value = true;
     pausedRemaining = 0;
     timer = window.setTimeout(tick, tickMs);
+  }
+
+  function reset(durationMs: number) {
+    clear();
+    total = Math.max(0, durationMs);
+    remaining.value = total;
+    elapsed.value = 0;
+    pausedRemaining = total;
+    running.value = false;
   }
 
   function stop() {
@@ -87,5 +100,5 @@ export function createTimer(tickHz = 8): TimerHandle {
     completeCb = cb;
   }
 
-  return { remaining, elapsed, running, start, pause, resume, stop, onComplete };
+  return { remaining, elapsed, running, start, pause, resume, reset, stop, onComplete };
 }

@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { SkeletonIndicator } from '@/components/ui/skeleton';
 import { computed, ref } from 'vue';
-import { Clock, Check, ChevronDown, ChevronUp, CircleAlert, Download, ExternalLink, FileVideo, FolderOpen, Headphones, LoaderCircle, Pause, RefreshCw, X } from 'lucide-vue-next';
+import { Clock, Check, ChevronDown, ChevronUp, CircleAlert, Download, ExternalLink, FileVideo, FolderOpen, Headphones, Pause, RefreshCw, X } from 'lucide-vue-next';
 import { useClipDeliveryStore, type ClipDeliveryEntry } from '@/stores/clip-delivery';
 import { audioExport, exportOptions } from '@/lib/clip-export';
 import '@/styles/clip-delivery.css';
@@ -30,7 +31,7 @@ function imageFailed(id: string) { failedImages.value = new Set([...failedImages
   <Teleport to="body">
     <section v-if="visible && delivery.entries.length" class="clip-delivery-overlay" :class="{ 'is-collapsed': delivery.collapsed }" aria-label="Export delivery progress" data-testid="export-progress-overlay">
       <header class="clip-delivery-heading">
-        <span class="clip-delivery-heading-icon"><LoaderCircle v-if="workingCount" :size="15" class="clip-delivery-spin" /><Clock v-else-if="queuedCount" :size="15" /><Check v-else :size="15" /></span>
+        <span class="clip-delivery-heading-icon"><SkeletonIndicator v-if="workingCount" /><Clock v-else-if="queuedCount" :size="15" /><Check v-else :size="15" /></span>
         <strong>Exports<span>{{ summary }}</span></strong>
         <button type="button" :aria-label="delivery.collapsed ? 'Expand export progress' : 'Collapse export progress'" :aria-expanded="!delivery.collapsed" @click="delivery.collapsed = !delivery.collapsed"><ChevronDown v-if="delivery.collapsed" :size="15" /><ChevronUp v-else :size="15" /></button>
       </header>

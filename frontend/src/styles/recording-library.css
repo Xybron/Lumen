@@ -64,6 +64,11 @@
 .library-empty { height: 100%; min-height: 280px; padding-bottom: 90px; }
 .library-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 255px), 1fr)); gap: 27px 22px; align-items: start; }
 .library-card { min-width: 0; background: none; }
+.library-skeleton-preview { aspect-ratio: 16 / 9; width: 100%; }
+.library-skeleton-details { display: grid; gap: 13px; padding-top: 18px; }
+.library-skeleton-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 2px; }
+.library-view-list .library-skeleton-details { padding-top: 0; }
+.library-storage-skeleton { display: grid; gap: 14px; padding-block: 12px; }
 .library-card-preview { display: block; position: relative; border-radius: 9px; overflow: hidden; border: 1px solid #ffffff0c; background: #202326; }
 .library-card-preview .clip-thumbnail { aspect-ratio: 16 / 9; }
 .library-card-preview .clip-thumbnail-empty { background: #202326; }

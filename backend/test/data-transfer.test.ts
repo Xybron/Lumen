@@ -89,6 +89,29 @@ test('presentation copies remap IDs and implicit media dependencies without chan
   } finally { await source.close(); await target.close(); }
 });
 
+test('presentation import keeps generated Notes linked to their newly copied source',async()=>{
+  const source=await fixture(),target=await fixture();
+  try{
+    const items=[
+      {id:'notes-root',type:'notes',title:'Message',body:'First point',layout:'statement'},
+      {id:'notes-child',type:'notes',title:'Message',body:'Second point',layout:'statement',notesSourceId:'notes-root'},
+      {id:'separate',type:'notes',title:'Separate',body:'An independent note'},
+    ];
+    const value=ContentSchema.parse({...source.content,playlists:[{id:'notes-deck',name:'Message',items}],channels:[{id:'notes-channel',name:'Message',kind:'notes',playlistId:'notes-deck'}]});
+    await fs.writeFile(path.join(source.root,'content.json'),JSON.stringify(value));
+    const selection={...none,presentations:['notes-deck']};
+    const bytes=await source.transfer.export(selection),preview=await target.transfer.preview(bytes);
+    await target.transfer.import(preview.archive,selection);
+    const imported=ContentSchema.parse(JSON.parse(await fs.readFile(path.join(target.root,'content.json'),'utf8')));
+    assert.equal(imported.channels[0].kind,'notes','A Notes channel remains a Notes channel when transferred');
+    const copied=imported.playlists[0].items;
+    assert.notEqual(copied[0].id,'notes-root');assert.notEqual(copied[1].id,'notes-child');
+    assert.equal(copied[1].notesSourceId,copied[0].id);
+    assert.equal(copied[0].notesSourceId,undefined);assert.equal(copied[2].notesSourceId,undefined);
+    assert.deepEqual(copied.map(item=>item.body),['First point','Second point','An independent note']);
+  }finally{await source.close();await target.close();}
+});
+
 test('malformed archives, traversal, unsupported media, corrupt hashes and overlapping verses fail before mutations', async () => {
   const source = await fixture(), target = await fixture();
   try {

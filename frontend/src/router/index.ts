@@ -5,6 +5,7 @@ export const router = createRouter({
   routes: [
     { path: '/remote', name: 'mobile-controller', component: () => import('@/views/MobileControllerView.vue') },
     { path: '/team', name: 'team', component: () => import('@/views/TeamView.vue') },
+    { path: '/media', name: 'media', component: () => import('@/views/MediaLibraryView.vue') },
     {
       path: '/recordings',
       name: 'recordings',
@@ -29,6 +30,11 @@ export const router = createRouter({
       path: '/studio/engine',
       name: 'studio-engine',
       component: () => import('@/views/StudioEngineView.vue'),
+    },
+    {
+      path: '/studio/virtual-output',
+      name: 'studio-virtual-output',
+      component: () => import('@/views/StudioVirtualOutputView.vue'),
     },
     {
       path: '/studio/output/:outputId',

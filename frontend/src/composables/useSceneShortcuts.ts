@@ -54,8 +54,6 @@ export function useSceneShortcutListener() {
   }
   onMounted(() => {
     bindings.value = readBindings();
-    // A new authenticated operator session must not retain a pre-login socket.
-    studio.reconnect();
     window.addEventListener('keydown', keydown);
     window.addEventListener('storage', storage);
   });

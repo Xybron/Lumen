@@ -7,7 +7,7 @@ import { gzipSync, gunzipSync } from 'node:zlib';
 import { z } from 'zod';
 import { BibleImportSchema, SongSchema, WorshipLibrary } from './worship-library.js';
 import { decodeSong, SongSectionSchema } from './worship-song.js';
-import { BackgroundSchema, ChannelSchema, ContentSchema, ItemSchema, PlaylistSchema, SettingsSchema, type Content } from './schema.js';
+import { BackgroundSchema, ChannelSchema, ContentSchema, ItemSchema, PlaylistSchema, validatePlaylistGroups, SettingsSchema, type Content } from './schema.js';
 import { ensureChannels } from './migrate-content.js';
 import { withContentLock } from './content-writer.js';
 import { invalidateLyricsSearch } from './lyrics-search.js';
@@ -29,7 +29,7 @@ const item = ItemSchema.extend({
   background: background.optional(), color: z.string().max(100).optional(),
   stanzas: z.array(z.object({ id: entityId, label: z.string().max(1000).default(''), lines: z.string().max(100_000).default('') }).strict()).max(1000).optional(),
 }).strict();
-const playlist = PlaylistSchema.extend({ id: entityId, name: z.string().trim().min(1).max(300), items: z.array(item).max(10_000) }).strict();
+const playlist = PlaylistSchema.innerType().extend({ id: entityId, name: z.string().trim().min(1).max(300), items: z.array(item).max(10_000) }).strict().superRefine(validatePlaylistGroups);
 const channel = ChannelSchema.extend({ id: entityId, playlistId: entityId, name: z.string().trim().min(1).max(300) }).strict();
 const settings = SettingsSchema.extend({ fontFamily: z.string().max(300), globalFontScale: z.number().positive().max(20) }).strict();
 const song = z.object({ id: entityId, title: z.string().trim().min(1).max(160), author: z.string().max(300), copyright: z.string().max(1500), sections: z.array(SongSectionSchema.strict()).min(1).max(100), showSectionLabels: z.boolean().optional() }).strict();
@@ -413,8 +413,10 @@ export class DataTransfer {
         for (const p of presentations) {
           const playlistId = `pl_${randomUUID()}`;
           const copy = structuredClone(p.playlist); copy.id = playlistId;
+          const itemRewrite = new Map(copy.items.map(item => [item.id, `item_${randomUUID()}`]));
           for (const i of copy.items) {
-            i.id = `item_${randomUUID()}`;
+            i.id = itemRewrite.get(i.id)!;
+            if (i.notesSourceId) i.notesSourceId = itemRewrite.get(i.notesSourceId);
             for (const s of i.stanzas ?? []) s.id = `stanza_${randomUUID()}`;
             if (i.background?.src) i.background.src = rewrite.get(localReference(i.background.src)) ?? i.background.src;
           }

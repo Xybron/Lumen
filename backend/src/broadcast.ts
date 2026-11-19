@@ -3,9 +3,12 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import ffmpeg from 'ffmpeg-static';
-import type { BroadcastConfigInput, BroadcastDestinationId, BroadcastPreflight, BroadcastSession, BroadcastSinkStatus, BroadcastSnapshot } from '../../shared/broadcast.js';
+import type { BroadcastConfigInput, BroadcastDestinationId, BroadcastIncident, BroadcastPreflight, BroadcastSession, BroadcastSinkStatus, BroadcastSnapshot } from '../../shared/broadcast.js';
 import { BROADCAST_CHUNK_LIMIT, BROADCAST_INPUT_LIMIT, broadcastEncoderArguments, broadcastHlsArguments, broadcastRtmpBridgeArguments, broadcastFailureMessage, broadcastFailureCanRetry, selectBroadcastEncoder, disableBroadcastHardware, spawnBroadcastProcess, timeout, writeBroadcastSink, type StreamEncoder, type BroadcastFailureCode, type BroadcastProcess, type BroadcastSpawn } from './broadcast-process.js';
 import { openBroadcastRtmpsTransport, type BroadcastRtmpsTransport, type BroadcastTlsConnect } from './broadcast-rtmps.js';
+import { normalizeInstagramStreamUrl } from './broadcast-destinations.js';
+import { BroadcastInputError, writeBroadcastInput } from './broadcast-input.js';
+import { createBroadcastHealth } from './broadcast-health.js';
 
 export class BroadcastError extends Error { constructor(public status: number, message: string) { super(message); } }
 export interface BroadcastWatchRelay {
@@ -15,30 +18,53 @@ export interface BroadcastWatchRelay {
   publish(options: { directory: string; playlist: string; signal?: AbortSignal }): Promise<unknown>;
   finish(options?: { signal?: AbortSignal }): Promise<unknown>;
 }
-const destinationId = z.enum(['youtube', 'facebook']);
+const destinationId = z.enum(['youtube', 'facebook', 'instagram']);
+const destinationNames = { youtube: 'YouTube', facebook: 'Facebook', instagram: 'Instagram' };
 const keySchema = z.string().trim().min(1).max(2048).regex(/^[\x21-\x7e]+$/);
+const streamUrlSchema = z.string().trim().max(2048).transform((value, ctx) => {
+  if (!value) return undefined;
+  try { return normalizeInstagramStreamUrl(value); }
+  catch { ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Enter the Stream URL from Instagram Live Producer.' }); return z.NEVER; }
+});
 const inputSchema = z.object({
   profile: z.enum(['720p', '1080p']).optional(), recordOnStart: z.boolean().optional(),
-  destinations: z.array(z.object({ id: destinationId, enabled: z.boolean(), streamKey: keySchema.optional(), clearKey: z.boolean().optional() }).strict()).max(2).optional(),
+  destinations: z.array(z.object({ id: destinationId, enabled: z.boolean(), streamUrl: streamUrlSchema.optional(), streamKey: keySchema.optional(), clearKey: z.boolean().optional() }).strict()).max(3).optional(),
   watch: z.object({ enabled: z.boolean() }).strict().optional(),
 }).strict().superRefine((value, ctx) => {
   const ids = value.destinations?.map(d => d.id) ?? [];
   if (new Set(ids).size !== ids.length) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Choose each destination only once.' });
   if (value.destinations?.some(d => d.clearKey && d.streamKey)) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Save or clear a key, not both.' });
+  if (value.destinations?.some(d => d.id !== 'instagram' && d.streamUrl !== undefined)) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Only Instagram accepts a Stream URL.' });
 });
-const configSchema = z.object({ version: z.literal(1), profile: z.enum(['720p', '1080p']), recordOnStart: z.boolean(),
-  destinations: z.array(z.object({ id: destinationId, enabled: z.boolean(), key: keySchema.optional() }).strict()).length(2),
+const configSchema = z.object({ version: z.literal(2), profile: z.enum(['720p', '1080p']), recordOnStart: z.boolean(),
+  destinations: z.array(z.object({ id: destinationId, enabled: z.boolean(), key: keySchema.optional(), streamUrl: streamUrlSchema.optional() }).strict()).length(3),
+  watch: z.object({ enabled: z.boolean() }).strict(),
+}).strict().refine(value => new Set(value.destinations.map(d => d.id)).size === 3 && value.destinations.every(d => d.id === 'instagram' || d.streamUrl === undefined));
+const legacyConfigSchema = z.object({ version: z.literal(1), profile: z.enum(['720p', '1080p']), recordOnStart: z.boolean(),
+  destinations: z.array(z.object({ id: z.enum(['youtube', 'facebook']), enabled: z.boolean(), key: keySchema.optional() }).strict()).length(2),
   watch: z.object({ enabled: z.boolean() }).strict(),
 }).strict().refine(value => new Set(value.destinations.map(d => d.id)).size === 2);
 type PrivateConfig = z.infer<typeof configSchema>;
+function readConfig(text: string): PrivateConfig {
+  const value = JSON.parse(text);
+  if (value?.version !== 1) return configSchema.parse(value);
+  const legacy = legacyConfigSchema.parse(value);
+  return configSchema.parse({ ...legacy, version: 2, destinations: [...legacy.destinations, { id: 'instagram', enabled: false }] });
+}
 const ENDPOINTS = { youtube: 'rtmps://a.rtmps.youtube.com:443/live2/', facebook: 'rtmps://live-api-s.facebook.com:443/rtmp/' } as const;
-export function broadcastDestinationUrl(id: BroadcastDestinationId, key: string): string {
+export function broadcastDestinationUrl(id: BroadcastDestinationId, key: string, streamUrl?: string): string {
   const parsed = keySchema.safeParse(key);
   // A key is opaque publisher data, not a URL. It can contain the platform's
   // query suffix, but never replace the fixed RTMPS authority or protocol.
-  if (!parsed.success || /^(?:[a-z]+:|\/\/)/i.test(parsed.data)) throw new BroadcastError(422, 'Enter a platform stream key, not a server URL.');
-  return ENDPOINTS[id] + parsed.data;
+  if (!parsed.success || /^(?:[a-z]+:|\/\/)/i.test(parsed.data) || /[#\\]/.test(parsed.data)) throw new BroadcastError(422, 'Enter a platform stream key, not a server URL.');
+  let endpoint: string;
+  try { endpoint = id === 'instagram' ? normalizeInstagramStreamUrl(streamUrl ?? '') : ENDPOINTS[id]; }
+  catch { throw new BroadcastError(422, 'Enter the secure Stream URL from Instagram Live Producer, without the stream key.'); }
+  const target = endpoint + parsed.data;
+  if (!new URL(target).pathname.startsWith(new URL(endpoint).pathname)) throw new BroadcastError(422, 'Enter a valid platform stream key.');
+  return target;
 }
+const destinationConfigured = (destination: PrivateConfig['destinations'][number]) => !!destination.key && (destination.id !== 'instagram' || !!destination.streamUrl);
 const isRunning = (run: Run) => !run.stopping && ['starting', 'live'].includes(run.session.state);
 interface Sink {
   status: BroadcastSinkStatus;
@@ -60,6 +86,7 @@ interface Run {
   sinks: Map<string, Sink>;
   nextChunk: number;
   queuedBytes: number;
+  maxInputWaitMs: number;
   ingest: Promise<unknown>;
   stopping: boolean;
   stopTask: Promise<void> | null;
@@ -101,10 +128,11 @@ export async function createBroadcast(options: {
   }
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   await fs.chmod(directory, 0o700);
-  let config: PrivateConfig = { version: 1, profile: '720p', recordOnStart: true,
-    destinations: [{ id: 'youtube', enabled: false }, { id: 'facebook', enabled: false }], watch: { enabled: false } };
+  const health = await createBroadcastHealth(directory);
+  let config: PrivateConfig = { version: 2, profile: '720p', recordOnStart: true,
+    destinations: [{ id: 'youtube', enabled: false }, { id: 'facebook', enabled: false }, { id: 'instagram', enabled: false }], watch: { enabled: false } };
   let initialized = false;
-  try { config = configSchema.parse(JSON.parse(await fs.readFile(configPath, 'utf8'))); await fs.chmod(configPath, 0o600); initialized = true; }
+  try { config = readConfig(await fs.readFile(configPath, 'utf8')); await fs.chmod(configPath, 0o600); initialized = true; }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new BroadcastError(503, 'Go Live settings could not be read. The existing private settings file has been preserved.'); }
   if (options.localWatch && !initialized) {
     if (options.initialConfigPath) {
@@ -117,7 +145,7 @@ export async function createBroadcast(options: {
           // chmod, rename, rewrite or repair the station's private settings.
           const bytes = Buffer.alloc(16385), read = await file.read(bytes, 0, bytes.length, 0);
           if (read.bytesRead > 16384) throw new Error();
-          config = configSchema.parse(JSON.parse(bytes.subarray(0, read.bytesRead).toString('utf8')));
+          config = readConfig(bytes.subarray(0, read.bytesRead).toString('utf8'));
         } finally { await file.close(); }
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new BroadcastError(503, 'Saved Go Live settings could not be read. Existing settings are preserved; check the private settings before starting Local Watch.');
@@ -140,14 +168,14 @@ export async function createBroadcast(options: {
     const checks: BroadcastPreflight['checks'] = [
       { id: 'encoder', ok: !!ffmpeg, message: ffmpeg ? 'Local H.264/AAC encoder is available.' : 'The local encoder is unavailable.' },
       { id: 'destinations', ok: selected.length + Number(watchSelected) > 0, message: selected.length + Number(watchSelected) > 0 ? 'Stream destinations selected.' : 'Enable at least one destination.' },
-      ...selected.map(d => ({ id: d.id, ok: !!d.key, message: d.key ? `${d.id === 'youtube' ? 'YouTube' : 'Facebook'} stream key is configured.` : `Add the ${d.id === 'youtube' ? 'YouTube' : 'Facebook'} stream key.` })),
+      ...selected.map(d => ({ id: d.id, ok: destinationConfigured(d), message: destinationConfigured(d) ? `${destinationNames[d.id]} streaming setup is configured.` : d.id === 'instagram' && !d.streamUrl ? 'Add the Instagram Stream URL and stream key from Live Producer.' : `Add the ${destinationNames[d.id]} stream key.` })),
       ...(watchSelected ? [{ id: 'watch', ok: relay?.configured === true, message: relay?.configured ? 'Independent Watch relay is configured.' : 'The public Watch relay is not configured on this station.' }] : []),
     ];
     return { ready: !closed && checks.every(c => c.ok), checks, estimatedUploadKbps: Math.ceil((config.profile === '1080p' ? 4660 : 2660) * (selected.length + Number(watchSelected)) * 1.15) };
   }
   function snapshot(): BroadcastSnapshot {
     return { ...(options.localWatch ? { mode: 'local-watch' as const } : {}), config: { profile: config.profile, recordOnStart: config.recordOnStart,
-      destinations: config.destinations.map(d => ({ id: d.id, enabled: d.enabled, configured: !!d.key })),
+      destinations: config.destinations.map(d => ({ id: d.id, enabled: d.enabled, configured: destinationConfigured(d), ...(d.id === 'instagram' ? { streamUrl: d.streamUrl ?? '', hasKey: !!d.key } : {}) })),
       watch: { enabled: config.watch.enabled, configured: relay?.configured === true, ...(relay?.publicUrl ? { publicUrl: relay.publicUrl } : {}) } },
       session: structuredClone(current?.session ?? last), preflight: preflight() };
   }
@@ -170,7 +198,9 @@ export async function createBroadcast(options: {
   }
   async function configure(input: BroadcastConfigInput) {
     const parsed = inputSchema.safeParse(input);
-    if (!parsed.success) throw new BroadcastError(422, 'Choose supported Go Live settings and valid stream keys.');
+    if (!parsed.success) throw new BroadcastError(422, parsed.error.issues.some(issue => issue.path.includes('streamUrl'))
+      ? 'Enter the secure Stream URL from Instagram Live Producer, without the stream key.'
+      : 'Choose supported Go Live settings and valid stream keys.');
     return serial(async () => {
       if (closed) throw new BroadcastError(503, 'Streaming service is shutting down.');
       if (current) throw new BroadcastError(409, 'Stop streaming before changing this setup.');
@@ -181,7 +211,12 @@ export async function createBroadcast(options: {
       for (const patch of value.destinations ?? []) {
         const target = next.destinations.find(d => d.id === patch.id)!;
         target.enabled = patch.enabled;
-        if (patch.streamKey !== undefined) { broadcastDestinationUrl(patch.id, patch.streamKey); target.key = patch.streamKey; }
+        if (Object.hasOwn(patch, 'streamUrl')) target.streamUrl = patch.streamUrl;
+        if (patch.streamKey !== undefined) {
+          // A key can be saved before the URL, but must still be a valid opaque key.
+          broadcastDestinationUrl(patch.id, patch.streamKey, target.streamUrl ?? (patch.id === 'instagram' ? 'rtmps://live-upload.instagram.com:443/rtmp/' : undefined));
+          target.key = patch.streamKey;
+        }
         if (patch.clearKey) delete target.key;
       }
       await saveConfig(next); config = next; notify(true); return snapshot();
@@ -228,15 +263,20 @@ export async function createBroadcast(options: {
     })();
     return run.stopTask;
   }
-  function fatal(run: Run, message: string) {
+  function fatal(run: Run, message: string, reason: BroadcastIncident['reason'] = 'encoder-exit') {
     if (!isRunning(run)) return;
+    const now = Date.now();
+    health.record({ at: new Date(now).toISOString(), reason, encoder: run.encoderKind, encoderFailure: run.encoder?.failure() ?? 'unknown',
+      profile: run.session.profile, destinations: run.config.destinations.filter(d => d.enabled).length + Number(run.config.watch.enabled),
+      queuedBytes: run.queuedBytes, pendingInputBytes: run.encoder?.input.writableLength ?? 0, maxInputWaitMs: run.maxInputWaitMs,
+      inputAgeMs: run.inputAt ? Math.max(0, now - run.inputAt) : null, outputAgeMs: run.outputAt ? Math.max(0, now - run.outputAt) : null });
     try { options.onFatal?.(run.session.id); } catch { /* Best-effort renderer notification. */ }
     void stopRun(run, message);
   }
   function stopIfNoDestination(run: Run) {
     const selected = [...run.sinks.values()].filter(sink => sink.status.state !== 'disabled');
     if (selected.length && selected.every(sink => sink.stopped && ['error', 'stopped'].includes(sink.status.state)) && selected.some(sink => sink.status.state === 'error')) {
-      fatal(run, 'No selected destination remains connected. Stream encoding stopped to save resources; local recording and Studio are unchanged. Check the destination errors, then start again.');
+      fatal(run, 'No selected destination remains connected. Stream encoding stopped to save resources; local recording and Studio are unchanged. Check the destination errors, then start again.', 'destinations-failed');
     }
   }
   function retrySink(run: Run, sink: Sink, code: BroadcastFailureCode = 'unknown') {
@@ -278,7 +318,7 @@ export async function createBroadcast(options: {
       let args: string[];
       if (sink.status.id === 'watch') args = broadcastHlsArguments(run.directory);
       else {
-        const transport = await openBroadcastRtmpsTransport(broadcastDestinationUrl(destination!.id, destination!.key!), {
+        const transport = await openBroadcastRtmpsTransport(broadcastDestinationUrl(destination!.id, destination!.key!, destination!.streamUrl), {
           connectTls: options.connectTls, onFailure: code => {
             const child = sink.process;
             if (sink.transport === transport && child) loseSink(run, sink, child, code);
@@ -352,7 +392,7 @@ export async function createBroadcast(options: {
       const session: BroadcastSession = { id, profile: config.profile, state: 'starting', startedAt: new Date(startedAt).toISOString(), chunks: 0, bytes: 0, destinations, watch };
       let run: Run;
       try {
-        run = { session, config: structuredClone(config), directory: sessionDirectory, encoder: null, encoderKind: null, sinks: new Map(), nextChunk: 0, queuedBytes: 0, ingest: Promise.resolve(),
+        run = { session, config: structuredClone(config), directory: sessionDirectory, encoder: null, encoderKind: null, sinks: new Map(), nextChunk: 0, queuedBytes: 0, maxInputWaitMs: 0, ingest: Promise.resolve(),
           stopping: false, stopTask: null, encoded: false, inputAt: 0, outputAt: 0, startedAt, watchController: new AbortController(), watchBusy: false, relayStarted: false, relayEpoch: randomUUID(), relayPublished: '', relayRetryAt: 0 };
         current = run;
         for (const status of [...destinations, watch]) {
@@ -409,21 +449,28 @@ export async function createBroadcast(options: {
     if (!Number.isInteger(sequence) || sequence < 0 || sequence > 2_147_483_647) throw new BroadcastError(422, 'Invalid stream chunk sequence.');
     if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > BROADCAST_CHUNK_LIMIT) throw new BroadcastError(413, 'Choose a stream chunk between 1 byte and 8 MiB.');
     if (sequence < run.nextChunk) return { nextSequence: run.nextChunk };
-    if (run.queuedBytes + bytes.length > BROADCAST_INPUT_LIMIT) { fatal(run, 'The stream input queue is full. Local recording continues independently.'); throw new BroadcastError(429, 'The stream input queue is full.'); }
+    if (run.queuedBytes + bytes.length > BROADCAST_INPUT_LIMIT) { fatal(run, 'The stream input queue is full. Local recording continues independently.', 'input-backlog'); throw new BroadcastError(429, 'The stream input queue is full.'); }
     run.queuedBytes += bytes.length;
     const operation = run.ingest.then(async () => {
       if (!isRunning(run)) throw new BroadcastError(409, 'This streaming session has stopped.');
       if (sequence < run.nextChunk) return { nextSequence: run.nextChunk };
       if (sequence !== run.nextChunk) throw new BroadcastError(409, `Expected stream chunk ${run.nextChunk}.`);
       if (run.encoder && (run.encoderKind === 'worker-h264') !== workerEncoded) throw new BroadcastError(409, 'Stream format changed mid-session.');
+      const writingAt = Date.now();
       try {
         const encoder = run.encoder ?? await openEncoder(run, workerEncoded);
-        if (encoder.input.destroyed || encoder.input.writableLength + bytes.length > BROADCAST_INPUT_LIMIT) throw new Error('Encoder input unavailable.');
-        await timeout(new Promise<void>((resolve, reject) => { encoder.input.write(bytes, error => error ? reject(error) : resolve()); }), 8000);
-      } catch {
+        await writeBroadcastInput(encoder.input, bytes, { limit: BROADCAST_INPUT_LIMIT, progress: () => run.outputAt });
+        run.maxInputWaitMs = Math.max(run.maxInputWaitMs, Date.now() - writingAt);
+      } catch (error) {
+        run.maxInputWaitMs = Math.max(run.maxInputWaitMs, Date.now() - writingAt);
         const hardwareFailed = run.encoderKind === 'videotoolbox' || run.encoderKind === 'mediafoundation';
         if (hardwareFailed && isRunning(run)) disableBroadcastHardware(run.session.profile);
-        fatal(run, hardwareFailed ? 'The hardware encoder stopped accepting media. Restart only the stream to use compatible software; local recording is unchanged.' : 'The stream encoder could not keep up with its input. Local recording continues independently.');
+        const reason = error instanceof BroadcastInputError ? error.reason : 'encoder-exit';
+        const message = reason === 'input-stalled' ? 'The local stream encoder stopped draining media. Close competing streaming or encoding apps and retry. Local recording continues independently.'
+          : reason === 'input-backlog' ? 'The local stream input queue filled up. Local recording continues independently.'
+            : hardwareFailed ? 'The hardware encoder stopped accepting media. Restart only the stream to use compatible software; local recording is unchanged.'
+              : 'The local stream encoder stopped accepting media. Check Program health for the failure details. Local recording continues independently.';
+        fatal(run, message, reason);
         throw new BroadcastError(503, 'Stream media could not be accepted.');
       }
       run.nextChunk++; run.session.chunks++; run.session.bytes += bytes.length; run.inputAt = Date.now(); run.session.lastChunkAt = new Date(run.inputAt).toISOString(); notify();
@@ -433,7 +480,7 @@ export async function createBroadcast(options: {
     try { return await operation; } finally { run.queuedBytes -= bytes.length; }
   }
   async function stop() { return serial(async () => { const run = current; if (run) await stopRun(run); return snapshot(); }); }
-  async function error(id: string, _message?: string) { const run = current; if (run?.session.id === id) { fatal(run, 'The Program media connection was interrupted. Studio and local recording are unchanged.'); await run.stopTask; } return snapshot(); }
+  async function error(id: string, _message?: string) { const run = current; if (run?.session.id === id) { fatal(run, 'The Program media connection was interrupted. Studio and local recording are unchanged.', 'source-stalled'); await run.stopTask; } return snapshot(); }
   function getSink(id: string) {
     const run = current, sink = run?.sinks.get(id);
     if (!run || !isRunning(run) || !sink) throw new BroadcastError(409, 'No active stream destination was found.');
@@ -467,12 +514,13 @@ export async function createBroadcast(options: {
   }
   const watchdog = setInterval(() => {
     const run = current; if (!run || !isRunning(run)) return;
-    if (Date.now() - (run.inputAt || run.startedAt) > 20_000) { fatal(run, 'No Program media arrived within 20 seconds. Local recording remains independent.'); return; }
-    if (run.inputAt && Date.now() - (run.outputAt || run.startedAt) > 20_000) { fatal(run, 'The encoder stopped producing frames. Local recording remains independent.'); return; }
+    if (Date.now() - (run.inputAt || run.startedAt) > 20_000) { fatal(run, 'No Program media arrived within 20 seconds. Local recording remains independent.', 'source-stalled'); return; }
+    if (run.inputAt && Date.now() - (run.outputAt || run.startedAt) > 20_000) { fatal(run, 'The encoder stopped producing frames. Local recording remains independent.', 'input-stalled'); return; }
     for (const sink of run.sinks.values()) if (sink.process && sink.backpressureAt && Date.now() - sink.backpressureAt > 8000) loseSink(run, sink, sink.process, 'backpressure');
     if (run.config.watch.enabled) void publishWatch(run);
   }, 500); watchdog.unref();
-  async function close() { closed = true; clearInterval(watchdog); await stop(); await lock; }
+  async function close() { closed = true; clearInterval(watchdog); await stop(); await lock; await health.flush(); }
   return { snapshot, sessionStatus, preflight, configure, start, chunk, error, stop, retryDestination, stopDestination, close,
-    diagnostics: () => current ? { encoder: current.encoderKind, queuedBytes: current.queuedBytes } : null };
+    diagnostics: () => ({ encoder: current?.encoderKind ?? null, queuedBytes: current?.queuedBytes ?? 0,
+      pendingInputBytes: current?.encoder?.input.writableLength ?? 0, maxInputWaitMs: current?.maxInputWaitMs ?? 0, lastFailure: health.latest() }) };
 }

@@ -5,7 +5,7 @@ import { useFullscreen, useIdle, useEventListener, useWakeLock } from '@vueuse/c
 import { Volume2, Maximize } from 'lucide-vue-next';
 import StudioMonitor from '@/components/studio/StudioMonitor.vue';
 import { studioApi } from '@/lib/studio/api';
-import { requestDisplayFullscreen } from '@/lib/studio/display-outputs';
+import { requestDisplayFullscreen, desktopDisplays } from '@/lib/studio/display-outputs';
 const route = useRoute();
 const outputId = computed(() => String(route.params.outputId));
 const root = ref<HTMLElement | null>(null), ready = ref(false), audible = ref(false), name = ref('Lumen output');
@@ -15,10 +15,19 @@ const outputName = computed(() => isProgram.value ? 'Program' : name.value);
 const { exit, isFullscreen } = useFullscreen(root), { idle } = useIdle(2500);
 const wake = useWakeLock();
 async function fullscreen() {
+  const native = desktopDisplays();
+  if (native && (await native.toggleFullscreen()).managed) return;
   if (isFullscreen.value) { await exit(); return; }
   if (root.value) { const result = await requestDisplayFullscreen(root.value); fullscreenMessage.value = result.message; }
 }
-useEventListener(window, 'keydown', e => { if (e.key.toLowerCase() === 'f') { e.preventDefault(); void fullscreen(); } });
+useEventListener(window, 'keydown', e => {
+  if (e.defaultPrevented || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key.toLowerCase() === 'f') { e.preventDefault(); void fullscreen(); }
+  else if (e.key === 'Escape' && desktopDisplays()) {
+    e.preventDefault();
+    void desktopDisplays()!.exitFullscreen().then(result => { if (!result.managed && isFullscreen.value) void exit(); });
+  }
+});
 onMounted(async () => {
   await wake.request('screen').catch(() => {});
   if (!isProgram.value) {

@@ -7,14 +7,16 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { once } = require('node:events');
 
-test('desktop bootstrap seeds a model without overwriting station content and closes its backend over IPC', async () => {
+test('desktop bootstrap seeds speech and optional VAD models without overwriting station content and closes over IPC', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'lumen-desktop-bootstrap-'));
   const runtime = path.join(directory, 'resources'), station = path.join(directory, 'station');
   const model = path.join(runtime, 'ggml-base.en.bin');
+  const vad = path.join(runtime, 'ggml-silero-v6.2.0.bin');
   let child;
   try {
     await fs.mkdir(path.join(runtime, 'lumen', 'backend', 'dist'), { recursive: true });
     await fs.writeFile(model, 'bundled synthetic model');
+    await fs.writeFile(vad, 'bundled synthetic speech detector');
     await fs.writeFile(path.join(runtime, 'lumen', 'backend', 'package.json'), JSON.stringify({ type: 'module' }));
     await fs.writeFile(path.join(runtime, 'lumen', 'backend', 'dist', 'server.js'), `
       import fs from 'node:fs/promises';
@@ -24,8 +26,8 @@ test('desktop bootstrap seeds a model without overwriting station content and cl
         return { server: { address: () => ({port: options.port}) }, close: () => fs.writeFile(path.join(process.env.LUMEN_DATA_DIR, 'closed'), 'yes') };
       }
     `);
-    async function run() {
-      child = spawn(process.execPath, [path.resolve(__dirname, '../app/backend.cjs')], { env: { ...process.env, LUMEN_DESKTOP_RUNTIME_ROOT: runtime, LUMEN_DATA_DIR: station, LUMEN_WHISPER_SERVER: '/synthetic/whisper', LUMEN_DESKTOP_MODEL: model, PORT: '43117' }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+    async function run(withVad=false) {
+      child = spawn(process.execPath, [path.resolve(__dirname, '../app/backend.cjs')], { env: { ...process.env, LUMEN_DESKTOP_RUNTIME_ROOT: runtime, LUMEN_DATA_DIR: station, LUMEN_WHISPER_SERVER: '/synthetic/whisper', LUMEN_DESKTOP_MODEL: model, LUMEN_DESKTOP_VAD:withVad?vad:'', PORT: '43117' }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
       const [ready] = await once(child, 'message', { signal: AbortSignal.timeout(5000) });
       assert.deepEqual(ready, { type: 'ready', port: 43117 });
       const exited = once(child, 'exit', { signal: AbortSignal.timeout(5000) });
@@ -37,9 +39,15 @@ test('desktop bootstrap seeds a model without overwriting station content and cl
     const installed = path.join(station, 'ai', 'models', 'ggml-base.en.bin');
     assert.equal(await fs.readFile(installed, 'utf8'), 'bundled synthetic model');
     assert.equal(await fs.readFile(path.join(station, 'closed'), 'utf8'), 'yes');
+    assert.deepEqual(await fs.readdir(path.dirname(installed)), ['ggml-base.en.bin'],'A legacy bundle need not provide a detector');
+    await run(true);
+    const installedVad=path.join(station,'ai','models','ggml-silero-v6.2.0.bin');
+    assert.equal(await fs.readFile(installedVad,'utf8'),'bundled synthetic speech detector');
     await fs.writeFile(installed, 'retained local model');
-    await run();
+    await fs.writeFile(installedVad,'retained local detector');
+    await run(true);
     assert.equal(await fs.readFile(installed, 'utf8'), 'retained local model');
-    assert.deepEqual(await fs.readdir(path.dirname(installed)), ['ggml-base.en.bin']);
+    assert.equal(await fs.readFile(installedVad,'utf8'),'retained local detector');
+    assert.deepEqual((await fs.readdir(path.dirname(installed))).sort(), ['ggml-base.en.bin','ggml-silero-v6.2.0.bin']);
   } finally { child?.kill(); await fs.rm(directory, { recursive: true, force: true }); }
 });

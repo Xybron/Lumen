@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {WorshipLibrary} from '../src/worship-library.js';
 import {ListeningSessions} from '../src/listening-session.js';
+import {analyzeLocalRecognition} from '../src/listening-recognition.js';
 import type {ListeningResult,WorshipWorkspace} from '../../shared/worship.js';
 
 const john='For God so loved the world, that he gave his only begotten Son, that whosoever believeth in him should not perish, but have everlasting life.';
@@ -223,4 +224,152 @@ test('invalid, negated or additional numeric references cannot escape into quote
       assert.equal(result.switched,false,`${reference}: ${result.reason}`);assert.ok(['review','conflict','partial'].includes(result.decision),reference);assert.equal(result.candidate,null,reference);assert.equal(f.changes.length,0);
     }finally{f.close();}
   }
+});
+
+test('adjacent clear partial citations retain their chapter for an explicitly marked continuation',()=>{
+  const f=fixture();try {
+    assert.equal(f.accept('John chapter three').decision,'partial');
+    const completed=f.accept('verse sixteen');
+    assert.equal(completed.switched,true,completed.reason);assert.equal(verse(completed),16);
+    assert.equal(completed.transcript,'verse sixteen','The UI must keep the actual transcript rather than fabricate a full spoken reference.');
+    assert.equal(f.accept('verse seventeen').candidate,null,'A completed citation does not remain as reusable context.');
+  }finally{f.close();}
+  const book=fixture();try {
+    assert.equal(book.accept('John').decision,'partial');
+    assert.equal(book.accept('chapter three').decision,'partial');
+    assert.equal(book.accept('verse sixteen').switched,true);
+  }finally{book.close();}
+});
+
+test('a quotation in the next window cannot silently contradict a fresh chapter lead-in',()=>{
+  const f=fixture();try {
+    f.accept('John chapter four');
+    const conflict=f.accept(john);assert.equal(conflict.switched,false);assert.equal(conflict.decision,'conflict');assert.equal(verse(conflict),16);
+    f.accept('John chapter three');
+    assert.equal(f.accept(john).switched,true,'A matching chapter and strong quotation remain immediate.');
+  }finally{f.close();}
+});
+
+test('silence, unrelated speech, different chapters, gaps and workspace changes clear partial citation context',t=>{
+  for(const interruption of ['', 'we have sixteen people here','not verse sixteen','chapter four verse one']) {
+    const f=fixture();try {
+      f.accept('John chapter three');assert.equal(f.accept(interruption).switched,false,interruption);
+      assert.equal(f.accept('verse sixteen').candidate,null,interruption);assert.equal(f.changes.length,0);
+    }finally{f.close();}
+  }
+  const gaps=fixture();try {
+    gaps.accept('John chapter three');
+    const result=gaps.sessions.accept('scripture',gaps.session.id,'operator',2,'scripture','verse sixteen',42,0);
+    assert.equal(result.candidate,null,'Skipped windows cannot be assumed to preserve a citation.');
+  }finally{gaps.close();}
+  const changed=fixture();try {
+    changed.accept('John chapter three');
+    changed.library.command('scripture',0,{type:'blank',value:true});
+    assert.equal(changed.accept('verse sixteen').candidate,null);
+  }finally{changed.close();}
+  let now=Date.now();t.mock.method(Date,'now',()=>now);
+  const expired=fixture();try {
+    expired.accept('John chapter three');now+=12001;
+    assert.equal(expired.accept('verse sixteen').candidate,null,'Recent chapter context expires independently of the session lease.');
+  }finally{expired.close();t.mock.restoreAll();}
+});
+
+test('uncertain and unavailable recognition never authorize automatic citations, quotations or voice commands',()=>{
+  for(const status of ['uncertain','unavailable'] as const)for(const text of ['John 3:16',john,'Lumen next']) {
+    const f=fixture('automatic',true);try {
+      f.accept('John 3:16');const revision=f.library.workspace('scripture').revision;
+      const recognition={status,reason:'Speech needs review.',avgLogprob:-1,noSpeechProbability:.4,rejectedSegments:0,totalSegments:1};
+      const result=f.sessions.accept('scripture',f.session.id,'operator',1,'scripture',text,42,revision,recognition);
+      assert.equal(result.switched,false,`${status}: ${text}`);assert.equal(result.decision,'review');assert.deepEqual(result.recognition,recognition);assert.equal(f.changes.length,1);
+      if(text!=='Lumen next')assert.ok(result.candidate,'Current uncertain text can still prepare a suggestion.');
+    }finally{f.close();}
+  }
+});
+
+test('rejected or uncertain audio cannot bridge partial references or fabricate candidates from silence',()=>{
+  for(const status of ['uncertain','unavailable','no-speech'] as const) {
+    const f=fixture();try {
+      f.accept('John chapter three');
+      const recognition={status,reason:'Speech needs review.',avgLogprob:null,noSpeechProbability:null,rejectedSegments:1,totalSegments:1};
+      const result=f.sessions.accept('scripture',f.session.id,'operator',1,'scripture','verse sixteen',42,0,recognition);
+      assert.equal(result.candidate,null);assert.equal(result.switched,false);
+      const after=f.sessions.accept('scripture',f.session.id,'operator',2,'scripture','verse sixteen',42,0);
+      assert.equal(after.candidate,null);
+    }finally{f.close();}
+  }
+  const f=fixture();try {
+    const recognition={status:'no-speech' as const,reason:'No speech detected.',avgLogprob:null,noSpeechProbability:1,rejectedSegments:1,totalSegments:1};
+    const result=f.sessions.accept('scripture',f.session.id,'operator',0,'scripture','John 3:16',42,0,recognition);
+    assert.equal(result.candidate,null);assert.equal(result.switched,false);assert.equal(result.decision,'listening');
+  }finally{f.close();}
+});
+
+test('paraphrase suggestions never become automatic evidence through repeated matches',()=>{
+  const f=fixture();try {
+    const text="God's gift of his begotten Son to a world he loved is how we receive everlasting life";
+    for(let i=0;i<3;i++){
+      const result=f.accept(text);assert.equal(verse(result),16);assert.equal(result.match,'phrase');
+      assert.equal(result.decision,'review');assert.equal(result.switched,false);assert.match(result.reason,/Possible paraphrase/);
+    }
+    assert.equal(f.changes.length,0);
+  }finally{f.close();}
+});
+
+test('corrected verse numbers and discarded spoken corrections never publish the surviving first reference',()=>{
+  const f=fixture();try {
+    for(const text of ['John 3:16, sorry, verse seventeen','John 3:16 no seventeen','John 3:16 I mean seventeen']){
+      const result=f.accept(text);assert.equal(result.switched,false,text);assert.equal(result.decision,'review');assert.equal(result.candidate,null);
+    }
+    f.accept('John chapter three');
+    assert.equal(f.accept('verse sixteen, sorry seventeen').switched,false);
+    const transcript=analyzeLocalRecognition({segments:[
+      {text:'John three',avg_logprob:-.2,no_speech_prob:.01},
+      {text:' no, not that verse',avg_logprob:-1.9,no_speech_prob:.1},
+      {text:' verse sixteen',avg_logprob:-.3,no_speech_prob:.01},
+    ]});
+    const result=f.sessions.accept('scripture',f.session.id,'operator',6,'scripture',transcript.text,42,0,transcript.recognition);
+    assert.equal(result.switched,false);assert.equal(result.decision,'review');assert.ok(result.candidate,'A surviving exact reference is review-only after discarded speech.');
+    assert.equal(f.changes.length,0);
+  }finally{f.close();}
+});
+
+test('an injected source clock makes offline context independent of inference wall time',t=>{
+  const library=new WorshipLibrary(':memory:');let sourceTime=0,wallTime=Date.now();
+  t.mock.method(Date,'now',()=>wallTime);
+  try{
+    library.importBible({version:{id:'KJV',name:'KJV',attribution:'KJV'},verses:[{book:43,chapter:3,verse:16,text:john}]});
+    const sessions=new ListeningSessions(library,()=>{},()=>sourceTime);
+    const lease=sessions.start('scripture','operator',{mode:'automatic',language:'en',commands:false});
+    sourceTime=10000;
+    assert.equal(sessions.accept('scripture',lease.id,'operator',0,'scripture','John chapter three',1,0).decision,'partial');
+    // Simulate a slow decoder without sleeping; only ten seconds of source
+    // audio elapsed, so the two citation fragments remain adjacent.
+    wallTime+=90000;sourceTime=20000;
+    sessions.renew('scripture',lease.id,'operator');
+    assert.equal(sessions.accept('scripture',lease.id,'operator',1,'scripture','verse sixteen',90000,0).switched,true);
+    sessions.stop('scripture');
+    const restarted=sessions.start('scripture','operator',{mode:'automatic',language:'en',commands:false});
+    assert.equal(sessions.accept('scripture',restarted.id,'operator',2,'scripture','verse sixteen',1,1).candidate,null,'Starting after a source gap has no inherited chapter.');
+    sourceTime+=45001;assert.throws(()=>sessions.renew('scripture',restarted.id,'operator'),/stopped or expired/,'Lease checks use the same injected clock.');
+  }finally{library.close();t.mock.restoreAll();}
+});
+
+test('Prepare only cannot move an existing live verse even with voice commands enabled',()=>{
+  const f=fixture('assisted',true);try {
+    const workspace=f.library.workspace('scripture');
+    const live=f.library.command('scripture',workspace.revision,{type:'take',selection:{kind:'scripture',versionId:'KJV',book:43,chapter:3,verse:16}});
+    for(const text of ['Lumen next verse','John 3:17','Lumen previous verse']) {
+      assert.equal(f.accept(text).switched,false);
+      assert.equal(f.library.workspace('scripture').revision,live.revision);
+    }
+    assert.equal(f.changes.length,0);
+  }finally{f.close();}
+});
+
+test('a citation mixed with decoder music markers remains review-only in armed auto mode',()=>{
+  const f=fixture();try {
+    const result=analyzeLocalRecognition({segments:[{text:'[Music] John 3:16',avg_logprob:-.1,no_speech_prob:.01}]});
+    const matched=f.sessions.accept('scripture',f.session.id,'operator',0,'scripture',result.text,1,f.library.workspace('scripture').revision,result.recognition);
+    assert.ok(matched.candidate);assert.equal(matched.decision,'review');assert.equal(matched.switched,false);assert.equal(f.changes.length,0);
+  }finally{f.close();}
 });

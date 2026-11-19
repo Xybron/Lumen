@@ -50,6 +50,7 @@ async function installMediaDouble(context) {
       remove: id => { available.delete(id); media.dispatchEvent(new Event('devicechange')); },
       add: (id, label) => { available.set(id, label); media.dispatchEvent(new Event('devicechange')); },
       end: id => { for (const item of captures.filter(item => item.id === id && item.track.readyState === 'live')) { item.track.stop(); item.track.dispatchEvent(new Event('ended')); } },
+      setLevel: value => { for (const item of captures.filter(item => item.track.readyState === 'live')) item.gain.gain.value=value; },
     };
     Object.defineProperty(window, '__listeningMedia', { value: trace });
     Object.defineProperty(media, 'enumerateDevices', { value: async () => [...available].map(([deviceId, label]) => ({
@@ -69,7 +70,7 @@ async function installMediaDouble(context) {
       Object.defineProperty(track, 'label', { value: available.get(id) });
       track.getSettings = () => ({ deviceId: id, groupId: `${id}-group`, channelCount: 1, sampleRate: audio.sampleRate });
       track.stop = () => { if (track.readyState === 'ended') return; trace.stops.push(id); nativeStop(); oscillator.stop(); void audio.close(); };
-      captures.push({ id, stream, track }); return stream;
+      captures.push({ id, stream, track, gain }); return stream;
     } });
   });
 }
@@ -124,7 +125,7 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   page.on('dialog', async prompt => { nativeDialogs.push({ type: prompt.type(), message: prompt.message() }); await prompt.dismiss(); });
   page.on('request', request => {
-    if (['POST', 'DELETE', 'PUT'].includes(request.method())) calls.push({ path: new URL(request.url()).pathname, session: new URL(request.url()).searchParams.get('session'), method: request.method(), body: request.headers()['content-type']?.startsWith('application/json') ? request.postDataJSON() : null, bytes: request.headers()['content-type']?.startsWith('audio/wav') ? request.postDataBuffer() : null });
+    if (['POST', 'DELETE', 'PUT'].includes(request.method())) calls.push({ path: new URL(request.url()).pathname, session: new URL(request.url()).searchParams.get('session'), sequence:Number(new URL(request.url()).searchParams.get('sequence')), method: request.method(), body: request.headers()['content-type']?.startsWith('application/json') ? request.postDataJSON() : null, bytes: request.headers()['content-type']?.startsWith('audio/wav') ? request.postDataBuffer() : null });
   });
   await page.goto(base); await page.getByRole('heading', { name: 'Find a passage', exact: true }).waitFor();
   const media = () => page.evaluate(() => ({ calls: window.__listeningMedia.calls, stops: window.__listeningMedia.stops, connections: window.__listeningMedia.connections, ...window.__listeningMedia.status() }));
@@ -149,6 +150,10 @@ try {
     if (await controlsTrigger().count() && !await controls().isVisible()) {
       await controlsTrigger().click(); await controls().waitFor();
     }
+    // This suite exercises the local worker. Configured stations now prefer
+    // shared cloud listening, including after a full page reload.
+    const provider = page.getByLabel('Recognition provider', { exact: true });
+    if (await provider.count() && await provider.isEnabled() && await provider.inputValue() !== 'local') await provider.selectOption('local');
   }
   async function closeControls() { if (await controls().isVisible()) await controls().getByRole('button', { name: 'Close listening controls', exact: true }).click(); await controls().waitFor({ state: 'hidden' }); await settle(); }
   async function openSettings() { await openControls(); await settings().click(); await dialog().waitFor(); await until(() => model().locator('option[value="base.en"]').count(), 'speech profiles render'); }
@@ -302,6 +307,12 @@ try {
   assert.equal(wav.riff, true); assert.equal(wav.rate, 16000); assert.equal(wav.channels, 1); assert.equal(wav.bits, 16);
   assert.ok(wav.bytes > 3244 && wav.bytes <= 384044);
   assert.ok((await page.evaluate(() => window.__listeningMedia.outputPeaks())).every(peak => peak < 1e-7), 'Listening also never monitors audio to speakers');
+  await page.evaluate(async()=>{window.__listeningMedia.setLevel(0);await new Promise(resolve=>setTimeout(resolve,8000));});
+  const beforeResume=audioRequests().at(-1),requestsBeforeResume=audioRequests().length;
+  await page.evaluate(()=>window.__listeningMedia.setLevel(.16));
+  await until(()=>audioRequests().length>requestsBeforeResume,'speech resumes after locally skipped silence');
+  assert.ok(audioRequests().at(-1).sequence>beforeResume.sequence+1,'Skipped silence creates a sequence gap so partial scripture context cannot cross it');
+  checks.push('Locally skipped silent windows create a sequence gap before resumed speech, preventing stale partial-reference context from crossing silence');
   const beforeCollapse = { media: await media(), starts: sessionRequests().length, ends: calls.filter(call => call.method === 'DELETE' && /\/listening$/.test(call.path)).length, windows: audioRequests().length, session: audioRequests().at(-1).session };
   await closeControls();
   assert.match(await controlsTrigger().innerText(), /Listening on/, 'The closed trigger clearly identifies active listening');
@@ -327,6 +338,17 @@ try {
   await until(() => listen().isEnabled(), 'restored USB input is ready for an explicit rearm'); await settle();
   assert.equal(sessionRequests().length, sessionsAtDisconnect); assert.deepEqual((await media()).live, [], 'Reconnecting does not automatically restart an armed listener');
   checks.push('Selected-device audio flows end to end through the real worklet/WAV/authenticated local session; active configuration is locked, disconnect stops capture/lease, and reconnection requires explicit rearming');
+
+  const audioRoute=/\/api\/worship\/channels\/scripture\/listening\/audio\?/;
+  for(const status of [429,503]){
+    let rejected=0;
+    await page.route(audioRoute,route=>{rejected++;return route.fulfill({status,contentType:'application/json',body:JSON.stringify({error:'Simulated recognition unavailable.'})});});
+    await openControls();await listen().click();
+    await until(async()=>rejected===1&&(await media()).live.length===0&&await stop().count()===0,'a rejected recognition window stops capture instead of silently skipping speech');
+    assert.match(await controls().textContent(),/Listening stopped because this audio could not be processed/);
+    assert.equal(rejected,1);await page.unroute(audioRoute);
+  }
+  checks.push('Busy and failed recognition requests stop with an explicit error and release capture; no later window silently bridges missing speech');
 
   await page.getByLabel('Search scripture', { exact: true }).fill('jn3 16');
   await page.locator('.w-verse-result').first().click();

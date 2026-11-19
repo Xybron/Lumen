@@ -3,6 +3,7 @@ import { setPriority, constants as osConstants } from 'node:os';
 import type { Writable, Readable } from 'node:stream';
 import ffmpeg from 'ffmpeg-static';
 import type { BroadcastProfile } from '../../shared/broadcast.js';
+import { broadcastIngestPrefix } from './broadcast-destinations.js';
 
 export const BROADCAST_INPUT_LIMIT = 16 * 1024 * 1024;
 export const BROADCAST_CHUNK_LIMIT = 8 * 1024 * 1024;
@@ -87,8 +88,9 @@ export function broadcastRtmpsArguments(target: string): string[] {
 }
 export function broadcastRtmpBridgeArguments(local: string, secureTcUrl: string): string[] {
   const destination = new URL(local), upstream = new URL(secureTcUrl);
+  const prefix = broadcastIngestPrefix(upstream);
   if (destination.protocol !== 'rtmp:' || destination.hostname !== '127.0.0.1' || !destination.port || destination.username || destination.password || destination.hash
-    || upstream.protocol !== 'rtmps:' || !['a.rtmps.youtube.com', 'live-api-s.facebook.com'].includes(upstream.hostname) || upstream.port && upstream.port !== '443' || upstream.username || upstream.password || upstream.search || upstream.hash) throw new Error('Invalid private streaming connection.');
+    || !prefix || upstream.search || upstream.pathname !== prefix.slice(0, -1) || !destination.pathname.startsWith(prefix)) throw new Error('Invalid private streaming connection.');
   return [...broadcastRemuxInput(), '-protocol_whitelist', 'rtmp,tcp', '-rw_timeout', '8000000', '-rtmp_tcurl', secureTcUrl, '-flvflags', 'no_duration_filesize', '-f', 'flv', local];
 }
 export function broadcastHlsArguments(directory: string): string[] {
@@ -108,9 +110,10 @@ export function spawnBroadcastProcess(args: string[], progress: (value: Record<s
   factory: BroadcastSpawn = spawn): BroadcastProcess {
   if (!ffmpeg) throw new Error('The stream encoder is unavailable.');
   const child = factory(ffmpeg, args, { stdio: ['pipe', 'pipe', 'pipe', 'pipe'], windowsHide: true });
-  // Let the production renderer and camera capture win CPU scheduling when a
-  // station is busy. FFmpeg's bounded input queue handles the stream side.
-  if (child.pid && args.includes('-c:v')) try { setPriority(child.pid, osConstants.priority.PRIORITY_BELOW_NORMAL); } catch { /* Best effort, including restricted Windows accounts. */ }
+  // Expensive software video encoding yields to Program. Copying already
+  // encoded video and hardware encoders need prompt scheduling to drain live
+  // input; deprioritizing them can starve the whole stream under competing apps.
+  if (child.pid && args[args.indexOf('-c:v') + 1] === 'libx264') try { setPriority(child.pid, osConstants.priority.PRIORITY_BELOW_NORMAL); } catch { /* Best effort, including restricted Windows accounts. */ }
   const input = child.stdin!, output = child.stdout!;
   let finished = false, stopping: Promise<void> | null = null, tail = '', fields: Record<string, string> = {};
   const classifier = createBroadcastFailureClassifier();

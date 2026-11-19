@@ -6,6 +6,7 @@ import path from 'node:path';
 const args=process.argv.slice(2),value=key=>args[args.indexOf(key)+1];
 const dir=path.dirname(value('-m'));
 await fs.writeFile(path.join(dir,'worker-args.json'),JSON.stringify(args));
+let requestIndex=0;
 const server=http.createServer(async(req,res)=>{
   if(req.url==='/health'){res.writeHead(200,{'content-type':'application/json'});res.end('{"status":"ok"}');return;}
   if(req.url!=='/inference'){res.writeHead(404).end();return;}
@@ -15,6 +16,7 @@ const server=http.createServer(async(req,res)=>{
   await fs.appendFile(path.join(dir,'worker-calls.jsonl'),`${JSON.stringify(fields)}\n`);
   let response={text:'John chapter three verse sixteen',segments:[{text:' John chapter three verse sixteen',avg_logprob:-.3,no_speech_prob:.02}]};
   try{response=JSON.parse(await fs.readFile(path.join(dir,'worker-response.json'),'utf8'));}catch{}
+  if(Array.isArray(response.responses))response=response.responses[Math.min(requestIndex++,response.responses.length-1)];
   if(response.delayMs)await new Promise(resolve=>setTimeout(resolve,response.delayMs));
   res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(response));
 });

@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { channelText } from '@/lib/studio/channel-overlay';
-import { channelPosterLayout } from '@/lib/studio/channel-poster-layout';
+import { channelPosterLayout, notesPosterSlideLayout } from '@/lib/studio/channel-poster-layout';
 import { textCss } from '@/lib/studio/text-style';
 import type { Item } from '@/types';
 import type { SceneLayer } from '../../../../shared/production';
 
 const props = defineProps<{ item: Item; layer: SceneLayer; overlay: boolean; posterForMedia?: (path: string | undefined, kind: 'image' | 'video') => string | undefined }>();
+const notesSlide = computed(() => !props.overlay && props.item.type === 'notes');
+const notesBlocks = computed(() => notesSlide.value ? notesPosterSlideLayout(props.item) : []);
 // Measuring is event-driven, at design resolution. No resize loop, playback
 // engine, media stream, or animation frame is needed for a sidebar thumbnail.
 const layout = computed(() => {
@@ -43,7 +45,15 @@ const textClip = computed(() => {
   <div class="poster-channel" :class="{ 'is-overlay': overlay }" :style="backgroundStyle" :data-item-id="item.id">
     <img v-if="image" :src="image" :style="{ objectFit: overlay ? layer.fit : background?.fit ?? 'cover' }" loading="lazy" decoding="async" draggable="false" alt="" />
     <div v-if="!overlay && background?.overlayOpacity" class="poster-shade" :style="{ opacity: background.overlayOpacity }" />
-    <div v-if="!visual" class="poster-channel-text-region" :style="textClip">
+    <div v-if="notesSlide" class="poster-channel-text-region">
+      <div v-for="(block, i) in notesBlocks" :key="i" class="poster-channel-text" :style="{
+        left: (block.x - (block.align === 'center' ? block.width / 2 : block.align === 'right' ? block.width : 0)) / 19.2 + '%',
+        width: block.width / 19.2 + '%', top: block.y / 10.8 + '%',
+        fontSize: block.fontSize * scale / 19.2 + 'cqw', lineHeight: block.lineHeight / block.fontSize,
+        letterSpacing: block.tracking * scale / 19.2 + 'cqw', fontWeight: block.weight, color: block.color, textAlign: block.align,
+      }">{{ block.lines.join('\n') }}</div>
+    </div>
+    <div v-else-if="!visual" class="poster-channel-text-region" :style="textClip">
       <div v-for="(block, i) in layout.blocks" :key="i" class="poster-channel-text" :style="{
         ...textCss(overlay ? layer : {}, scale),
         left: layout.insets.left / width * 100 + '%', width: layout.contentWidth / width * 100 + '%', top: block.top / height * 100 + '%',

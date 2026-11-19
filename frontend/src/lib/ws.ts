@@ -63,9 +63,13 @@ function open() {
     scheduleReconnect();
     return;
   }
+  // An online event can replace a socket whose close handshake is still in
+  // flight. Retire its timers before the replacement owns the connection.
+  clearTimers();
   socket = ws;
 
   ws.addEventListener('open', () => {
+    if (socket !== ws) return;
     reconnectAttempt = 0;
     setStatus('online');
 
@@ -79,12 +83,15 @@ function open() {
     }
 
     pingTimer = window.setInterval(() => {
-      if (ws.readyState !== WebSocket.OPEN) return;
+      if (socket !== ws || ws.readyState !== WebSocket.OPEN) return;
       ws.send(JSON.stringify({ t: 'ping' }));
       // If we don't see any message (pong or otherwise) within the window,
-      // assume the socket is a zombie and force a reconnect.
-      if (pongTimer != null) clearTimeout(pongTimer);
+      // assume the socket is a zombie and force a reconnect. Later pings must
+      // not postpone this deadline: they arrive more often than it expires.
+      if (pongTimer != null) return;
       pongTimer = window.setTimeout(() => {
+        if (socket !== ws) return;
+        pongTimer = null;
         try {
           ws.close();
         } catch {
@@ -95,6 +102,7 @@ function open() {
   });
 
   ws.addEventListener('message', (e) => {
+    if (socket !== ws) return;
     // Any inbound traffic resets the liveness timer.
     if (pongTimer != null) {
       clearTimeout(pongTimer);
@@ -113,6 +121,7 @@ function open() {
   });
 
   ws.addEventListener('close', () => {
+    if (socket !== ws) return;
     clearTimers();
     socket = null;
     setStatus('offline');

@@ -122,5 +122,5 @@ export function useFloatingDock({ legacyStorageKeys, bottomInset }: FloatingDock
     window.removeEventListener('resize', scheduleFit);
     window.removeEventListener('keydown', escape);
   });
-  return { element, style, collapsed, dragging, begin, move, finish, cancel, reset, keyboard };
+  return { element, style, collapsed, dragging, begin, move, finish, cancel, reset, keyboard, refresh: scheduleFit };
 }

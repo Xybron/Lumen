@@ -308,7 +308,7 @@ try {
   await until(() => cutButton.isEnabled(), 'controls recover after delayed Take');
   await page.unroute('**/api/studio/command', delayTakeRoute);
   await repeatTakeKeys(page, cutButton, 'Floating Multiview recovers after busy key suppression', ['Space']);
-  assert.equal(await page.getByRole('button', { name: 'Pause presentation', exact: true }).count(), 0, 'Repeated and busy Multiview Space never starts the underlying Presentation');
+  assert.equal(await page.getByRole('button', { name: 'Pause timer', exact: true }).count(), 0, 'Repeated and busy Multiview Space never starts the underlying Presentation');
   assert.ok(await measureAudio(output) > .02, 'Main audio still reaches Program after button and keyboard switching');
   checks.push('scene click and plain digits select Preview only; Cut/Fade/Space/Shift+Space and configured shortcuts atomically swap buses; repeated physical Space after scene/Cut/Fade clicks needs no refocus, held keys never native-click again, and Main/pinned output stay intact');
 
@@ -355,11 +355,11 @@ try {
   await page.getByRole('button', { name: 'Presentation — presentation', exact: true }).click();
   const presentationChip = page.getByRole('button', { name: 'Presentation — presentation', exact: true });
   const slideCounter = await presentationChip.textContent();
-  await page.getByRole('button', { name: 'Play presentation', exact: true }).first().waitFor();
+  await page.getByRole('button', { name: 'Start timer', exact: true }).first().waitFor();
   await page.getByRole('button', { name: 'Move Multiview', exact: true }).press('ArrowRight');
   await floating.focus(); await page.keyboard.press('Space'); await page.waitForTimeout(200);
   assert.equal(await presentationChip.textContent(), slideCounter, 'Multiview header arrows never advance the underlying Presentation');
-  assert.equal(await page.getByRole('button', { name: 'Pause presentation', exact: true }).count(), 0, 'Space on the window shell never plays the underlying Presentation');
+  assert.equal(await page.getByRole('button', { name: 'Pause timer', exact: true }).count(), 0, 'Space on the window shell never plays the underlying Presentation');
   await page.getByRole('button', { name: 'Scripture — scripture', exact: true }).click();
 
   const grip = page.getByRole('button', { name: 'Move Multiview', exact: true });

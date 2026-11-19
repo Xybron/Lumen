@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, ref, useTemplateRef } from 'vue';
-import { ExternalLink, Hand, MoreVertical, Pencil, Trash2, BookOpen, Music2, Presentation } from 'lucide-vue-next';
+import { ExternalLink, Hand, MoreVertical, Pencil, Trash2, BookOpen, Music2, Presentation, NotebookPen } from 'lucide-vue-next';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -67,7 +67,7 @@ function commitRename() {
       :aria-pressed="ch.focused"
       @click="!renaming && emit('focus')"
     >
-      <component :is="ch.kind === 'scripture' ? BookOpen : ch.kind === 'lyrics' ? Music2 : Presentation" :size="16" :class="ch.focused ? 'text-accent' : 'text-white/40'" />
+      <component :is="ch.kind === 'scripture' ? BookOpen : ch.kind === 'lyrics' ? Music2 : ch.kind === 'notes' ? NotebookPen : Presentation" :size="16" :class="ch.focused ? 'text-accent' : 'text-white/40'" />
       <div class="flex flex-col items-start leading-tight min-w-0">
         <input
           v-if="renaming"
@@ -83,7 +83,7 @@ function commitRename() {
         <span v-if="!renaming" class="text-[10px] tnum text-white/40 flex items-center gap-1">
           <span v-if="ch.listening" :class="ch.listening === 'automatic' ? 'text-amber-300' : 'text-accent'">AI {{ch.listening === 'automatic' ? 'auto' : 'listening'}} ·</span>
           <span v-if="ch.blanked" class="text-white/50">blanked</span>
-          <span v-else>{{ ch.kind === 'scripture' ? 'Scripture' : ch.kind === 'lyrics' ? 'Lyrics' : `Slides · ${ch.total === 0 ? 'Ready' : `${ch.index + 1} / ${ch.total}`}` }}</span>
+          <span v-else>{{ ch.kind === 'scripture' ? 'Scripture' : ch.kind === 'lyrics' ? 'Lyrics' : `${ch.kind === 'notes' ? 'Notes' : 'Slides'} · ${ch.total === 0 ? 'Ready' : `${ch.index + 1} / ${ch.total}`}` }}</span>
           <span v-if="ch.byOther" class="text-amber-300/80 normal-nums">· {{ ch.controllerName }}</span>
         </span>
       </div>

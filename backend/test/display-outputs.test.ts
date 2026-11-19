@@ -86,3 +86,26 @@ test('fullscreen is requested only by an explicit receiving-page action and degr
   assert.equal((await requestDisplayFullscreen({ requestFullscreen: async () => { throw new Error('gesture'); } } as unknown as HTMLElement)).entered, false);
   assert.match((await requestDisplayFullscreen({} as HTMLElement)).message, /browser/);
 });
+
+test('native assignments use display identity across resolution changes and reject ambiguous legacy matches', async () => {
+  const { assignedDisplay } = await import('../../frontend/src/lib/studio/display-outputs.js');
+  const first = { id: 'desktop-1', label: 'Projector', width: 1920, height: 1080, isPrimary: false, isCurrent: false, isInternal: false };
+  const second = { ...first, id: 'desktop-2' };
+  assert.equal(assignedDisplay([{ ...first, width: 1280 }], first)?.id, first.id);
+  assert.equal(assignedDisplay([second], first), null, 'A same-name replacement cannot take a missing native identity');
+  const legacy = { label: first.label, width: first.width, height: first.height };
+  assert.equal(assignedDisplay([first, second], legacy), null);
+  assert.equal(assignedDisplay([first], legacy)?.id, first.id);
+});
+
+test('desktop display discovery bypasses browser permission APIs and cleans up change listeners', async () => {
+  const value = fixture(); let notify = () => {}, removed = false;
+  const display = { id: 'desktop-4', label: 'Projector', width: 1920, height: 1080, isPrimary: false, isCurrent: false, isInternal: false };
+  const result = await listDisplays({ ...value.browser, lumenDisplays: {
+    list: async () => [display], open: async () => { throw Error('unused'); }, toggleFullscreen: async () => ({ managed: false }), exitFullscreen: async () => ({ managed: false }),
+    onChanged: listener => { notify = listener; return () => { removed = true; }; },
+  } });
+  assert.equal(value.queries(), 0); assert.equal(result.displays[0].id, display.id); assert.match(result.message, /fullscreen automatically/);
+  let updates = 0; const stop = result.subscribe(() => updates++); notify(); await Promise.resolve(); assert.equal(updates, 1);
+  stop(); notify(); await Promise.resolve(); assert.equal(updates, 1); assert.equal(removed, true);
+});

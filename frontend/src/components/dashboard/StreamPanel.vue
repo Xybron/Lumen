@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { SkeletonIndicator } from '@/components/ui/skeleton';
 import { computed, ref, watch } from 'vue';
-import { Radio, Plus, Play, Square, Loader2, KeyRound } from 'lucide-vue-next';
+import { Radio, Plus, Play, Square, KeyRound } from 'lucide-vue-next';
 import { toast } from 'vue-sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -108,7 +109,7 @@ function stateColor(s: string) {
               :disabled="busy === d.id || !engineEnabled || !targets[d.id]?.hasKey"
               @click="toggle(d.id)"
             >
-              <Loader2 v-if="busy === d.id" :size="13" class="animate-spin" />
+              <SkeletonIndicator v-if="busy === d.id" />
               <Play v-else-if="stream.stateFor(d.id) === 'idle'" :size="13" />
               <Square v-else :size="13" />
               {{ stream.stateFor(d.id) === 'idle' ? 'Go live' : 'Stop' }}

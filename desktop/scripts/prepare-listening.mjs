@@ -8,6 +8,8 @@ import { spawn } from 'node:child_process';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { installListeningModel } from '../../scripts/listening-model-download.mjs';
+import { installListeningVad } from '../../scripts/listening-vad-download.mjs';
+import { LISTENING_VAD_MODEL } from '../../shared/listening-vad.js';
 
 async function run(command, args) {
   await new Promise((resolve, reject) => {
@@ -78,10 +80,17 @@ export async function prepareListening(resourcesDir, cacheDir) {
   const models = path.join(cache, 'models');
   await fs.mkdir(models, { recursive: true });
   const model = await installListeningModel('base.en', models);
+  const vad = await installListeningVad(models);
   await fs.copyFile(model, path.join(target, 'models', path.basename(model)));
+  await fs.copyFile(vad, path.join(target, 'models', LISTENING_VAD_MODEL.filename));
+  await fs.copyFile(new URL('./SILERO-VAD-LICENSE.txt', import.meta.url), path.join(target, 'LICENSE-silero-vad'));
   await fs.writeFile(path.join(target, 'MODEL-NOTICE.txt'),
     'Whisper Base English weights by OpenAI (MIT license), converted for whisper.cpp.\n' +
     'Source: https://huggingface.co/ggerganov/whisper.cpp\n' +
-    'Original model and license: https://github.com/openai/whisper\n');
-  return { whisperRelativePath: `listening/${filename}`, modelRelativePath: `listening/models/${path.basename(model)}` };
+    'Original model and license: https://github.com/openai/whisper\n\n' +
+    `Silero VAD ${LISTENING_VAD_MODEL.id} by Silero Team (MIT license), converted for whisper.cpp.\n` +
+    'Source: https://huggingface.co/ggml-org/whisper-vad\n' +
+    'Original model and license: https://github.com/snakers4/silero-vad\n' +
+    `SHA-256: ${LISTENING_VAD_MODEL.sha256}\n`);
+  return { whisperRelativePath: `listening/${filename}`, modelRelativePath: `listening/models/${path.basename(model)}`, vadRelativePath: `listening/models/${LISTENING_VAD_MODEL.filename}` };
 }

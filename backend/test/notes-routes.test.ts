@@ -1,0 +1,70 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
+import express from 'express';
+import type { LocalListener } from '../src/local-listener.js';
+
+test('Notes keeps speech private, checks authorship, deduplicates windows and rejects late stopped results',async t=>{
+  const directory=await fs.mkdtemp(path.join(os.tmpdir(),'lumen-notes-http-')),previous=process.env.LUMEN_DATA_DIR;process.env.LUMEN_DATA_DIR=directory;
+  let server:http.Server|undefined,notes:ReturnType<typeof import('../src/notes.js')['createNotes']>|undefined,identity:{close():void}|undefined;
+  t.after(async()=>{server?.closeAllConnections();if(server)await new Promise<void>(resolve=>server!.close(()=>resolve()));notes?.close();identity?.close();if(previous===undefined)delete process.env.LUMEN_DATA_DIR;else process.env.LUMEN_DATA_DIR=previous;await fs.rm(directory,{recursive:true,force:true});});
+  const {DATA_DIR,CONTENT_FILE}=await import('../src/paths.js');assert.equal(DATA_DIR,directory);
+  const {initDb}=await import('../src/db.js');identity=initDb();
+  const {login,createUser,setGrant}=await import('../src/auth.js');
+  const admin={Cookie:`lumen_session=${login('admin','admin')!.sessionId}`};
+  const viewer=createUser('notes-viewer','Viewer','test-password')!;setGrant(viewer.id,'*','viewer');
+  const limited={Cookie:`lumen_session=${login('notes-viewer','test-password')!.sessionId}`};
+  const author=createUser('notes-author','Author','test-password')!;setGrant(author.id,'another-channel','author');
+  const authorHeaders={Cookie:`lumen_session=${login('notes-author','test-password')!.sessionId}`};
+  const content={version:2,channels:[{id:'channel',playlistId:'deck',kind:'presentation'}],playlists:[{id:'deck',items:[
+    {id:'note',type:'notes',title:'Approved title',body:'Only approved text',layout:'statement'},
+    {id:'imported-root',type:'notes',title:'Imported series',body:'First point',layout:'statement',background:{kind:'color',color:'#172554'},typography:{size:'lg'}},
+    {id:'imported-child',type:'notes',title:'Imported series',body:'Second point',layout:'statement',notesSourceId:'imported-root'},
+  ]}]};
+  const original=JSON.stringify(content);await fs.writeFile(CONTENT_FILE,original);
+  let otherActive=false,calls=0,nextText='Private opening words. Let us pray.',release:(()=>void)|undefined,waitForTranscription:Promise<void>|undefined;
+  const listener={start:async()=>{},transcribe:async()=>{calls++;if(waitForTranscription)await waitForTranscription;return {text:nextText,elapsedMs:5,recognition:{status:'clear'}};}} as unknown as LocalListener;
+  const {createNotes}=await import('../src/notes.js');notes=createNotes({listener,otherListeningActive:()=>otherActive});
+  const app=express();app.use(express.json());app.use('/api',notes.router);server=http.createServer(app);await new Promise<void>(resolve=>server!.listen(0,'127.0.0.1',resolve));
+  const url=`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/notes/channels/channel/items/note`;
+  const get=()=>fetch(url,{headers:admin});
+  assert.equal((await fetch(url)).status,401);assert.equal((await fetch(url,{headers:limited})).status,403);assert.equal((await fetch(url,{headers:authorHeaders})).status,403,'A grant on another channel cannot read this transcript');
+  const initial=await get();assert.equal(initial.headers.get('cache-control'),'private, no-store');const document=await initial.json();assert.equal(document.draft.body,'Only approved text');
+  content.channels[0].kind='notes';await fs.writeFile(CONTENT_FILE,JSON.stringify(content));
+  assert.deepEqual((await(await get()).json()).draft,document.draft,'The dedicated Notes channel retains access to the existing private document');
+  const imported=await(await fetch(url.replace('/items/note','/items/imported-root'),{headers:admin})).json();
+  assert.equal(imported.draft.grouping,'pointers');assert.equal(imported.draft.body,'First point\nSecond point','A copied series opens all of its published points when no private draft exists');
+  assert.deepEqual(imported.draft.background,{kind:'color',color:'#172554'});assert.deepEqual(imported.draft.typography,{size:'lg'});
+  otherActive=true;assert.equal((await fetch(`${url}/listening`,{method:'POST',headers:admin})).status,409);otherActive=false;
+  const lease=await(await fetch(`${url}/listening`,{method:'POST',headers:admin})).json();assert(notes.hasActive());
+  assert.equal((await fetch(`${url}/listening`,{method:'POST',headers:admin})).status,409,'Only one Notes listener owns the worker');
+  const audio=(sequence:number)=>fetch(`${url}/listening/audio?session=${lease.id}&sequence=${sequence}`,{method:'POST',headers:{...admin,'Content-Type':'audio/wav'},body:Buffer.from('synthetic-wav-for-injected-recognizer')});
+  assert.equal((await audio(0)).status,200);nextText='Let us pray. A second private thought.';
+  const second=await audio(1);assert.equal(second.status,200);assert.deepEqual((await second.json()).segments.map((segment:{text:string})=>segment.text),['Private opening words. Let us pray.','A second private thought.']);
+  assert.equal((await audio(1)).status,200);assert.equal(calls,2,'A retried sequence never runs recognition or appends twice');
+  assert.equal((await audio(3)).status,409,'Out-of-order windows cannot silently omit speech');
+  const save=await fetch(url,{method:'PUT',headers:{...admin,'Content-Type':'application/json'},body:JSON.stringify({revision:document.revision,draft:{title:'Private draft',body:'Refined selection',reference:'',layout:'key-points'}})});assert.equal(save.status,200);
+  const saved=await save.json();
+  const compact=await fetch(`${url}?transcript=omit`,{method:'PUT',headers:{...admin,'Content-Type':'application/json'},body:JSON.stringify({revision:saved.revision,draft:{...saved.draft,body:'A faster private edit',grouping:'pointers',background:{kind:'color',color:'#172554'},typography:{size:'lg',align:'left'}}})});
+  assert.equal(compact.status,200);const compactDocument=await compact.json();
+  assert.deepEqual(compactDocument.segments,[]);assert.equal(compactDocument.draft.grouping,'pointers');
+  assert.equal((await(await get()).json()).segments.length,2,'Autosave omission leaves the stored transcript intact');
+  assert.equal(await fs.readFile(CONTENT_FILE,'utf8'),JSON.stringify(content),'Raw speech and private edits never write the public presentation');
+  waitForTranscription=new Promise<void>(resolve=>{release=resolve;});const pending=audio(2);
+  while(calls<3)await new Promise(resolve=>setTimeout(resolve,5));
+  assert.equal((await fetch(`${url}/listening?session=${lease.id}`,{method:'DELETE',headers:admin})).status,200);assert(!notes.hasActive());
+  release!();assert.equal((await pending).status,409,'A stopped session cannot append a late recognition result');
+  assert.equal((await(await get()).json()).segments.length,2);
+  setGrant(author.id,'channel','author');
+  const authorLease=await(await fetch(`${url}/listening`,{method:'POST',headers:authorHeaders})).json();
+  waitForTranscription=new Promise<void>(resolve=>{release=resolve;});
+  const revoked=fetch(`${url}/listening/audio?session=${authorLease.id}&sequence=0`,{method:'POST',headers:{...authorHeaders,'Content-Type':'audio/wav'},body:Buffer.from('synthetic-window')});
+  while(calls<4)await new Promise(resolve=>setTimeout(resolve,5));
+  setGrant(author.id,'channel','viewer');release!();assert.equal((await revoked).status,403,'Permission is rechecked after asynchronous recognition');
+  assert.equal((await(await get()).json()).segments.length,2,'Revoked author result stays out of the document');
+  content.playlists[0].items=[];await fs.writeFile(CONTENT_FILE,JSON.stringify(content));assert.equal((await get()).status,404,'Deleting the slide revokes access to its private transcript');
+});

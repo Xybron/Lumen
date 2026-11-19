@@ -1,22 +1,11 @@
 import type { Item } from '@/types';
 import { mediaUrl } from './api';
+import { createMediaPreloader } from './media-preloader';
 
-// Cache by URL so repeated hits across slides don't refetch. WeakRefs would be
-// nicer but Image objects don't get GC'd while referenced; this is fine for the
-// 50-100 backgrounds a real service deck contains.
-const seen = new Set<string>();
+const preloader = createMediaPreloader();
 
-export function preload(item: Item | undefined): void {
-  if (!item?.background) return;
-  const url = mediaUrl(item.background.src);
-  if (!url || seen.has(url)) return;
-  seen.add(url);
-  if (item.background.kind === 'image') {
-    const img = new Image();
-    img.src = url;
-  } else if (item.background.kind === 'video') {
-    const v = document.createElement('video');
-    v.preload = 'auto';
-    v.src = url;
-  }
+export function preload(owner: string, item: Item | undefined): void {
+  const kind = item?.background?.kind, url = mediaUrl(item?.background?.src);
+  preloader.prepare(owner, url && (kind === 'image' || kind === 'video') ? { kind, url } : undefined);
 }
+export const releasePreload = preloader.release;

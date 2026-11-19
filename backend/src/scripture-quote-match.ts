@@ -6,6 +6,7 @@ export interface ScriptureQuoteMatch {
   /** Strength of the library-text match, not speech-recognition confidence. */
   score: number;
   eligible: boolean;
+  ambiguous?: boolean;
   reason: string;
 }
 
@@ -133,7 +134,7 @@ const empty = (reason: string): ScriptureQuoteMatch => ({ selection: null, score
  * the installed edition's FTS index. No corpus scan, fuzzy publication, model,
  * manual-search behaviour, output mutation or cross-edition substitution.
  */
-export function matchScriptureQuote(db: Database.Database, versionId: string, text: string): ScriptureQuoteMatch {
+function matchOrderedQuote(db: Database.Database, versionId: string, text: string): ScriptureQuoteMatch {
   const heard = words(text, MAX_HEARD_WORDS + 1);
   // Bounds must not hide a contradictory ending and accidentally authorise a
   // truncated prefix. Ordinary five-second listening windows are much shorter.
@@ -170,12 +171,26 @@ export function matchScriptureQuote(db: Database.Database, versionId: string, te
   const selection: ScriptureSelection = { kind: 'scripture', versionId, book: best.row.book, chapter: best.row.chapter, verse: best.row.verse, ...(best.row.endVerse != null ? { endVerse: best.row.endVerse } : {}) };
   const result: ScriptureQuoteMatch = { selection, score: Math.round(best.score * 100) / 100, eligible: false, reason: '' };
   const quote = heard.slice(best.run.heard, best.run.heard + best.run.length);
+  // A short shared fragment is not a useful suggestion even in review mode.
+  // Probe the complete edition, not just the ranked candidate window.
+  if (best.run.length < 8 || meaningful(quote) < 3) {
+    const broaderEvidence=best.alignment.meaningful>=3&&best.alignment.matches>=9&&(!candidates[1]||best.score>candidates[1].score*1.15);
+    if (!broaderEvidence&&(best.run.length < 5 || meaningful(quote) < 2) || best.alignment.matches / heard.length < .5)
+      return empty('Waiting for a longer, distinctive quotation.');
+    const rival=db.prepare(`SELECT 1 ${BASE} AND v.id<>? LIMIT 1`).get(phrase(quote),versionId,best.row.id);
+    if(rival&&!broaderEvidence)return empty('This short phrase occurs in multiple passages. Listening for more words.');
+  }
   const boundary = boundaryDifference(text, heard, best.tokens, best.run);
   if (best.alignment.negationMismatch || boundary === 'negative') {
     result.reason = 'Possible quoted verse, but negative wording differs. Review before sending live.';
     return result;
   }
   if (best.run.length < 8 || meaningful(quote) < 3) {
+    // A common fragment inside a longer prayer or instruction is not evidence
+    // that the whole utterance quotes this verse. Short suggestions need broad
+    // support from the heard words; strong long quotations may retain filler.
+    if(best.alignment.matches / heard.length < .5)
+      return empty('Only a small part of the speech matches this verse. Waiting for a more distinctive quotation.');
     result.reason = best.alignment.edits ? 'Possible quoted verse with different wording. Prepared for review only.' : 'Quoted phrase is too short or common for automatic publishing. Prepared for review.';
     return result;
   }
@@ -192,6 +207,9 @@ export function matchScriptureQuote(db: Database.Database, versionId: string, te
   // prevents publication, as does a rival within a 20% exact-phrase margin.
   const marginLength = Math.max(6, Math.ceil(best.run.length * .8));
   if (other(phrases(quote, marginLength, 2))) {
+    // A near match still needs operator review, but a unique full phrase can
+    // be prepared promptly once a distinguishing word arrives.
+    result.ambiguous=!!rival.get(phrase(quote),versionId,best.row.id);
     result.reason = 'Quoted wording is shared by multiple verses in this version. Choose the intended passage.';
     return result;
   }
@@ -199,6 +217,7 @@ export function matchScriptureQuote(db: Database.Database, versionId: string, te
   // to choose whichever ranked first. Search their complete indexed hit set.
   const independent = phrases(heard.slice(0, best.run.heard), 8, 3).concat(phrases(heard.slice(best.run.heard + best.run.length), 8, 3));
   if (other(independent)) {
+    result.ambiguous=true;
     result.reason = 'More than one quoted verse was heard. Choose the intended passage.';
     return result;
   }
@@ -206,4 +225,41 @@ export function matchScriptureQuote(db: Database.Database, versionId: string, te
   result.score = Math.max(.9, result.score);
   result.reason = 'Distinctive exact quotation matched one verse in the selected version.';
   return result;
+}
+
+// Sermon paraphrases often change word order and lose all long exact runs.
+// This secondary retriever uses shared content words only to prepare a review
+// candidate. It is deliberately separate from the exact-quotation publisher:
+// lexical overlap is neither semantic equivalence nor recognition confidence.
+const PARAPHRASE_FILLER = new Set(['god','lord','jesus','christ','said','says','say','church','today','now','amen','hallelujah','let','listen','look','well']);
+function contentWords(tokens:string[]) { return [...new Set(tokens.filter(word=>word.length>2&&!CONNECTORS.has(word)&&!NEGATIONS.has(word)&&!/^\d+$/.test(word)))]; }
+function matchParaphraseWords(db:Database.Database,versionId:string,heard:string[]):ScriptureQuoteMatch|null {
+  const content=contentWords(heard).filter(word=>!PARAPHRASE_FILLER.has(word)).slice(0,24);
+  if(content.length<4)return null;
+  const rows=db.prepare(`SELECT v.id,v.versionId,v.book,v.chapter,v.verse,v.endVerse,v.text ${BASE} ORDER BY rank,v.id LIMIT ${CANDIDATE_LIMIT}`).all(content.map(word=>phrase([word])).join(' OR '),versionId) as Row[];
+  const candidates=rows.map(row=>{
+    const tokens=contentWords(words(row.text,MAX_VERSE_WORDS)).filter(word=>!PARAPHRASE_FILLER.has(word));
+    const common=content.filter(word=>tokens.includes(word)).length;
+    const coverage=common/content.length,verseCoverage=common/Math.max(1,tokens.length);
+    // Both sides must contribute evidence. Four words buried in a long,
+    // unrelated verse or a long sermon paragraph are not a useful suggestion.
+    return {row,common,coverage,verseCoverage,score:2*coverage*verseCoverage/Math.max(.001,coverage+verseCoverage)};
+  }).filter(candidate=>candidate.common>=4&&candidate.coverage>=.5&&candidate.verseCoverage>=.35)
+    .sort((a,b)=>b.score-a.score||b.common-a.common||a.row.id-b.row.id);
+  const best=candidates[0];if(!best)return null;
+  const rival=candidates[1],ambiguous=rival&&rival.score>=best.score*.9;
+  return {
+    selection:{kind:'scripture',versionId,book:best.row.book,chapter:best.row.chapter,verse:best.row.verse,...(best.row.endVerse!=null?{endVerse:best.row.endVerse}:{})},
+    score:Math.round(Math.min(.85,best.score)*100)/100,
+    eligible:false,ambiguous:!!ambiguous,
+    reason:ambiguous?'Similar wording appears in multiple passages. Review this suggestion and choose the intended verse.':'Possible paraphrase from shared distinctive words. Check the meaning and wording before sending live.',
+  };
+}
+
+export function matchScriptureQuote(db:Database.Database,versionId:string,text:string):ScriptureQuoteMatch {
+  const ordered=matchOrderedQuote(db,versionId,text);
+  if(ordered.selection)return ordered;
+  const heard=words(text,MAX_HEARD_WORDS+1);
+  if(heard.length>MAX_HEARD_WORDS||text.length>12000)return ordered;
+  return matchParaphraseWords(db,versionId,heard)??ordered;
 }

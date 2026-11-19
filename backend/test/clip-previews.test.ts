@@ -177,3 +177,26 @@ test('low storage prevents all media work and malformed streams are held instead
     assert.equal(helper.nextJob(), null, 'Repeated requests do not keep spawning failed decoders.');
   } finally { await helper.close(); await fs.rm(directory, { recursive: true, force: true }); }
 });
+
+test('asset deletion releases its preview work and owned cache while preserving unrelated previews', { timeout: 30_000 }, async () => {
+  const files = await fixture(), first: ClipSourceRef = { kind: 'asset', id: 'asset_remove' }, second: ClipSourceRef = { kind: 'asset', id: 'asset_keep' };
+  const helper = await createClipPreviews({ dir: path.join(files.dir, 'cache'), resolveSource: () => ({ path: files.video, kind: 'video', durationMs: 1000 }), isProtected: () => false });
+  try {
+    const cached: string[] = [];
+    for (const source of [first, second]) {
+      await helper.request(source, 'frame', 0); await helper.process(helper.nextJob()!, freshWork());
+      const result = await helper.request(source, 'frame', 0);
+      assert.equal(result.status, 'ready'); if (result.status === 'ready') cached.push(result.path);
+    }
+    await helper.request(first, 'frame', 200);
+    const work = freshWork(), active = helper.process(helper.nextJob()!, work);
+    await helper.request(first, 'frame', 600); await helper.request(second, 'frame', 600);
+    await helper.withSourceDeletion(first, async () => {
+      await active;
+      await assert.rejects(helper.request(first, 'frame', 0), /being removed/);
+      await assert.rejects(fs.access(cached[0])); await fs.access(cached[1]);
+      assert.equal(helper.nextJob()!.source.id, second.id); assert.equal(helper.nextJob(), null);
+    });
+    assert.equal(work.reason, 'cancel');
+  } finally { await helper.close(); await fs.rm(files.dir, { recursive: true, force: true }); }
+});

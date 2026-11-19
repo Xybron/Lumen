@@ -1,25 +1,31 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 import { toast } from 'vue-sonner';
-import { Camera, Monitor, Mic, Image, Film, Music2, Presentation, Upload, LoaderCircle, Search, Check, FolderOpen, RefreshCw, X, ArrowUpRight, VolumeX, CircleHelp } from 'lucide-vue-next';
+import { Skeleton, LoadingSkeleton, SkeletonIndicator } from '@/components/ui/skeleton';
+import { Camera, Monitor, Mic, Image, Film, Music2, Presentation, Upload, Search, Check, FolderOpen, RefreshCw, X, ArrowUpRight, VolumeX, CircleHelp } from 'lucide-vue-next';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import MediaAssetPreview from './MediaAssetPreview.vue';
+import MediaImagePicker from '@/components/media/MediaImagePicker.vue';
+import { mediaAssetReference } from '@/lib/media-library';
 import { api, type MediaLibraryFile } from '@/lib/api';
 import { shortId } from '@/lib/ids';
-import { mediaAccept, mediaAssetUrl, mediaDisplayName, mediaExtensions, mediaFileSize, mediaFilesForKind, mediaFormatHint, mediaSourceName, MAX_MEDIA_BYTES, type MediaAssetKind } from '@/lib/studio/media-library';
+import { mediaAccept, mediaAssetUrl, mediaDisplayName, mediaFileLabel, mediaExtensions, mediaFileSize, mediaFilesForKind, mediaFormatHint, mediaSourceName, MAX_MEDIA_BYTES, type MediaAssetKind } from '@/lib/studio/media-library';
 import { inputCaptureError, openDeviceCapture, type InputSelection } from '@/lib/studio/device-capture';
 import { CameraPreviewCapture } from '@/lib/studio/camera-preview';
 import { useContentStore } from '@/stores/content';
 import { useStudioStore } from '@/stores/studio';
 import type { StudioSource } from '../../../../shared/production';
+import type { MediaLibraryAsset } from '../../../../shared/media-library';
 
 const open = defineModel<boolean>('open', { required: true });
 const props = defineProps<{ sourceId?: string | null }>();
 const studio = useStudioStore(), content = useContentStore();
 const editing = computed(() => !!props.sourceId);
+const presentationMusic = computed(() => props.sourceId === 'lumen_presentation_music');
 const editingSource = computed(() => studio.state?.sources.find(source => source.id === props.sourceId));
 const initialInput = ref<InputSelection>({}), initializing = ref(false);
 const loop = ref(true), playbackPaused = ref(false), restartOnSave = ref(false), choosingMedia = ref(false);
+const imagePickerOpen = ref(false);
 const screenReplacement = shallowRef<MediaStream | null>(null), screenChoosing = ref(false);
 const kind = ref<StudioSource['kind']>('camera'), name = ref(''), nameEdited = ref(false), url = ref(''), channelId = ref('');
 const adding = ref(false), error = ref(''), libraryError = ref(''), files = ref<MediaLibraryFile[]>([]), query = ref(''), listing = ref(false);
@@ -88,7 +94,7 @@ const kinds = [
   { id: 'image', label: 'Image', hint: 'Artwork, logo, or backdrop', icon: Image, group: 'Media library' },
   { id: 'video', label: 'Video', hint: 'A film or motion background', icon: Film, group: 'Media library' },
   { id: 'audio', label: 'Audio file', hint: 'Music or a recorded message', icon: Music2, group: 'Media library' },
-  { id: 'channel', label: 'Presentation', hint: 'An existing Lumen channel', icon: Presentation, group: 'Channels' },
+  { id: 'channel', label: 'Lumen channel', hint: 'Notes, presentation, scripture or lyrics', icon: Presentation, group: 'Channels' },
 ] as const;
 const activeKind = computed(() => kinds.find(item => item.id === kind.value)!);
 const mediaKind = computed<MediaAssetKind | null>(() => ['image', 'video', 'audio'].includes(kind.value) ? kind.value as MediaAssetKind : null);
@@ -96,7 +102,7 @@ const libraryTitle = computed(() => kind.value === 'image' ? 'Images' : kind.val
 const matchingFiles = computed(() => mediaKind.value ? mediaFilesForKind(files.value, mediaKind.value, query.value) : []);
 const totalFiles = computed(() => mediaKind.value ? mediaFilesForKind(files.value, mediaKind.value).length : 0);
 const selected = computed(() => files.value.find(file => file.path === url.value));
-const selectedName = computed(() => pendingFile.value?.name ?? (selected.value ? mediaDisplayName(selected.value.name) : url.value ? mediaDisplayName(url.value.split('/').pop() || name.value) : ''));
+const selectedName = computed(() => pendingFile.value?.name ?? (selected.value ? mediaFileLabel(selected.value) : url.value ? mediaDisplayName(url.value.split('/').pop() || name.value) : ''));
 const previewSrc = computed(() => localPreview.value || (preparedUrl.value ? mediaAssetUrl(preparedUrl.value) : url.value ? mediaAssetUrl(url.value) : ''));
 const previewPoster = computed(() => selected.value?.thumbnail ? mediaAssetUrl(selected.value.thumbnail) : undefined);
 const selectedBytes = computed(() => mediaFileSize(pendingFile.value?.size ?? selected.value?.bytes));
@@ -212,6 +218,7 @@ function stopUpload() {
   clearLocalPreview();
 }
 function invalidate() {
+  imagePickerOpen.value = false;
   epoch++; listSequence++;
   stopCameraPreview();
   screenReplacement.value?.getTracks().forEach(track => track.stop()); screenReplacement.value = null; screenChoosing.value = false;
@@ -221,7 +228,7 @@ function invalidate() {
   stopUpload(); dragDepth.value = 0;
 }
 async function refreshDevices() {
-  if (!open.value || !['camera', 'microphone'].includes(kind.value)) return;
+  if (!open.value || presentationMusic.value || !['camera', 'microphone'].includes(kind.value)) return;
   if (!navigator.mediaDevices?.enumerateDevices) {
     deviceError.value = 'Device access requires localhost or HTTPS and a browser with camera support.';
     return;
@@ -267,7 +274,7 @@ function deviceChanged() {
   if (document.visibilityState !== 'hidden' && !accessingDevices.value && !refreshingDevices.value && !adding.value) void refreshDevices();
 }
 function startDeviceDiscovery() {
-  if (!open.value || !['camera', 'microphone'].includes(kind.value)) return;
+  if (!open.value || presentationMusic.value || !['camera', 'microphone'].includes(kind.value)) return;
   void refreshDevices();
   // Driver startup and browser devicechange delivery vary across operating
   // systems. These are passive scans; they never open a camera or microphone.
@@ -328,7 +335,7 @@ watch([open, () => props.sourceId], ([value]) => {
       if (open.value && context === epoch) void startCameraPreview();
     }
   });
-});
+}, { immediate: true });
 watch(kind, () => {
   if (settingInitialKind) return;
   initializing.value = false;
@@ -338,6 +345,9 @@ watch(kind, () => {
   deviceError.value = ''; deviceAccessError.value = ''; devicesScanned.value = false; startDeviceDiscovery();
   void loadFiles();
 }, { flush: 'sync' });
+watch(channelId, id => {
+  if (!editing.value && !nameEdited.value && kind.value === 'channel') name.value = content.channels.find(channel => channel.id === id)?.name ?? '';
+});
 onBeforeUnmount(() => {
   invalidate(); navigator.mediaDevices?.removeEventListener('devicechange', deviceChanged);
   window.removeEventListener('focus', deviceChanged); document.removeEventListener('visibilitychange', deviceChanged);
@@ -347,9 +357,18 @@ function choose(file: MediaLibraryFile) {
   if (adding.value) return;
   stopUpload(); error.value = ''; url.value = file.path;
   if (kind.value === 'video') watchVideoPreparation(file.path);
-  if (!nameEdited.value) name.value = mediaSourceName(file.name);
+  if (!nameEdited.value) name.value = mediaSourceName(mediaFileLabel(file));
   if (editing.value) choosingMedia.value = false;
   revealPreview();
+}
+function chooseLibraryImage(asset: MediaLibraryAsset) {
+  if (!open.value || asset.kind !== mediaKind.value || adding.value || asset.origin !== 'library') return;
+  const file: MediaLibraryFile = { name: asset.name, displayName: asset.displayName, path: mediaAssetReference(asset), bytes: asset.bytes, modifiedAt: asset.modifiedAt };
+  files.value = [file, ...files.value.filter(value => value.path !== file.path)];
+  choose(file);
+  if (!nameEdited.value) name.value = mediaSourceName(asset.displayName);
+  imagePickerOpen.value = false;
+  void loadFiles();
 }
 function revealPreview() {
   const context = epoch;
@@ -379,7 +398,7 @@ async function uploadFile(file: File) {
   const controller = new AbortController(); uploadController = controller;
   uploading.value = true; pendingFile.value = file; error.value = ''; url.value = ''; justUploaded.value = '';
   localPreview.value = URL.createObjectURL(file);
-  if (!nameEdited.value) name.value = mediaSourceName(file.name);
+  if (!nameEdited.value) name.value = mediaSourceName(mediaFileLabel(file));
   revealPreview();
   try {
     const result = await api.uploadMedia(assetKind === 'audio' ? 'music' : 'backgrounds', file, {
@@ -525,23 +544,24 @@ async function saveProperties() {
 
           <section v-if="mediaKind" class="source-media-workspace" :class="{ 'source-media-properties': editing && !choosingMedia }" @dragenter="dragEnter" @dragleave="dragLeave" @dragover="dragOver" @drop="drop">
             <div v-if="!editing || choosingMedia" class="source-library">
-              <div class="source-library-heading"><h3>{{ libraryTitle }}</h3><span>{{ totalFiles }} {{ totalFiles === 1 ? 'asset' : 'assets' }}</span><button type="button" class="source-small-icon" aria-label="Refresh media library" title="Refresh library" :disabled="listing" @click="loadFiles"><RefreshCw :size="13" :class="{ spin: listing }" /></button></div>
+              <div class="source-library-heading"><h3>{{ libraryTitle }}</h3><span>{{ totalFiles }} {{ totalFiles === 1 ? 'asset' : 'assets' }}</span><button type="button" class="source-small-icon" aria-label="Refresh media library" title="Refresh library" :disabled="listing" @click="loadFiles"><SkeletonIndicator v-if="listing" /><RefreshCw v-else :size="13" /></button></div>
               <div class="source-library-tools">
                 <label class="source-search"><Search :size="15" /><input v-model="query" aria-label="Search media" placeholder="Search media…" type="search" @keydown.enter.prevent /><button v-if="query" type="button" aria-label="Clear media search" @click="query = ''"><X :size="12" /></button></label>
                 <button type="button" class="source-upload-button" :disabled="adding" @click="uploadInput?.click()"><Upload :size="14" /><span>Upload</span></button>
                 <input ref="uploadInput" class="source-file-input" type="file" :accept="mediaAccept[mediaKind]" aria-label="Upload media" data-testid="source-media-upload" tabindex="-1" :disabled="adding" @change="fileChanged" />
               </div>
+              <button v-if="mediaKind" type="button" class="s-button source-change-file" :disabled="adding || uploading" @click="imagePickerOpen = true"><FolderOpen :size="13" />Choose from Media</button>
               <p v-if="libraryError" class="source-library-error" role="alert">{{ libraryError }}<button type="button" @click="loadFiles">Try again</button></p>
-              <div v-if="listing && !files.length" class="source-grid-loading" aria-label="Loading media library"><span v-for="n in 6" :key="n" /><span class="sr-only">Loading media library…</span></div>
+              <LoadingSkeleton v-if="listing && !files.length" class="source-grid-loading" label="Loading media library"><div v-for="n in 6" :key="n" class="source-card-skeleton" aria-hidden="true"><Skeleton class="source-card-image-skeleton" height="auto" :radius="6" /><Skeleton :width="n%2 ? '78%' : '62%'" :height="10" /><Skeleton width="42%" :height="8" /></div></LoadingSkeleton>
               <div v-else-if="matchingFiles.length" class="source-media-grid" :class="{ 'audio-grid': mediaKind === 'audio' }" data-testid="source-media-grid" role="group" aria-label="Media library" @keydown="galleryKeys">
-                <button v-for="file in matchingFiles" :key="file.path" type="button" class="source-asset" :class="{ selected: url === file.path }" :aria-label="'Select ' + mediaDisplayName(file.name)" :aria-pressed="url === file.path" :disabled="adding" :title="mediaDisplayName(file.name)" @click="choose(file)">
+                <button v-for="file in matchingFiles" :key="file.path" type="button" class="source-asset" :class="{ selected: url === file.path }" :aria-label="'Select ' + mediaFileLabel(file)" :aria-pressed="url === file.path" :disabled="adding" :title="mediaFileLabel(file)" @click="choose(file)">
                   <span class="source-asset-image" :class="{ 'source-audio-tile': mediaKind === 'audio' }">
                     <img v-if="thumb(file)" :src="thumb(file)" alt="" loading="lazy" decoding="async" @error="thumbnailFailed(file.path)" />
                     <component :is="activeKind.icon" v-else :size="25" :stroke-width="1.3" />
                     <span v-if="mediaKind === 'video'" class="source-video-badge"><Film :size="11" />VIDEO</span>
                     <span v-if="url === file.path" class="source-selected-check"><Check :size="12" /></span>
                   </span>
-                  <span class="source-asset-caption"><b>{{ mediaDisplayName(file.name) }}</b><small>{{ file.name.split('.').pop()?.toUpperCase() }}<span v-if="file.bytes !== undefined"> · {{ mediaFileSize(file.bytes) }}</span></small></span>
+                  <span class="source-asset-caption"><b>{{ mediaFileLabel(file) }}</b><small>{{ file.name.split('.').pop()?.toUpperCase() }}<span v-if="file.bytes !== undefined"> · {{ mediaFileSize(file.bytes) }}</span></small></span>
                 </button>
               </div>
               <div v-else-if="!libraryError" class="source-library-empty">
@@ -560,6 +580,7 @@ async function saveProperties() {
               <div class="source-media-settings">
               <div v-if="selectedName" class="source-file-detail"><b :title="selectedName">{{ selectedName }}</b><span>{{ selectedBytes }}<template v-if="selectedBytes && selected?.modifiedAt"> · </template>{{ dateLabel(selected?.modifiedAt) }}</span><small v-if="url && url === justUploaded && !uploading"><Check :size="11" />Uploaded to library</small></div>
               <button v-if="editing" type="button" class="s-button source-change-file" :disabled="adding" @click="choosingMedia = !choosingMedia"><FolderOpen :size="13" />{{ choosingMedia ? 'Done choosing' : 'Change file' }}</button>
+              <button v-if="editing && mediaKind && !choosingMedia" type="button" class="s-button source-change-file" :disabled="adding || uploading" @click="imagePickerOpen = true"><FolderOpen :size="13" />Choose from Media</button>
               <div v-if="uploading" class="source-upload-progress" role="status" aria-live="polite"><div><span>{{ progress >= 100 ? 'Saving to library…' : 'Uploading… ' + progress + '%' }}</span><button type="button" @click="stopUpload" aria-label="Cancel upload"><X :size="13" /></button></div><progress :value="progress" max="100" aria-label="Upload progress" /><small>Your preview is ready. Add once the file is saved.</small></div>
               <p v-if="preparingVideo" class="source-preparation-note" role="status">Video saved. Preparing Windows playback in the background. You can {{ editing ? 'save changes' : 'add it' }} now.</p>
               <p v-if="preparationError" class="source-form-error" role="alert">{{ preparationError }}</p>
@@ -576,6 +597,10 @@ async function saveProperties() {
             <div v-if="dragDepth > 0" class="source-drop-overlay"><Upload :size="28" /><b>Drop to upload</b><span>{{ mediaFormatHint[mediaKind] }} · Up to 512 MB</span></div>
           </section>
 
+          <section v-else-if="presentationMusic" class="source-input-workspace">
+            <div class="source-input-intro"><Music2 :size="21" /><div><h3>Presentation music</h3><p>Use the presentation music player to choose tracks, play, pause and enable Auto. Its audio is included in the Main mix.</p></div></div>
+            <p class="source-field-help">Keep the operator tab open while sending music. Local monitoring is controlled separately in the music player.</p>
+          </section>
           <section v-else class="source-input-workspace" :class="{ 'source-camera-workspace': kind === 'camera' }">
             <div class="source-input-intro"><component :is="activeKind.icon" :size="21" :stroke-width="1.5" /><div><h3>{{ kind === 'camera' ? 'Camera' : activeKind.label }}</h3><p>{{ kind === 'camera' ? 'Webcams, capture cards & OBS' : activeKind.hint }}</p></div></div>
             <div :class="kind === 'camera' ? 'camera-setup-grid' : 'source-single-setup'">
@@ -583,8 +608,9 @@ async function saveProperties() {
                 <div class="camera-preview-heading"><span>Preview</span><span v-if="cameraLive" class="camera-live-badge"><i />Live</span><VolumeX :size="14" aria-label="Preview audio muted" /></div>
                 <div class="camera-preview-stage" :data-state="cameraLive ? 'live' : cameraConnecting ? 'loading' : deviceAccessError ? 'error' : 'idle'" data-testid="camera-preview-stage">
                   <video ref="cameraElement" data-testid="source-camera-preview" autoplay muted playsinline :class="{ visible: cameraLive }" @loadedmetadata="cameraPicture" @loadeddata="cameraPicture" @playing="cameraPicture" @resize="cameraPicture" @emptied="cameraPicture" />
-                  <div v-if="!cameraLive" class="camera-preview-empty" role="status">
-                    <LoaderCircle v-if="cameraConnecting" :size="27" class="spin" /><Camera v-else :size="30" :stroke-width="1.2" />
+                  <LoadingSkeleton v-if="!cameraLive && cameraConnecting" class="camera-preview-skeleton" label="Connecting camera"><Skeleton height="100%" :radius="0" /><div class="camera-preview-skeleton-caption"><Skeleton width="42%" :height="11" /><Skeleton width="65%" :height="8" /></div></LoadingSkeleton>
+                  <div v-else-if="!cameraLive" class="camera-preview-empty" role="status">
+                    <Camera :size="30" :stroke-width="1.2" />
                     <b>{{ cameraConnecting ? 'Connecting…' : videoMissing ? 'Camera disconnected' : deviceAccessError ? 'Camera unavailable' : cameraStream ? 'Waiting for picture' : 'See your camera here' }}</b>
                     <p v-if="cameraStream && !cameraConnecting">Check the camera’s HDMI signal.</p>
                     <button v-if="!cameraConnecting" type="button" class="s-button" :disabled="adding || videoMissing || audioMissing" @click="startCameraPreview">{{ cameraWanted ? 'Try again' : 'Start preview' }}</button>
@@ -594,9 +620,9 @@ async function saveProperties() {
               </aside>
               <div class="source-input-properties">
                 <div v-if="kind === 'camera'" class="camera-device-field">
-                  <div class="camera-device-label"><label for="source-video-device">Video device</label><span data-testid="input-device-discovery" role="status">{{ deviceSummary }}</span><button type="button" class="source-small-icon" aria-label="Refresh devices" title="Refresh devices" :disabled="adding || refreshingDevices" @click="refreshDevices"><RefreshCw :size="13" :class="{ spin: refreshingDevices }" /></button></div>
+                  <div class="camera-device-label"><label for="source-video-device">Video device</label><span data-testid="input-device-discovery" role="status">{{ deviceSummary }}</span><button type="button" class="source-small-icon" aria-label="Refresh devices" title="Refresh devices" :disabled="adding || refreshingDevices" @click="refreshDevices"><SkeletonIndicator v-if="refreshingDevices" /><RefreshCw v-else :size="13" /></button></div>
                   <select id="source-video-device" v-model="videoDevice" aria-label="Video device" :disabled="adding"><option value="">Default camera</option><option v-if="videoDevice && !videoInputs.some(device => device.deviceId === videoDevice)" :value="videoDevice" disabled>{{ videoMissing ? 'Camera disconnected' : 'Saved camera' }}</option><option v-for="(device, i) in videoInputs" :key="device.deviceId" :value="device.deviceId">{{ device.label || 'Video input ' + (i + 1) }}</option></select>
-                  <div v-if="deviceSummary === 'Access needed'" class="source-device-actions camera-access-action"><button type="button" class="s-button" :disabled="adding || cameraConnecting || videoMissing || audioMissing" @click="startCameraPreview"><LoaderCircle v-if="cameraConnecting" :size="13" class="spin" />{{ cameraConnecting ? 'Requesting access…' : 'Allow camera access' }}</button></div>
+                  <div v-if="deviceSummary === 'Access needed'" class="source-device-actions camera-access-action"><button type="button" class="s-button" :disabled="adding || cameraConnecting || videoMissing || audioMissing" @click="startCameraPreview"><SkeletonIndicator v-if="cameraConnecting" />{{ cameraConnecting ? 'Requesting access…' : 'Allow camera access' }}</button></div>
                 </div>
                 <div v-if="kind === 'camera'" class="camera-format-fields">
                   <label class="studio-field">Resolution<select v-model="resolution" aria-label="Resolution" :disabled="adding"><option value="">Auto</option><option v-for="size in resolutionOptions" :key="size" :value="size">{{ size.replace('x', ' × ') }}</option></select></label>
@@ -608,15 +634,15 @@ async function saveProperties() {
                   <p>{{ (screenReplacement || studio.sourceStream(sourceId!))?.getVideoTracks()[0]?.label || 'No screen connected' }}</p>
                   <button type="button" class="s-button" :disabled="adding || screenChoosing" @click="chooseScreen"><Monitor :size="14" />{{ screenChoosing ? 'Choosing…' : 'Choose screen or window' }}</button>
                 </div>
-                <label v-if="kind === 'channel'" class="studio-field">Presentation channel<select v-model="channelId" :disabled="adding"><option value="">Choose a channel…</option><option v-for="channel in content.channels" :key="channel.id" :value="channel.id">{{ channel.name }}</option></select></label>
+                <label v-if="kind === 'channel'" class="studio-field">Lumen channel<select v-model="channelId" :disabled="adding"><option value="">Choose a channel…</option><option v-for="channel in content.channels" :key="channel.id" :value="channel.id">{{ channel.name }}</option></select></label>
                 <label v-if="kind === 'camera'" class="studio-check camera-audio-toggle"><input v-model="withAudio" type="checkbox" :disabled="adding" /><Mic :size="14" />Include audio</label>
                 <label v-if="kind === 'microphone' || (kind === 'camera' && withAudio)" class="studio-field">Audio device<select v-model="audioDevice" aria-label="Audio device" :disabled="adding || accessingDevices"><option value="">Default audio input</option><option v-if="audioDevice && !audioInputs.some(device => device.deviceId === audioDevice)" :value="audioDevice" disabled>{{ audioMissing ? 'Audio device disconnected' : 'Saved audio input' }}</option><option v-for="(device, i) in audioInputs" :key="device.deviceId" :value="device.deviceId">{{ device.label || 'Audio input ' + (i + 1) }}</option></select></label>
-                <div v-if="kind === 'microphone'" class="source-device-actions"><button type="button" class="s-button" :disabled="adding || accessingDevices" @click="enableDevices"><LoaderCircle v-if="accessingDevices" :size="13" class="spin" />{{ accessingDevices ? 'Requesting access…' : 'Enable device access' }}</button><button type="button" class="source-small-icon" aria-label="Refresh devices" title="Refresh devices" :disabled="adding || accessingDevices || refreshingDevices" @click="refreshDevices"><RefreshCw :size="13" :class="{ spin: refreshingDevices }" /></button></div>
+                <div v-if="kind === 'microphone'" class="source-device-actions"><button type="button" class="s-button" :disabled="adding || accessingDevices" @click="enableDevices"><SkeletonIndicator v-if="accessingDevices" />{{ accessingDevices ? 'Requesting access…' : 'Enable device access' }}</button><button type="button" class="source-small-icon" aria-label="Refresh devices" title="Refresh devices" :disabled="adding || accessingDevices || refreshingDevices" @click="refreshDevices"><SkeletonIndicator v-if="refreshingDevices" /><RefreshCw v-else :size="13" /></button></div>
                 <p v-if="videoMissing || audioMissing || deviceAccessError || deviceError" class="source-form-error" role="alert">{{ videoMissing || audioMissing ? 'Device disconnected. Reconnect it or choose another.' : deviceAccessError || deviceError }}</p>
                 <details class="source-connection-help">
                   <summary><CircleHelp :size="13" />{{ kind === 'channel' ? 'About channel sources' : 'Connection help' }}</summary>
                   <div v-if="kind === 'camera'"><p>Camera HDMI → capture card → USB.</p><p>Auto prefers 1080p at 30 fps. The preview shows the delivered format; available resolution and frame-rate combinations depend on the device.</p><p>Allow camera access in browser and system settings. Install the card’s driver if it is missing.</p><p>Unexpected background on Mac? In the menu bar’s Video menu, turn off Background for your browser.</p><p>For HDMI audio, choose the card’s audio input. Keep this tab open during your production.</p></div>
-                  <div v-else-if="kind === 'channel'"><p>Slide, scripture and lyric changes follow this channel automatically.</p></div>
+                  <div v-else-if="kind === 'channel'"><p>Notes, slide, scripture and lyric changes follow this channel automatically. Select a Notes layer in Design to choose Full screen, Bottom or Top.</p></div>
                   <div v-else><p>Keep this tab open while using the input.</p><p v-if="kind === 'screen'">Available audio depends on the surface you share.</p><p v-else>Allow microphone access in browser and system settings.</p></div>
                 </details>
               </div>
@@ -626,11 +652,12 @@ async function saveProperties() {
         <footer class="source-footer">
           <p v-if="error" class="source-form-error" role="alert">{{ error }}</p>
           <p class="source-target-note"><span />{{ targetHint }}</p>
-          <div class="dialog-actions"><button type="button" class="s-button" :disabled="adding" @click="open = false">Cancel</button><button type="submit" class="s-button primary" :disabled="!canAdd"><LoaderCircle v-if="adding" :size="14" class="spin" />{{ editing ? (adding ? 'Saving…' : 'Save changes') : (adding ? 'Adding source…' : 'Add to Studio') }}</button></div>
+          <div class="dialog-actions"><button type="button" class="s-button" :disabled="adding" @click="open = false">Cancel</button><button type="submit" class="s-button primary" :disabled="!canAdd"><SkeletonIndicator v-if="adding" />{{ editing ? (adding ? 'Saving…' : 'Save changes') : (adding ? 'Adding source…' : 'Add to Studio') }}</button></div>
         </footer>
       </form>
     </DialogContent>
   </Dialog>
+  <MediaImagePicker v-model:open="imagePickerOpen" :accepted-kinds="mediaKind ? [mediaKind] : ['image']" :selected-path="url" @select="chooseLibraryImage" />
 </template>
 
 <style scoped>
@@ -666,7 +693,7 @@ async function saveProperties() {
 .source-library-tools{display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-shrink:0}.source-search{display:flex;align-items:center;gap:7px;min-width:0;flex:1;background:var(--surface-2);border:1px solid var(--border-hair);border-radius:6px;padding:0 9px;color:var(--text-subtle);height:33px}.source-search:focus-within{border-color:#7dd3fc70}.source-search input{min-width:0;width:100%;background:transparent;border:0;outline:0!important;box-shadow:none;padding:0;font-size:11px;color:var(--text-primary)}.source-search>svg{flex-shrink:0}.source-search>button{display:grid;place-items:center;color:var(--text-muted)}.source-search input::-webkit-search-cancel-button{display:none}
 .source-upload-button{display:flex;align-items:center;justify-content:center;gap:6px;height:33px;padding:0 10px;font-size:11px;border:1px solid var(--border-glow);border-radius:6px;background:var(--surface-3);color:var(--text-primary)}.source-upload-button:hover{background:#32353b}.source-file-input{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap;opacity:0}
 .source-media-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:16px 11px;align-content:start;overflow-y:auto;min-height:0;padding:3px 2px 15px;margin:-3px -2px 0;flex:1;overscroll-behavior:contain}.source-asset{text-align:left;min-width:0;border-radius:6px;align-self:start;outline-offset:3px!important}.source-asset-image{position:relative;display:flex;align-items:center;justify-content:center;aspect-ratio:4/3;overflow:hidden;border:1px solid #ffffff0a;border-radius:7px;background:repeating-conic-gradient(#25272a 0% 25%,#202225 0% 50%) 50% / 14px 14px;color:#737780}.source-asset-image>img{height:100%;width:100%;object-fit:contain}.source-asset:hover .source-asset-image{border-color:#ffffff35}.source-asset.selected .source-asset-image{border-color:var(--accent);box-shadow:0 0 0 1px #7dd3fc66}.source-selected-check{position:absolute;right:6px;top:6px;width:19px;height:19px;background:var(--accent);color:#102632;border-radius:50%;display:grid;place-items:center;box-shadow:0 1px 5px #0004}.source-video-badge{position:absolute;bottom:6px;left:6px;display:flex;align-items:center;gap:4px;font-size:8px;font-weight:550;letter-spacing:.03em;padding:3px 5px;border-radius:3px;color:#f4f4f5;background:#000a}.source-asset-caption{display:block;padding:8px 1px 0}.source-asset-caption>b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;font-weight:450;color:var(--text-primary)}.source-asset-caption>small{display:block;margin-top:3px;font-size:9px;color:var(--text-subtle)}.source-audio-tile{background:var(--surface-2);aspect-ratio:2/1}.source-audio-tile>svg{color:#969da8}
-.source-grid-loading{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px;align-content:start;flex:1}.source-grid-loading>span:not(.sr-only){aspect-ratio:4/3;background:var(--surface-2);border-radius:7px}
+.source-grid-loading{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px;align-content:start;flex:1}.source-card-skeleton{min-width:0;display:flex;flex-direction:column;gap:9px}.source-card-image-skeleton{aspect-ratio:4/3;margin-bottom:3px}.camera-preview-skeleton{position:absolute;inset:0;overflow:hidden}.camera-preview-skeleton-caption{position:absolute;left:20px;right:20px;bottom:20px;display:flex;flex-direction:column;gap:10px}
 .source-library-empty{display:flex;align-items:center;justify-content:center;flex-direction:column;flex:1;text-align:center;padding:30px 12px;color:var(--text-subtle);min-height:180px}.source-library-empty h4{font-size:13px;font-weight:500;color:var(--text-primary);margin-top:14px}.source-library-empty p{font-size:11px;line-height:1.6;margin:6px 0 16px;max-width:220px}.source-library-empty .s-button{font-size:11px}
 .source-library-footnote{display:flex;flex-wrap:wrap;justify-content:space-between;gap:5px;color:var(--text-subtle);font-size:9px;line-height:1.5;padding:13px 0;margin-top:auto;border-top:1px solid var(--border-hair);flex-shrink:0}
 .source-detail{border-left:1px solid var(--border-hair);background:#10111348;padding:19px 17px;overflow-y:auto;min-width:0}.source-file-detail{padding:14px 0 17px;min-width:0}.source-file-detail>b{display:block;overflow-wrap:anywhere;font-weight:500;font-size:12px;line-height:1.5;color:var(--text-primary)}.source-file-detail>span{display:block;font-size:10px;color:var(--text-subtle);line-height:1.6;margin-top:4px}.source-file-detail>small{display:flex;align-items:center;gap:4px;font-size:9px;color:var(--status-ready);margin-top:8px}.source-detail .source-name-field{margin-top:18px;font-size:10px;gap:7px}.source-detail .source-name-field input,.source-input-properties .studio-field input,.source-input-properties .studio-field select{background:var(--surface-2);border:1px solid var(--border-hair);border-radius:6px;height:34px;font-size:12px;padding:7px 9px}.source-detail-help{font-size:10px;color:var(--text-subtle);line-height:1.65;margin-top:8px}.source-preview-note{display:flex;gap:6px;align-items:center;font-size:9px;color:var(--text-subtle);margin-top:23px}

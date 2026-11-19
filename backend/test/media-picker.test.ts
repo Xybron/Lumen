@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   MAX_MEDIA_BYTES, mediaAccept, mediaAssetUrl, mediaDisplayName,
-  mediaExtensions, mediaFilesForKind, mediaFileSize, mediaFormatHint, mediaSourceName,
+  mediaExtensions, mediaFilesForKind, mediaFileSize, mediaFormatHint, mediaSourceName, mediaFileLabel,
 } from '../../frontend/src/lib/studio/media-library';
 
 const file = (name: string, modifiedAt?: string) => ({ name, path: `media/backgrounds/${name}`, modifiedAt });
@@ -48,6 +48,16 @@ test('newest library files are first with deterministic alphabetical ties and no
   assert.deepEqual(mediaFilesForKind(files, 'image').map(asset => asset.name), ['Newest.png', 'Alpha.png', 'Zed.png', 'Invalid.png', 'Unknown.png']);
   assert.deepEqual(files, original);
   assert.deepEqual(mediaFilesForKind([], 'audio'), []);
+});
+
+test('renamed images stay searchable by display name and original human filename without changing paths', () => {
+  const renamed = { ...file('1792300000000-original.png'), displayName: 'Sunday welcome' };
+  assert.equal(mediaFileLabel(renamed), 'Sunday welcome');
+  assert.equal(mediaFileLabel(file('1792300000000-original.png')), 'original.png');
+  assert.deepEqual(mediaFilesForKind([renamed], 'image', 'Sunday'), [renamed]);
+  assert.deepEqual(mediaFilesForKind([renamed], 'image', 'original'), [renamed]);
+  assert.deepEqual(mediaFilesForKind([renamed], 'image', '1792300000000'), []);
+  assert.equal(renamed.path, 'media/backgrounds/1792300000000-original.png');
 });
 
 test('display names hide only station upload prefixes and preserve meaningful filenames', () => {

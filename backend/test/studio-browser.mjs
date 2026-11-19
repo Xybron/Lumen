@@ -62,7 +62,7 @@ try {
   await page.goto(`${base}/studio`); await page.getByRole('heading', { name: 'Production Studio' }).waitFor();
   await page.evaluate(() => document.fonts.ready);
   await page.getByRole('button', { name: 'Scripture — scripture', exact: true }).waitFor();
-  const studioLiveButton = page.locator('.lumen-header').getByRole('button', { name: 'Open Live View', exact: true });
+  const studioOutputsButton = page.locator('.lumen-header').getByRole('button', { name: 'Open Outputs', exact: true });
   const cutButton = page.getByRole('button', { name: 'Cut', exact: true });
   const fadeButton = page.getByRole('button', { name: 'Fade', exact: true });
   const fadeDuration = page.getByLabel('Fade duration', { exact: true });
@@ -73,11 +73,15 @@ try {
   for (const width of [1512, 1280, 1024, 900, 768, 390]) {
     await page.setViewportSize({ width, height: 982 });
     if (width === 390) await page.getByRole('button', { name: 'Collapse inspector', exact: true }).click();
-    await studioLiveButton.click({ trial: true });
-    const bounds = await studioLiveButton.boundingBox();
-    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width, `Studio live-view control fits at ${width}px`);
+    assert.ok(await studioOutputsButton.isVisible());
+    assert.equal(await studioOutputsButton.isEnabled(), true, 'Output settings are available before an explicit Program selection');
+    const bounds = await studioOutputsButton.boundingBox();
+    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width, `Outputs control fits at ${width}px`);
+    await page.getByRole('button', { name: 'More Program controls', exact: true }).click();
     assert.ok(await page.getByRole('button', { name: 'Start engine', exact: true }).isVisible());
+    assert.equal(await page.getByRole('button', { name: 'Start engine', exact: true }).isEnabled(), true, 'Renderer can start with Preview while Program is empty');
     assert.ok(await page.getByRole('button', { name: 'Recordings', exact: true }).isVisible());
+    await page.keyboard.press('Escape');
     await cutButton.scrollIntoViewIfNeeded();
     const cutBounds = await cutButton.boundingBox(), fadeBounds = await fadeButton.boundingBox();
     assert.ok(cutBounds.x >= 0 && cutBounds.x + cutBounds.width <= width && fadeBounds.x >= 0 && fadeBounds.x + fadeBounds.width <= width, `Transition buttons fit at ${width}px`);
@@ -98,7 +102,7 @@ try {
   await page.locator('.studio-workspace').evaluate(el => { el.scrollTop = 0; });
   const dockLayout = () => page.evaluate(() => {
     const app = document.querySelector('.studio-app'), dock = document.querySelector('.channel-nav');
-    const footer = document.querySelector('.studio-statusbar').getBoundingClientRect();
+    const footer = document.querySelector('[data-testid=production-statusbar]').getBoundingClientRect();
     const workspace = document.querySelector('.studio-workspace').getBoundingClientRect();
     const rect = dock.getBoundingClientRect();
     return { padding: getComputedStyle(app).paddingBottom, position: getComputedStyle(dock).position,
@@ -154,8 +158,8 @@ try {
   await page.screenshot({ path: path.join(dir, 'studio-design.png'), fullPage: true });
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.locator('.studio-workspace').evaluate(el => { el.scrollTop = el.scrollHeight; });
-  const bottomControls = await page.locator('.output-card-bottom').last().boundingBox();
-  assert.ok(bottomControls.y + bottomControls.height + 12 < (await dock.boundingBox()).y, 'Bottom output controls can scroll completely clear of the default toolbar');
+  const bottomControls = await page.getByTestId('outputs-summary').boundingBox();
+  assert.ok(bottomControls.y + bottomControls.height + 12 < (await dock.boundingBox()).y, 'Bottom output summary can scroll completely clear of the default toolbar');
   await settledFrame();
   await page.screenshot({ path: path.join(dir, 'studio-scroll-clearance.png'), fullPage: true });
   await page.getByRole('button', { name: 'Collapse toolbar', exact: true }).click();
@@ -192,8 +196,8 @@ try {
   await grip.press('Home');
   await page.getByRole('button', { name: 'Expand toolbar', exact: true }).click();
   await page.locator('.studio-app').evaluate(el => { el.scrollTop = el.scrollHeight; });
-  const mobileBottom = await page.locator('.output-card-bottom').last().boundingBox();
-  assert.ok(mobileBottom.y + mobileBottom.height + 12 < (await dock.boundingBox()).y, 'Mobile output controls also clear the toolbar at the end of scroll');
+  const mobileBottom = await page.getByTestId('outputs-summary').boundingBox();
+  assert.ok(mobileBottom.y + mobileBottom.height + 12 < (await dock.boundingBox()).y, 'Mobile output summary also clears the toolbar at the end of scroll');
   // Layout changes are local operator preferences, never a Take or scene edit.
   assert.equal((await get()).revision, layoutState.revision);
   assert.deepEqual((await get()).program, layoutState.program);
@@ -212,6 +216,7 @@ try {
   assert.equal(startup.origin, base, 'Engine falls back to the available app when its configured frontend port is refused');
   assert.ok(startup.attempts.some(a => a.origin === staleRendererUrl && a.error), 'The unavailable frontend is captured in diagnostics');
   assert.equal(await page.locator('.engine-alert').count(), 0, 'Successful startup clears the error banner');
+  assert.equal((await get()).program, null, 'Starting the renderer leaves Program empty until an explicit Take');
   await cutButton.click();
   await until(() => page.locator('.program-panel video').evaluate(v => v.readyState >= 2 && v.videoWidth > 0), 'Program video');
   await page.locator('.layer-row').filter({ hasText: 'Subtitle' }).click();
@@ -280,8 +285,15 @@ try {
   await cutButton.click();
   await until(async () => (await get()).program?.id === 'scene_message', 'take live');
   assert.deepEqual((await get()).outputs[0].scene, original, 'Pinned output changed with Program');
-  const liveOpened = context.waitForEvent('page'); await studioLiveButton.click();
-  const programView = await liveOpened; await programView.waitForURL(`${base}/studio/output/program`);
+  await studioOutputsButton.click();
+  const programSetup = page.getByRole('dialog', { name: 'Outputs', exact: true });
+  await programSetup.waitFor();
+  await programSetup.getByRole('button', { name: 'Set up Program screen', exact: true }).click();
+  await programSetup.getByRole('heading', { name: 'Program output', exact: true }).waitFor();
+  const liveOpened = context.waitForEvent('page');
+  await programSetup.getByRole('button', { name: 'Open output', exact: true }).click();
+  const programView = await liveOpened; await programView.waitForURL(`${base}/studio/output/program?display=1`);
+  await programSetup.getByRole('button', { name: 'Close', exact: true }).click();
   await until(() => programView.locator('video').evaluate(v => v.readyState >= 2 && v.videoWidth > 0), 'Studio live view renders actual Program even when the first output is pinned');
   await programView.locator('video').dispatchEvent('stalled');
   assert.ok(await programView.locator('video').evaluate(video => video.classList.contains('is-ready')), 'A transient playback stall keeps the last good Program frame visible');
@@ -465,7 +477,7 @@ try {
   await until(async () => (await get()).program?.id === beforeTransitions.program.id, 'original Program restored after transition fixtures');
   await page.locator('.audio-panel').scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(dir, 'studio-live.png'), fullPage: true });
-  await page.getByRole('button', { name: 'Record', exact: true }).click();
+  await page.getByRole('button', { name: 'Record Program', exact: true }).click();
   const active = await until(async () => { const s = await (await request.get(`${base}/api/studio/status`)).json(); return s.recording?.bytes > 10000 ? s.recording : null; }, 'recorded chunks', 30000);
   // Closing the controller releases its fake cameras, but file-based scenes and
   // recording remain owned by the station renderer.

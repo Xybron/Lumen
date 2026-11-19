@@ -27,9 +27,9 @@ export async function localRtmpsReceivers(directory, options = {}) {
   await processRun('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', keyFile, '-out', certFile, '-days', '1', '-subj', '/CN=localhost']);
   const [key, cert] = await Promise.all([fs.readFile(keyFile), fs.readFile(certFile)]), endpoints = {}, records = [], sockets = new Set(), children = new Set();
   let closing = false;
-  for (const name of ['youtube', 'facebook']) {
+  for (const name of Object.keys(options.paths ?? { youtube: '', facebook: '' })) {
     const route = options.paths?.[name] ?? '/live/fixture';
-    if (!/^\/(?:live|live2|rtmp)\/[a-zA-Z0-9_-]{1,100}$/.test(route)) throw new Error('A safe local RTMP fixture path is required.');
+    if (!/^\/(?:live|live2|rtmp)\/[a-zA-Z0-9_-]{1,100}(?:\?[a-zA-Z0-9_=&-]{1,100})?$/.test(route)) throw new Error('A safe local RTMP fixture path is required.');
     let sequence = 0;
     const server = tls.createServer({ key, cert, minVersion: 'TLSv1.2' }, secure => {
       const events = [], event = value => events.push({ elapsedMs: Date.now() - started, value }), started = Date.now();

@@ -70,6 +70,16 @@
   font-family: inherit !important;
 }
 
+/* Keep temporary feedback clear of the persistent production readings. */
+.studio-toaster[data-sonner-toaster][data-y-position="bottom"] {
+  bottom: calc(var(--studio-status-height, 44px) + 16px);
+}
+@media (max-width: 720px) {
+  .studio-toaster[data-sonner-toaster][data-y-position="bottom"] {
+    bottom: calc(var(--studio-status-height, 130px) + 76px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
 /* Shared confirmations: compact, action-specific and safe to cancel by default. */
 [data-slot="dialog-content"].lumen-confirmation {
   width: min(460px, calc(100vw - 32px));

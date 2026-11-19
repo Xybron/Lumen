@@ -63,7 +63,7 @@ function duration(ms: number) { return fmt(ms).replace(/^in /, ''); }
         </div>
       </div>
 
-      <div class="cue-timing"><span>{{ playback.mode === 'manual' ? 'Manual control' : playback.playing ? 'Auto advancing' : 'Auto paused' }}</span><span class="tnum">{{ duration(playback.remainingMs) }} / {{ duration(playback.totalMs) }}</span></div>
+      <div class="cue-timing"><span>{{ playback.mode === 'manual' ? playback.playing ? 'Manual · timer running' : 'Manual · timer paused' : playback.playing ? 'Auto advancing' : 'Auto paused' }}</span><span class="tnum">{{ duration(playback.remainingMs) }} / {{ duration(playback.totalMs) }}</span></div>
       <div class="h-0.5 rounded-full bg-white/[0.07] overflow-hidden">
         <div
           class="h-full bg-accent transition-[width] duration-200 ease-out-cubic"
@@ -82,7 +82,7 @@ function duration(ms: number) { return fmt(ms).replace(/^in /, ''); }
       >
         <button type="button" class="cue-jump" :disabled="playback.readOnly" :title="`Show ${item.title || item.body || 'slide'} now`" @click="playback.jumpTo(index)">
           <div class="w-[72px] shrink-0">
-            <PreviewSurface :item="item" :prayer-label="playback.prayerLabelFor(item.id)?.display" />
+            <PreviewSurface :item="item" :prayer-label="playback.prayerLabelFor(item.id)?.display" thumbnail />
           </div>
           <div class="flex-1 min-w-0">
             <div class="text-[11px] font-medium text-white truncate">

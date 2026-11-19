@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import {
   GripVertical,
   Pencil,
@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-vue-next';
 import type { Item } from '@/types';
+import { ensureScenePosterMedia, scenePosterMedia } from '@/lib/studio/scene-poster-media';
 import { mediaUrl } from '@/lib/api';
 import { usePlaybackStore } from '@/stores/playback';
 import { useContentStore } from '@/stores/content';
@@ -97,9 +98,10 @@ const sheetTitle = computed(
     : props.item.title || props.item.body || `Slide ${props.index + 1}`,
 );
 
-const bgUrl = computed(() => mediaUrl(props.item.background?.src));
+watch(() => props.view === 'list' ? props.item.background?.src : undefined,
+  path => { const url = mediaUrl(path); if (url) ensureScenePosterMedia([url]); }, { immediate: true });
+const bgUrl = computed(() => scenePosterMedia(mediaUrl(props.item.background?.src)?.replace(/^\//, ''), props.item.background?.kind === 'video' ? 'video' : 'image'));
 const bgColor = computed(() => props.item.background?.color);
-const isVideo = computed(() => props.item.background?.kind === 'video');
 const isSection = computed(() => props.item.type === 'section');
 
 const durationLabel = computed(() => {
@@ -108,14 +110,15 @@ const durationLabel = computed(() => {
 });
 
 const typeLabel = computed(
-  () => ({
+  () => props.item.document ? (props.item.document.type === 'pdf' ? 'PDF' : 'PowerPoint') : ({
     scripture: 'Scripture',
     text: 'Text',
-    image: 'Image',
-    video: 'Video',
+    image: 'Media',
+    video: 'Media',
     section: 'Section',
     prayer: 'Prayer',
-    'prayer-sub': 'Prayer (sub)',
+    'prayer-sub': 'Prayer',
+    notes: 'Notes',
     lyrics: 'Lyrics',
     announcement: 'Announcement',
   })[props.item.type],
@@ -187,7 +190,7 @@ const typeLabel = computed(
     @dblclick="emit('jump')"
   >
     <div class="relative">
-      <PreviewSurface :item="item" :prayer-label="prayerLabel" />
+      <PreviewSurface :item="item" :prayer-label="prayerLabel" thumbnail />
 
       <div class="absolute top-2 left-2 flex items-center gap-1.5">
         <span class="text-[10px] font-semibold tracking-[0.1em] uppercase text-white/85 bg-black/55 backdrop-blur-md rounded-md px-1.5 py-0.5">
@@ -286,21 +289,16 @@ const typeLabel = computed(
       <!-- thumbnail -->
       <div class="relative slide-list-thumbnail shrink-0 overflow-hidden bg-black">
         <img
-          v-if="bgUrl && !isVideo"
+          v-if="bgUrl"
           :src="bgUrl"
+          loading="lazy"
+          decoding="async"
           class="absolute inset-0 h-full w-full object-cover"
         />
         <div
           v-else-if="bgColor"
           class="absolute inset-0"
           :style="{ background: bgColor }"
-        />
-        <video
-          v-else-if="bgUrl && isVideo"
-          :src="bgUrl"
-          class="absolute inset-0 h-full w-full object-cover"
-          muted
-          playsinline
         />
         <div v-else class="absolute inset-0 bg-gradient-to-br from-zinc-800 to-zinc-900" />
         <div class="absolute inset-0 bg-black/30" />

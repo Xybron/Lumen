@@ -9,17 +9,24 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { LISTENING_MODELS, listeningModel } from '../shared/listening-models.js';
 import { installListeningModel } from './listening-model-download.mjs';
+import { installListeningVad } from './listening-vad-download.mjs';
 const args=process.argv.slice(2);
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const dir = path.join(process.env.LUMEN_DATA_DIR ? path.resolve(process.env.LUMEN_DATA_DIR) : path.join(root,'data'),'ai');
+if(args.includes('--vad-only')) {
+  if(args.length!==1)throw new Error('Use --vad-only by itself to add speech detection to an existing local listener.');
+  const vadFile=await installListeningVad(path.join(dir,'models'));
+  console.log(`Local speech detection installed: ${vadFile}\nRestart listening to use it. No speech model or runtime was changed.`);
+  process.exit(0);
+}
 if(args.includes('--list-models')) {
   for(const model of LISTENING_MODELS)console.log(`${model.id.padEnd(24)} ${String(model.downloadMiB).padStart(4)} MiB  ${model.label}\n  ${model.description}`);
   process.exit(0);
 }
-if(args.some(arg=>!arg.startsWith('--model='))||args.length>1)throw new Error('Usage: npm run setup:ai -- --model=small.en (or --list-models).');
+if(args.some(arg=>!arg.startsWith('--model='))||args.length>1)throw new Error('Usage: npm run setup:ai -- --model=small.en (or --list-models / --vad-only).');
 const modelId=args[0]?.slice('--model='.length)??'base.en';
 const requestedModel=listeningModel(modelId);
 if(!requestedModel)throw new Error('Unknown model. Run npm run setup:ai -- --list-models.');
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const dir = path.join(process.env.LUMEN_DATA_DIR ? path.resolve(process.env.LUMEN_DATA_DIR) : path.join(root,'data'),'ai');
 await fs.mkdir(dir,{recursive:true});
 async function run(executable,args) {
   await new Promise((resolve,reject)=>{ const child=spawn(executable,args,{stdio:'inherit'}); child.once('error',reject); child.once('close',code=>code===0?resolve():reject(new Error(`${executable} exited ${code}`))); });
@@ -54,4 +61,5 @@ if (!await exists(binary)) {
 const models=path.join(dir,'models'); await fs.mkdir(models,{recursive:true});
 console.log(`Installing ${requestedModel.label} (${requestedModel.downloadMiB} MiB). Existing models are preserved.`);
 const modelFile=await installListeningModel(modelId,models);
-console.log(`\nLocal listening is installed.\nRuntime: ${binary}\nModel: ${modelFile}\nSelect this installed model in a channel's listening settings. Audio stays on this station.\n`);
+const vadFile=await installListeningVad(models);
+console.log(`\nLocal listening is installed.\nRuntime: ${binary}\nModel: ${modelFile}\nSpeech detector: ${vadFile}\nSelect this installed model in a channel's listening settings. Audio stays on this station.\n`);

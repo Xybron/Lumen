@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import test from 'node:test';
 import ffmpeg from 'ffmpeg-static';
 import { preparePresentationVideo, queueSourceVideo, sourceVideoStatus } from '../src/media-video';
+import { removeLibraryFile } from '../src/media-catalog';
 
 const run = promisify(execFile);
 
@@ -53,4 +54,26 @@ test('source MOV stays available while a browser-ready MP4 is prepared in the ba
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
+});
+
+test('deletion cannot race a queued MOV conversion or its thumbnail writer', async () => {
+  assert.ok(ffmpeg);
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'lumen-video-deletion-'));
+  const media = path.join(dir, 'media'), background = path.join(media, 'backgrounds'); await fs.mkdir(background, { recursive: true });
+  const source = path.join(background, 'active.mov');
+  try {
+    await run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30', '-t', '1', '-c:v', 'libx264', '-an', source], { timeout: 30_000 });
+    queueSourceVideo(source);
+    await assert.rejects(removeLibraryFile(media, 'backgrounds', 'active.mov'), /still being prepared/);
+    await fs.access(source);
+    const deadline = Date.now() + 30_000;
+    while (true) {
+      try { await removeLibraryFile(media, 'backgrounds', 'active.mov'); break; }
+      catch (error) {
+        if (!/still being prepared/.test((error as Error).message) || Date.now() > deadline) throw error;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+    }
+    for (const filename of ['backgrounds/active.mov', 'backgrounds/active.mp4', 'thumbnails/active.jpg']) await assert.rejects(fs.access(path.join(media, filename)));
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });

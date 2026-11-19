@@ -32,6 +32,7 @@ export interface AuthMe {
 
 export interface MediaLibraryFile {
   name: string;
+  displayName?: string;
   path: string;
   thumbnail?: string | null;
   bytes?: number;

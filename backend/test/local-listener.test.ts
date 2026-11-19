@@ -6,6 +6,7 @@ import os from 'node:os';
 import {fileURLToPath} from 'node:url';
 import {LocalListener,localTranscript} from '../src/local-listener.js';
 import {LISTENING_MODELS} from '../../shared/listening-models.js';
+import {LISTENING_VAD_MODEL} from '../../shared/listening-vad.js';
 import {installListeningModel} from '../../scripts/listening-model-download.mjs';
 import {ListeningSessions} from '../src/listening-session.js';
 import {WorshipLibrary} from '../src/worship-library.js';
@@ -41,11 +42,27 @@ test('all listening contexts use prompt-free isolated decoding with supported be
     assert.match((await f.listener.transcribe(wav(),'en','scripture')).text,/John chapter three/);
     await f.listener.transcribe(wav(),'en','lyrics');
     await f.listener.transcribe(wav(),'en');
-    const args=JSON.parse(await fs.readFile(path.join(f.models,'worker-args.json'),'utf8'));assert.equal(args[args.indexOf('--max-context')+1],'0');assert.equal(args[args.indexOf('--beam-size')+1],'5');assert.ok(args.includes('--no-fallback'));assert.doesNotMatch(args.join(' '),/Genesis|Revelation|--prompt/);
+    const args=JSON.parse(await fs.readFile(path.join(f.models,'worker-args.json'),'utf8'));assert.equal(args[args.indexOf('--max-context')+1],'0');assert.equal(args[args.indexOf('--beam-size')+1],'5');assert.ok(args.includes('--no-fallback'));assert.ok(args.includes('--suppress-nst'),'Preserve Base decoder settings');assert.doesNotMatch(args.join(' '),/Genesis|Revelation|--prompt/);
     const calls=(await fs.readFile(path.join(f.models,'worker-calls.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line));
     assert.equal(calls.length,3);assert.equal(calls[0].beam_size,'5');assert.equal(calls[0].response_format,'verbose_json');assert.equal(calls[0].language,'en');assert.equal(calls[0].temperature,'0');assert.equal(calls[0].temperature_inc,'0');assert.equal(calls[0].no_language_probabilities,'true');assert.equal(calls[0].detect_language,'false');assert.equal(calls[0].translate,'false');
     for(const call of calls)assert.equal(call.prompt,'','No channel can condition recognition on a book-name list or a previous prompt');
     await f.listener.selectModel('small');assert.equal((await f.listener.status()).state,'stopped');await f.listener.transcribe(wav(),'fr','lyrics');assert.equal((await f.listener.status()).modelId,'small');assert.equal((await f.listener.status()).state,'ready');
+  }finally{await f.close();}
+});
+test('installed speech detection enables local VAD and running status reflects the active worker',async()=>{
+  const f=await fixture();try {
+    assert.equal((await f.listener.status()).speechDetection,'energy');
+    await f.listener.start();
+    await fs.writeFile(path.join(f.models,LISTENING_VAD_MODEL.filename),'protocol fixture only');
+    assert.equal((await f.listener.status()).speechDetection,'energy','Installing a detector does not change an already-running worker.');
+    await f.listener.selectModel('small.en');
+    assert.equal((await f.listener.status()).speechDetection,'neural');
+    await f.listener.start();
+    const args=JSON.parse(await fs.readFile(path.join(f.models,'worker-args.json'),'utf8'));
+    assert.ok(args.includes('--vad'));assert.equal(args[args.indexOf('--vad-model')+1],path.join(f.models,LISTENING_VAD_MODEL.filename));
+    assert.equal(args[args.indexOf('--vad-speech-pad-ms')+1],'12000');
+    assert.equal(args[args.indexOf('--vad-min-silence-duration-ms')+1],'12000');assert.equal(args[args.indexOf('--vad-samples-overlap')+1],'0');
+    assert.equal(args[args.indexOf('--vad-threshold')+1],'0.25');assert.equal(args[args.indexOf('--vad-min-speech-duration-ms')+1],'100');
   }finally{await f.close();}
 });
 test('malformed input, unsupported language, silence and concurrent model changes cannot invoke unsafe inference',async()=>{
@@ -54,7 +71,7 @@ test('malformed input, unsupported language, silence and concurrent model change
     await assert.rejects(()=>f.listener.transcribe(wav(),'en; rm'),/two-letter/);
     await assert.rejects(()=>f.listener.transcribe(wav(),'fr'),/English model/);
     await assert.rejects(()=>f.listener.transcribe(wav(),'en','arbitrary prompt' as any),/context/);
-    assert.deepEqual(await f.listener.transcribe(wav(true),'en','scripture'),{text:'',elapsedMs:0});assert.equal((await f.listener.status()).state,'stopped');
+    const silence=await f.listener.transcribe(wav(true),'en','scripture');assert.equal(silence.text,'');assert.equal(silence.elapsedMs,0);assert.equal(silence.recognition.status,'no-speech');assert.equal((await f.listener.status()).state,'stopped');
     await fs.writeFile(path.join(f.models,'worker-response.json'),JSON.stringify({text:'waiting',delayMs:250}));
     const inference=f.listener.transcribe(wav(),'en','scripture');
     await assert.rejects(()=>f.listener.selectModel('small.en'),/current audio window/);
@@ -138,4 +155,32 @@ test('station-wide active check counts all channels and prunes expired leases',t
     assert.throws(()=>sessions.check('scripture',first.id,'user'),/stopped or expired/);
     const fresh=sessions.start('scripture','user',options);assert.equal(sessions.hasActive(),true);assert.notEqual(fresh.id,first.id);
   }finally{t.mock.restoreAll();library.close();}
+});
+
+test('only the installed Turbo profile allows acoustic markers',async()=>{
+  const f=await fixture();try {
+    const model=LISTENING_MODELS.find(model=>model.id==='large-v3-turbo-q5_0')!;
+    await fs.writeFile(path.join(f.models,model.filename),'protocol fixture, not weights');
+    await f.listener.selectModel(model.id);await f.listener.start();
+    const args=JSON.parse(await fs.readFile(path.join(f.models,'worker-args.json'),'utf8'));
+    assert.ok(!args.includes('--suppress-nst'));assert.ok(args.includes('--no-fallback'));
+  }finally{await f.close();}
+});
+
+test('sparse Turbo speech recovers in two bounded passes and resets VAD on the next window',async()=>{
+  const f=await fixture();try {
+    const model=LISTENING_MODELS.find(model=>model.id==='large-v3-turbo-q5_0')!;
+    await fs.writeFile(path.join(f.models,model.filename),'protocol fixture');
+    await fs.writeFile(path.join(f.models,LISTENING_VAD_MODEL.filename),'protocol fixture');
+    await f.listener.selectModel(model.id);
+    const response=(text:string)=>({segments:[{text,avg_logprob:-.5,no_speech_prob:.01}]});
+    await fs.writeFile(path.join(f.models,'worker-response.json'),JSON.stringify({responses:[response('every disappointment'),response('every disappointment receive'),response('the power to break new records'),response('John chapter three verse sixteen')]}));
+    const short=wav(),long=Buffer.concat([short.subarray(0,44),...Array(10).fill(short.subarray(44))]);long.writeUInt32LE(long.length-8,4);long.writeUInt32LE(long.length-44,40);
+    const recovered=await f.listener.transcribe(long,'en','scripture');
+    assert.equal(recovered.text,'every disappointment receive the power to break new records');assert.equal(recovered.recognition.status,'uncertain');
+    await f.listener.transcribe(short,'en','scripture');
+    const calls=(await fs.readFile(path.join(f.models,'worker-calls.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line));
+    assert.deepEqual(calls.map(call=>call.vad),['true','false','false','true']);
+    assert.ok(calls.every(call=>call.prompt===''));
+  }finally{await f.close();}
 });

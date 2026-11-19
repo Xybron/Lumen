@@ -126,6 +126,23 @@ test('two independently quoted passages in one speech window require review', ()
   } finally {db.close();}
 });
 
+test('reordered paraphrase words prepare a bounded review suggestion without claiming a quotation',()=>{
+  const text="God's gift of his begotten Son to a world he loved is how we receive everlasting life";
+  const db=library();try {
+    const match=db.matchScriptureQuote('KJV',text);
+    assert.equal(match.selection?.book,43);assert.equal(match.selection?.verse,16);
+    assert.equal(match.eligible,false);assert.match(match.reason,/Possible paraphrase/);
+    assert.ok(match.score<=.85,'Lexical overlap must not be presented as strong exact-quotation evidence.');
+    for(const prose of ['God loves us all and this is a beautiful morning at church','Please put the microphone beside the green chairs and turn the music down'])assert.equal(db.matchScriptureQuote('KJV',prose).selection,null,prose);
+    db.importBible({version:{id:'OTHER',name:'Other',attribution:'Test'},verses:[{book:1,chapter:1,verse:1,text:'A separate sentence without those distinctive words.'}]});
+    assert.equal(db.matchScriptureQuote('OTHER',text).selection,null,'Paraphrase retrieval also stays in the selected edition.');
+  }finally{db.close();}
+  const duplicate=library([{book:1,chapter:1,verse:1,text:john}]);try {
+    const result=duplicate.matchScriptureQuote('KJV',text);
+    assert.equal(result.eligible,false);assert.match(result.reason,/multiple passages/);
+  }finally{duplicate.close();}
+});
+
 test('quotation lookup remains indexed, bounded and responsive across the full installed Bible', () => {
   const db=new WorshipLibrary(':memory:');try {
     const books=JSON.parse(fs.readFileSync(new URL('../assets/kjv.source.json',import.meta.url),'utf8').replace(/^\uFEFF/,''));
@@ -143,5 +160,36 @@ test('quotation lookup remains indexed, bounded and responsive across the full i
     const duration=performance.now()-start;
     console.log(`Listening quotation lookup: ${(duration/20).toFixed(1)} ms/query against ${verses.length} verses.`);
     assert.ok(duration<5000,`20 bounded indexed lookups took ${duration.toFixed(0)} ms.`);
+    for(const text of [
+      'broken. I said let them',
+      'broken. I said let the record be broken.',
+      'You will not sit at the',
+      'You will not sit at the same spot.',
+      'And the Spirit of the Lord',
+      'He breaks reconciliation in the name of Jesus.',
+      'in the name of jesus receive it receive the power of the holy spirit',
+      'You will not sit at the same spot. You will not be marking time at the same spot. After this conference it is forward march.',
+      'Please keep your hands on the table while we sort out the sound and prepare for the next announcement',
+    ])assert.equal(db.matchScriptureQuote('KJV',text).selection,null,'A short common fragment must not turn ordinary speech into a verse suggestion: '+text);
+    for(const text of [
+      'That Samwell took the harm of oil and an item David in the midst of his breath.',
+      'And the spirit of the lock came upon David from that day. From that day. It looked like papa.',
+    ]){
+      const result=db.matchScriptureQuote('KJV',text);
+      assert.deepEqual(result.selection,{kind:'scripture',versionId:'KJV',book:9,chapter:16,verse:13});
+      assert.equal(result.eligible,false,'Garbled quotations remain review-only.');
+    }
+    const paraphrases:[string,number,number,number][]=[
+      ["God's gift of his begotten Son to a world he loved is how we receive everlasting life",43,3,16],
+      ['His kingdom and righteousness come first; seek these and the things you need are added',40,6,33],
+      ['Death has cast a shadow over the valley I walk in; evil cannot cause me to fear',19,23,4],
+    ];
+    const paraphraseStart=performance.now();
+    for(const [text,book,chapter,verse] of paraphrases){
+      const result=db.matchScriptureQuote('KJV',text);
+      assert.deepEqual(result.selection,{kind:'scripture',versionId:'KJV',book,chapter,verse},text);
+      assert.equal(result.eligible,false);assert.match(result.reason,/Possible paraphrase/);
+    }
+    assert.ok(performance.now()-paraphraseStart<2000,'Three bounded paraphrase lookups should remain responsive against the whole installed Bible.');
   } finally {db.close();}
 });

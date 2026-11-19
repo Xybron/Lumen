@@ -351,8 +351,8 @@ try {
   checks.push('Screen selection previews locally; Cancel/chooser denial preserve current screen and Save transfers the replacement without duplicating sources');
 
   await open('channel_edit');
-  assert.equal(await dialog().getByLabel('Presentation channel').inputValue(), channelTemplate.id);
-  await dialog().getByLabel('Presentation channel').selectOption('source_properties_channel_two');
+  assert.equal(await dialog().getByLabel('Lumen channel').inputValue(), channelTemplate.id);
+  await dialog().getByLabel('Lumen channel').selectOption('source_properties_channel_two');
   await save();
   assert.equal((await get()).sources.find(item => item.id === 'channel_edit').channelId, 'source_properties_channel_two');
   await open('audio_edit');

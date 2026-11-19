@@ -7,6 +7,7 @@ import { usePresenceStore } from '@/stores/presence';
 import { useEnginesStore } from '@/stores/engines';
 import { usePlaybackStore } from '@/stores/playback';
 import { openProjection } from '@/lib/tauri';
+import SendToProgramButton from './SendToProgramButton.vue';
 
 const identity = useIdentityStore(), presence = usePresenceStore(), engines = useEnginesStore(), playback = usePlaybackStore();
 const menuOpen = ref(false);
@@ -15,19 +16,23 @@ const canOperate = computed(() => !!channelId.value && identity.can(channelId.va
 </script>
 
 <template>
+  <div class="channel-program-actions">
+  <SendToProgramButton />
   <Popover v-if="channelId" v-model:open="menuOpen">
     <PopoverTrigger as-child><button class="channel-output-more" aria-label="More channel controls" title="More channel controls"><MoreHorizontal :size="16" /></button></PopoverTrigger>
     <PopoverContent align="end" :side-offset="8" class="!p-2 w-60">
       <div class="channel-output-menu">
         <button @click="openProjection(channelId!);menuOpen=false"><ExternalLink :size="14" />Open channel output</button>
         <button class="channel-mobile-blank" :disabled="!canOperate || !playback.current" @click="playback.toggleBlank();menuOpen=false"><Monitor v-if="playback.blanked" :size="14" /><MonitorOff v-else :size="14" />{{ playback.blanked ? 'Resume projection' : 'Blank screen' }}</button>
-        <small>Channel content updates its Studio sources. Scene switching stays in Studio.</small>
+        <small>Channel content updates wherever it is used. Send to Program presents this channel fullscreen.</small>
       </div>
     </PopoverContent>
   </Popover>
+  </div>
 </template>
 
 <style scoped>
+.channel-program-actions{display:flex;align-items:center;gap:5px;flex-shrink:0}
 .channel-output-more{height:32px;width:28px;display:grid;place-items:center;flex-shrink:0;border-radius:var(--radius-control,7px);color:var(--text-muted)}
 .channel-output-more:hover,.channel-output-menu button:hover:not(:disabled){background:var(--bg-hover)}
 button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}

@@ -17,8 +17,8 @@ const playback = usePlaybackStore();
       <Button
         :variant="playback.playing ? 'accent' : 'default'"
         size="icon"
-        :disabled="playback.mode !== 'auto' || !playback.current || playback.readOnly"
-        :aria-label="playback.playing ? 'Pause presentation' : 'Play presentation'"
+        :disabled="!playback.current || playback.current.durationMs <= 0 || playback.readOnly"
+        :aria-label="playback.playing ? 'Pause timer' : 'Start timer'"
         @click="playback.toggle"
       >
         <Pause v-if="playback.playing" :size="16" />

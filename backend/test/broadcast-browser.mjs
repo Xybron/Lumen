@@ -17,7 +17,7 @@ const port = Number(process.env.LUMEN_BROADCAST_TEST_PORT ?? 3470), base = `http
 const sampleSeconds = Number(process.env.LUMEN_REHEARSAL_SECONDS ?? 6);
 assert.ok(Number.isInteger(sampleSeconds) && sampleSeconds >= 2 && sampleSeconds <= 300, 'Rehearsal sample must be 2–300 seconds');
 const videoFile = path.join(directory, 'camera.y4m'), toneFile = path.join(directory, 'media', 'music', 'main-tone.wav');
-const errors = [], mutations = [], publicRequests = [], checks = [], privateKey = 'fixture-youtube-key-loopback-only', facebookKey = 'fixture-facebook-key-loopback-only';
+const errors = [], mutations = [], publicRequests = [], checks = [], privateKey = 'fixture-youtube-key-loopback-only', facebookKey = 'fixture-facebook-key-loopback-only', instagramKey = 'fixture-instagram-key-loopback-only?s_bl=1&s_fbp=lhr11-1&s_prp=', instagramUrl = 'rtmps://edgetee-upload-los4-1.xx.fbcdn.net:443/rtmp/';
 const publicConsole = [];
 let server, browser, admin, operator, viewer, anonymous, page, operatorPage, watchPage, relayOrigin, logs = '';
 console.log(JSON.stringify({ phase: 'starting', directory, port }));
@@ -244,6 +244,12 @@ try {
   await dialog(page).getByRole('button', { name: 'Configure Facebook destination', exact: true }).click();
   await dialog(page).getByLabel('Facebook stream key', { exact: true }).fill(facebookKey);
   await dialog(page).getByLabel('Enable Facebook destination', { exact: true }).check();
+  await dialog(page).getByLabel('Enable Instagram destination', { exact: true }).check();
+  await dialog(page).getByLabel('Instagram stream URL', { exact: true }).fill(instagramUrl);
+  await dialog(page).getByLabel('Instagram stream key', { exact: true }).fill(instagramKey);
+  assert.equal(await dialog(page).getByLabel('Instagram stream key', { exact: true }).getAttribute('type'), 'password');
+  await panelBounds(page, 'Instagram expanded setup');
+  await page.screenshot({ path: path.join(directory, 'go-live-instagram-setup.png'), fullPage: true });
   await dialog(page).getByRole('button', { name: 'Configure Lumen Watch destination', exact: true }).click();
   await dialog(page).getByLabel('Enable Lumen Watch destination', { exact: true }).check();
   assert.equal((await snapshot()).config.watch.enabled, false, 'Inline destination controls remain local edits until saved');
@@ -262,6 +268,10 @@ try {
   assert.equal(await dialog(page).getByLabel('Record with stream', { exact: true }).isChecked(), true, 'Per-session recording stays independent of saved-default hydration');
   if (!await dialog(page).getByLabel('YouTube stream key', { exact: true }).isVisible()) await dialog(page).getByRole('button', { name: 'Configure YouTube destination', exact: true }).click();
   assert.equal(await dialog(page).getByLabel('YouTube stream key', { exact: true }).inputValue(), privateKey, 'Background polling preserves the unsaved write-only key');
+  await dialog(page).getByRole('button', { name: 'Configure Instagram destination', exact: true }).click();
+  assert.equal(await dialog(page).getByLabel('Instagram stream URL', { exact: true }).inputValue(), instagramUrl, 'Polling preserves the unsaved Instagram URL');
+  assert.equal(await dialog(page).getByLabel('Instagram stream key', { exact: true }).inputValue(), instagramKey);
+  await dialog(page).getByRole('button', { name: 'Configure YouTube destination', exact: true }).click();
   assert.equal((await snapshot()).config.profile, '720p', 'Quality remains saved at the original profile until explicit Save setup');
   assert.equal((await snapshot()).config.recordOnStart, true, 'An unsaved default has not changed station settings');
   await recordingDefault.check();
@@ -272,7 +282,12 @@ try {
   await dialog(page).getByText('Setup saved', { exact: true }).waitFor();
   assert.equal(await dialog(page).getByRole('button', { name: 'Save setup', exact: true }).count(), 0, 'Save setup disappears after the explicit save is acknowledged');
   assert.equal(await dialog(page).getByLabel('YouTube stream key', { exact: true }).inputValue(), ''); assert.ok(!JSON.stringify(await snapshot()).includes(privateKey)); assert.ok(!JSON.stringify(await snapshot()).includes(facebookKey));
-  assert.equal((await fixtureStats()).spawned.filter(value => value.kind === 'youtube' || value.kind === 'facebook').length, 0, 'Enabling test destinations does not connect before explicit Go Live');
+  assert.equal((await fixtureStats()).spawned.filter(value => ['youtube', 'facebook', 'instagram'].includes(value.kind)).length, 0, 'Enabling test destinations does not connect before explicit Go Live');
+  await dialog(page).getByRole('button', { name: 'Configure Instagram destination', exact: true }).click();
+  assert.equal(await dialog(page).getByLabel('Instagram stream key', { exact: true }).inputValue(), '');
+  assert.equal(await dialog(page).getByLabel('Instagram stream URL', { exact: true }).inputValue(), instagramUrl);
+  assert.ok(!JSON.stringify(await snapshot()).includes(instagramKey));
+  await dialog(page).getByRole('button', { name: 'Configure Instagram destination', exact: true }).click();
   await page.screenshot({ path: path.join(directory, 'go-live-unified-desktop.png'), fullPage: true });
   await unifiedSetup(page, 'Desktop saved unified setup');
   const youtubeSetup = dialog(page).getByRole('button', { name: 'Configure YouTube destination', exact: true });
@@ -291,43 +306,85 @@ try {
   assert.equal((await status()).state, 'offline', 'Setup, sharing and review leave the offline engine untouched');
   await page.screenshot({ path: path.join(directory, 'go-live-review-no-recording.png'), fullPage: true });
   await dialog(page).getByRole('button', { name: 'Back to setup', exact: true }).click(); assert.equal(mutations.filter(value => value.pathname.endsWith('/broadcast/start')).length, startWrites);
-  checks.push('One Go Live setup view exposes quality and per-session recording without tabs; station defaults stay optional and independent, unsaved defaults/keys/toggles/quality survive polling, inline changes require explicit Save setup, both platform keys stay write-only, readiness blocks missing destinations, and review/share never starts publishing; all platform traffic is constructor-rewritten to isolated loopback TLS receivers');
+  checks.push('One Go Live setup view exposes quality and per-session recording without tabs; station defaults stay optional and independent, unsaved defaults/keys/toggles/quality survive polling, inline changes require explicit Save setup, all three platform keys stay write-only, readiness blocks missing destinations, and review/share never starts publishing; all platform traffic is constructor-rewritten to isolated loopback TLS receivers');
   await dialog(page).getByLabel('Record with stream', { exact: true }).check();
   await dialog(page).getByRole('button', { name: 'Review stream', exact: true }).click();
   await dialog(page).locator('.broadcast-confirmation dl').getByText('Local recording', { exact: true }).waitFor();
   await dialog(page).getByLabel('Service recording name', { exact: true }).fill('Broadcast service fixture');
   await page.keyboard.press('Control+Enter'); assert.equal(mutations.filter(value => value.pathname.endsWith('/broadcast/start')).length, startWrites);
+  if (process.env.LUMEN_REHEARSAL_COMPETING_ENCODE === '1') {
+    // Extra generated 1080p recording approximates a competing encode workload;
+    // it does not launch TikTok, touch devices, or publish any media externally.
+    await page.evaluate(() => {
+      const canvas = document.createElement('canvas'); canvas.width = 1920; canvas.height = 1080;
+      const context = canvas.getContext('2d', { alpha: false }); let frame = 0;
+      const timer = setInterval(() => {
+        context.fillStyle = '#263f62'; context.fillRect(0, 0, 1920, 1080);
+        context.fillStyle = '#ec9563'; context.fillRect((frame++ * 17) % 1800, 300, 120, 480);
+      }, 1000 / 30);
+      const stream = canvas.captureStream(30), recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8', videoBitsPerSecond: 6000000 });
+      const stats = { chunks: 0, bytes: 0, failed: false };
+      recorder.ondataavailable = event => { stats.chunks++; stats.bytes += event.data.size; };
+      recorder.onerror = () => { stats.failed = true; }; recorder.start(500);
+      window.__competingEncode = { stats, stop: () => { recorder.stop(); clearInterval(timer); stream.getTracks().forEach(track => track.stop()); } };
+    });
+  }
   await dialog(page).getByRole('button', { name: 'Go Live', exact: true }).click();
-  const active = await until(async () => { const value = await snapshot(); return value.session?.watch.state === 'live' && value.session.destinations.every(destination => destination.state === 'live') && value.session.chunks > 0 && value; }, 'managed Program reaches both actual local RTMPS receivers and the independent Watch relay', 90000);
-  assert.ok(active.session.destinations.every(destination => destination.retries === 0), 'Neither real TLS destination repeatedly reconnects');
-  const tlsStats = await fixtureStats(); assert.equal(tlsStats.tlsDials.length, 2); assert.ok(tlsStats.tlsDials.every(value => value.connected && value.authorized && value.certificateVerification && !value.errorCode), 'Both platform egress connections retain real CA/hostname verification');
+  const startupSamples = []; let sampledAt = 0;
+  const active = await until(async () => {
+    const value = await snapshot();
+    if (Date.now() - sampledAt > 2000) {
+      sampledAt = Date.now(); const diagnostic = await json(await admin.request.get(`${base}/api/studio/diagnostics`));
+      startupSamples.push({ at: sampledAt, status: diagnostic.status, timing: diagnostic.renderer?.timing, rendererBroadcast: diagnostic.renderer?.broadcast, broadcast: diagnostic.broadcast });
+      await fs.writeFile(path.join(directory, 'stream-startup.json'), JSON.stringify(startupSamples, null, 2));
+    }
+    return value.session?.watch.state === 'live' && value.session.destinations.every(destination => destination.state === 'live') && value.session.chunks > 0 && value;
+  }, 'managed Program reaches all three actual local RTMPS receivers and the independent Watch relay', 90000);
+  assert.ok(active.session.destinations.every(destination => destination.retries === 0), 'No real TLS destination repeatedly reconnects');
+  const tlsStats = await fixtureStats(); assert.equal(tlsStats.tlsDials.length, 3); assert.ok(tlsStats.tlsDials.every(value => value.connected && value.authorized && value.certificateVerification && !value.errorCode), 'All three platform egress connections retain real CA/hostname verification');
   assert.equal(active.production.recording.name, 'Broadcast service fixture'); const recordingId = active.production.recording.id;
   assert.deepEqual(await production(), before, 'Starting a broadcast/recording never changes Program, scene layers or Main audio');
   await until(async () => await dialog(page).locator('[data-destination="watch"]').getAttribute('data-state') === 'live', 'operator status reflects actual HLS readiness');
   assert.equal(await dialog(page).getByRole('button', { name: 'Preview Program', exact: true }).count(), 0, 'Automatic Program preview needs no extra toggle or click');
   await until(async () => await dialog(page).locator('.broadcast-program-monitor video').evaluate(video => video.readyState >= 2 && video.muted && video.videoWidth > 100), 'actual Program monitor connects automatically and muted');
   assert.deepEqual(await dialog(page).locator('.broadcast-program-monitor video').evaluate(video => [video.videoWidth, video.videoHeight]), [640, 360], 'The muted operator monitor is lightweight and does not decode the full Program output');
+  assert.equal(await page.locator('.preview-panel video.studio-video, .program-panel video.studio-video').count(), 0, 'Covered silent monitors release their redundant video encoders');
   await page.screenshot({ path: path.join(directory, 'broadcast-live-program-preview.png'), fullPage: true });
   await close(); assert.equal(await page.locator('.broadcast-program-monitor video').count(), 0, 'Closing the panel releases its monitor peer');
+  await until(async () => await page.locator('.program-panel video.studio-video').evaluate(video => video.readyState >= 2 && video.srcObject?.getAudioTracks().some(track => !track.muted)), 'Closing Go Live restores the regular Program monitor');
+  await until(async () => await page.locator('.preview-panel video.studio-video').evaluate(video => video.readyState >= 2), 'Closing Go Live restores Preview');
+  // Exercise headphone monitoring without playing the generated tone aloud.
+  await page.locator('.program-panel video.studio-video').evaluate(video => { video.volume = 0; });
+  await page.getByTitle('Monitor audio — use headphones', { exact: true }).click();
+  const monitoredTrack = await page.locator('.program-panel video.studio-video').evaluate(video => video.srcObject.getAudioTracks()[0].id);
+  await open();
+  assert.equal(await page.locator('.preview-panel video.studio-video').count(), 0);
+  assert.equal(await page.locator('.program-panel video.studio-video').evaluate(video => !video.muted && video.srcObject.getAudioTracks()[0].id), monitoredTrack, 'Opening Go Live preserves an explicitly enabled headphone connection');
+  await close(); await page.getByTitle('Mute monitoring', { exact: true }).click();
   await navigate(page, '/'); await page.getByRole('button', { name: 'Open Go Live controls', exact: true }).waitFor(); await open();
   await until(async () => await dialog(page).locator('.broadcast-program-monitor video').evaluate(video => video.readyState >= 2 && video.muted && video.videoWidth > 100), 'Reopening Go Live automatically reconnects the muted Program preview');
   watchPage = await viewer.newPage(); watchPage.on('pageerror', error => errors.push(error.message)); watchPage.on('request', request => publicRequests.push(request.url())); watchPage.on('console', message => { if (['error', 'warning'].includes(message.type())) publicConsole.push(message.text()); }); await watchPage.bringToFront(); await watchPage.goto(`${relayOrigin}/watch/live`);
   await publicPixel('red');
   const projectionMotion = await sampleProjector();
+  if (process.env.LUMEN_REHEARSAL_COMPETING_ENCODE === '1') {
+    const competing = await page.evaluate(() => window.__competingEncode.stats);
+    assert.equal(competing.failed, false); assert.ok(competing.chunks > 5 && competing.bytes > 10000, 'The extra generated 1080p encoder stays active throughout the rehearsal');
+    checks.push(`Additional generated 1080p recording produced ${competing.chunks} chunks during the streaming rehearsal`);
+  }
   const profile = await processProfile();
-  const platforms = await Promise.all(['youtube', 'facebook'].map(name => verifyPlatform(name, 1)));
+  const platforms = await Promise.all(['youtube', 'facebook', 'instagram'].map(name => verifyPlatform(name, 1)));
   assert.equal(await watchPage.locator('video').evaluate(video => !window.Hls?.isSupported() || video.currentSrc.startsWith('blob:')), true, 'A capable MSE player is preferred over Chromium’s unreliable native HLS maybe claim');
   const energy = await verifyHlsAudio(); await watchPage.screenshot({ path: path.join(directory, 'broadcast-independent-public-live.png'), fullPage: true });
   assert.equal((await viewer.request.get(`${relayOrigin}/api/studio`)).status(), 404); assert.equal((await anonymous.request.get(`${base}/api/studio/broadcast`)).status(), 401);
-  checks.push(`Both real loopback RTMPS/FLV destinations plus HLS decode 720p H.264/AAC and stereo Main audio (${energy.map(value => value.toFixed(3)).join('/')}) with zero retries, one shared encode and a 720p streaming input; automatic muted monitor releases/reconnects`);
+  checks.push(`All three real loopback RTMPS/FLV destinations plus HLS decode 720p H.264/AAC and stereo Main audio (${energy.map(value => value.toFixed(3)).join('/')}) with zero retries, one shared encode and a 720p streaming input; automatic muted monitor releases/reconnects`);
   await command({ type: 'take', sceneId: 'blue_program' }); await publicPixel('blue'); const switched = await production(); assert.equal(switched.mainAudioSourceId, before.mainAudioSourceId); assert.deepEqual(switched.sources, before.sources); await verifyHlsAudio();
   await dialog(page).getByRole('button', { name: 'Stop Lumen Watch destination', exact: true }).click();
   await until(async () => (await snapshot()).session.watch.state === 'stopped', 'destination-only stop is honest'); assert.equal((await status()).recording.id, recordingId);
-  await dialog(page).locator('.broadcast-notice-inline').getByText(/Lumen Watch was stopped.*Still sending to YouTube and Facebook/).waitFor();
+  await dialog(page).locator('.broadcast-notice-inline').getByText(/Lumen Watch was stopped.*Still sending to YouTube and Facebook and Instagram/).waitFor();
   await dialog(page).getByRole('button', { name: 'Retry Lumen Watch destination', exact: true }).click(); await until(async () => (await snapshot()).session.watch.state === 'live', 'retry reconnects the real HLS relay', 60000);
   assert.equal((await status()).recording.id, recordingId); assert.deepEqual((await production()).sources, before.sources);
-  const ongoing = await snapshot(); assert.ok(ongoing.session.destinations.every(destination => destination.state === 'live' && destination.retries === 0), 'Watch Stop/Retry never disrupts either active platform');
-  const fanout = await fixtureStats(); assert.equal(fanout.spawned.filter(value => value.kind === 'encoder').length, 1); assert.equal(fanout.spawned.filter(value => value.kind === 'youtube').length, 1); assert.equal(fanout.spawned.filter(value => value.kind === 'facebook').length, 1);
+  const ongoing = await snapshot(); assert.ok(ongoing.session.destinations.every(destination => destination.state === 'live' && destination.retries === 0), 'Watch Stop/Retry never disrupts any active platform');
+  const fanout = await fixtureStats(); assert.equal(fanout.spawned.filter(value => value.kind === 'encoder').length, 1); assert.equal(fanout.spawned.filter(value => value.kind === 'youtube').length, 1); assert.equal(fanout.spawned.filter(value => value.kind === 'facebook').length, 1); assert.equal(fanout.spawned.filter(value => value.kind === 'instagram').length, 1);
   checks.push('Manual Studio scene switching reaches the public HLS picture while Main audio persists; stopping/retrying one destination leaves the independent recording and production sources running');
   await close(page);
   operatorPage = await operator.newPage(); await instrument(operatorPage); await operatorPage.goto(`${base}/studio`); await open(operatorPage);
@@ -362,7 +419,7 @@ try {
   assert.ok(recording.bytes > 10000); const file = await admin.request.get(`${base}/api/studio/recordings/${recordingId}/download`); assert.equal(file.status(), 200); const savedRecording = path.join(directory, 'actual-independent-recording.webm'); await fs.writeFile(savedRecording, await file.body());
   const recorded = await ff(['-hide_banner', '-i', savedRecording, '-t', '0.1', '-f', 'null', '-']); assert.match(recorded.diagnostics, /Video:[^\n]*1920x1080/); assert.match(recorded.diagnostics, /Audio:/);
   const recordedMotion = await verifyCameraMotion(savedRecording, 'local Program recording');
-  const finalFanout = await fixtureStats(); assert.equal(finalFanout.spawned.filter(value => value.kind === 'encoder').length, 2, 'Each of two broadcast sessions has one actual encoder'); assert.equal(finalFanout.spawned.filter(value => value.kind === 'youtube').length, 2); assert.equal(finalFanout.spawned.filter(value => value.kind === 'facebook').length, 2);
+  const finalFanout = await fixtureStats(); assert.equal(finalFanout.spawned.filter(value => value.kind === 'encoder').length, 2, 'Each of two broadcast sessions has one actual encoder'); assert.equal(finalFanout.spawned.filter(value => value.kind === 'youtube').length, 2); assert.equal(finalFanout.spawned.filter(value => value.kind === 'facebook').length, 2); assert.equal(finalFanout.spawned.filter(value => value.kind === 'instagram').length, 2);
   assert.deepEqual(await production(), switched); assert.equal((await status()).state, 'running'); assert.deepEqual([digest(await fs.readFile(videoFile)), digest(await fs.readFile(toneFile))], sourceHashes);
   checks.push('Recording-off confirmation hides its row/name and preserves an existing recording on restart; explicit Stop both produces a real seekable video/audio recording while Studio, scene state, original media and Main audio remain intact');
   for (const [width, height] of [[1024, 768], [390, 844]]) {
@@ -375,12 +432,27 @@ try {
     await operatorPage.screenshot({ path: path.join(directory, `go-live-defaults-${width}.png`), fullPage: true });
     await dialog(operatorPage).getByText('Station defaults', { exact: true }).click();
   }
+  await close(operatorPage);
+  const healthFixture = await json(await admin.request.get(`${base}/api/studio/diagnostics`));
+  healthFixture.broadcast.lastFailure = { at: new Date().toISOString(), reason: 'input-stalled', encoder: 'worker-h264', encoderFailure: 'unknown', profile: '720p', destinations: 3, queuedBytes: 1048576, pendingInputBytes: 1048576, maxInputWaitMs: 8100, inputAgeMs: 8100, outputAgeMs: 8100 };
+  await operatorPage.route('**/api/studio/diagnostics', route => route.fulfill({ json: healthFixture }));
+  await operatorPage.getByRole('button', { name: 'Program health', exact: true }).click();
+  const healthPanel = operatorPage.getByRole('dialog', { name: 'Program health', exact: true });
+  await healthPanel.getByRole('heading', { name: 'Last stream interruption', exact: true }).waitFor();
+  await healthPanel.getByText(/Longest input wait: 8.1 s/).waitFor();
+  const healthBounds = await healthPanel.boundingBox();
+  assert.ok(healthBounds.x >= -1 && healthBounds.y >= -1 && healthBounds.x + healthBounds.width <= 391 && healthBounds.y + healthBounds.height <= 845, 'Persisted failure details fit the phone viewport with current Program health');
+  await operatorPage.screenshot({ path: path.join(directory, 'program-health-last-interruption-390.png'), fullPage: true });
+  checks.push('Program health displays a saved interruption with queue/wait measurements inside the phone viewport');
+  if (process.env.LUMEN_REHEARSAL_COMPETING_ENCODE === '1') await page.evaluate(() => window.__competingEncode.stop());
   assert.ok(publicRequests.every(url => url.startsWith(relayOrigin) || url.startsWith('blob:')), 'Public playback never depends on the station origin or an external CDN'); assert.deepEqual(errors, []);
   assert.equal(await page.evaluate(() => window.__broadcastCaptureRequests), 1, 'Only the explicit camera connection acquires capture');
   assert.equal(await operatorPage.evaluate(() => window.__broadcastCaptureRequests), 0, 'Monitoring and publishing never acquire a camera implicitly');
-  console.log(JSON.stringify({ ok: true, directory, relayOrigin, checks, projectionMotion, platforms, encoder: profile.processes.filter(value => value.kind === 'encoder'), recording: { id: recording.id, bytes: recording.bytes, durationMs: recording.durationMs, ...recordedMotion }, errors, publicRequests: publicRequests.length }, null, 2));
+  const report = { ok: true, directory, relayOrigin, sampleSeconds, competingEncode: process.env.LUMEN_REHEARSAL_COMPETING_ENCODE === '1', checks, projectionMotion, platforms, encoder: profile.processes.filter(value => value.kind === 'encoder'), recording: { id: recording.id, bytes: recording.bytes, durationMs: recording.durationMs, ...recordedMotion }, errors, publicRequests: publicRequests.length };
+  await fs.writeFile(path.join(directory, 'report.json'), JSON.stringify(report, null, 2));
+  console.log(JSON.stringify(report, null, 2));
 } catch (error) {
   for (const [target, name] of [[page, 'broadcast-failure.png'], [operatorPage, 'broadcast-operator-failure.png'], [watchPage, 'broadcast-watch-failure.png']]) if (target && !target.isClosed()) await target.screenshot({ path: path.join(directory, name), fullPage: true }).catch(() => {});
   const publicVideo = watchPage && !watchPage.isClosed() ? await watchPage.locator('video').evaluate(video => ({ paused: video.paused, time: video.currentTime, duration: video.duration, width: video.videoWidth, height: video.videoHeight, ready: video.readyState, network: video.networkState, src: video.currentSrc, visibility: document.visibilityState, native: video.canPlayType('application/vnd.apple.mpegurl'), hls: window.Hls?.isSupported(), error: video.error?.message, buffered: Array.from({ length: video.buffered.length }, (_, index) => [video.buffered.start(index), video.buffered.end(index)]) })).catch(() => null) : null;
-  await fs.writeFile(path.join(directory, 'server.log'), logs); const transport = admin ? await fixtureStats().catch(() => null) : null, broadcast = admin ? await snapshot().catch(() => null) : null; await fs.writeFile(path.join(directory, 'transport-failure.json'), JSON.stringify({ broadcast, transport }, null, 2)); console.error(JSON.stringify({ ok: false, directory, error: error.stack, errors, mutations, publicConsole, publicVideo, publicRequests: publicRequests.slice(-15), checks, broadcast, transport, logs: logs.replaceAll(privateKey, '[REDACTED]').replaceAll(facebookKey, '[REDACTED]').slice(-12000) }, null, 2)); process.exitCode = 1;
+  await fs.writeFile(path.join(directory, 'server.log'), logs); const transport = admin ? await fixtureStats().catch(() => null) : null, broadcast = admin ? await snapshot().catch(() => null) : null; await fs.writeFile(path.join(directory, 'transport-failure.json'), JSON.stringify({ broadcast, transport }, null, 2)); console.error(JSON.stringify({ ok: false, directory, error: error.stack, errors, mutations, publicConsole, publicVideo, publicRequests: publicRequests.slice(-15), checks, broadcast, transport, logs: logs.replaceAll(privateKey, '[REDACTED]').replaceAll(facebookKey, '[REDACTED]').replaceAll(instagramKey, '[REDACTED]').slice(-12000) }, null, 2)); process.exitCode = 1;
 } finally { if (browser) await browser.close().catch(() => {}); await stopServer(); }

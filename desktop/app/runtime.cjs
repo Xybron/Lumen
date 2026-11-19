@@ -46,7 +46,9 @@ async function runtimePaths(root) {
     throw new Error('This Lumen installer does not match this computer.');
   }
   const result = { root: canonical, manifest };
-  for (const [key, property] of Object.entries({ node: 'nodeRelativePath', chromium: 'chromiumRelativePath', ffmpeg: 'ffmpegRelativePath', whisper: 'whisperRelativePath', model: 'modelRelativePath' })) {
+  // Older application bundles may omit VAD. When present it receives the same
+  // containment, symlink and file checks as the speech model and binaries.
+  for (const [key, property] of Object.entries({ node: 'nodeRelativePath', chromium: 'chromiumRelativePath', ffmpeg: 'ffmpegRelativePath', whisper: 'whisperRelativePath', model: 'modelRelativePath', ...(manifest.vadRelativePath===undefined?{}:{vad:'vadRelativePath'}), ...(manifest.sofficeRelativePath===undefined?{}:{soffice:'sofficeRelativePath'}) })) {
     const filename = resourcePath(canonical, manifest[property]);
     const real = await fs.realpath(filename);
     if (!real.startsWith(canonical + path.sep) || !(await fs.stat(real)).isFile()) throw new Error(`The bundled ${key} runtime is unavailable.`);

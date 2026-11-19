@@ -120,6 +120,12 @@ test('confirmed publish rejection stops only an unusable broadcast and exposes n
     const snapshot = service.snapshot(); assert.equal(snapshot.session?.state, 'error'); assert.equal(captureStopped, session.id);
     const destination = snapshot.session?.destinations.find(d => d.id === 'youtube')!; assert.match(destination.error ?? '', /platform rejected publishing/i); assert.equal(destination.retries, 0);
     assert.match(snapshot.session?.error ?? '', /stopped to save resources/); assert.doesNotMatch(JSON.stringify(snapshot), /fixture-private-key|private-query|remote-secret-body/);
+    const failure = service.diagnostics().lastFailure;
+    assert.equal(failure?.reason, 'destinations-failed'); assert.equal(failure.destinations, 1);
+    assert.doesNotMatch(JSON.stringify(service.diagnostics()), /fixture-private-key|private-query|remote-secret-body/);
+    await service.close();
+    const restarted = await createBroadcast({ dir });
+    try { assert.deepEqual(restarted.diagnostics().lastFailure, failure); } finally { await restarted.close(); }
   } finally { await service.close(); await fs.rm(dir, { recursive: true, force: true }); }
 });
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, watch } from 'vue';
+import { onActivated, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { StudioSignal, StudioPeer } from '@/lib/studio/signal';
 import { MULTIVIEW_OUTPUT_ID } from '../../../../shared/multiview-layout';
 import { PROGRAM_MONITOR_OUTPUT_ID } from '../../../../shared/program-monitor.js';
@@ -75,6 +75,9 @@ onMounted(() => {
 });
 watch(() => props.outputId, (_id, old) => { signal?.send({ t: 'unwatch', outputId: old }); reset(); request(); });
 watch(() => props.audible, value => { if (video.value) { video.value.muted = !value; playMonitor(video.value); } });
+// A cached workspace keeps its peer and last decoded frame. Browsers may pause
+// a detached video, so resume that same element when Studio becomes visible.
+onActivated(() => { if (video.value?.srcObject) playMonitor(video.value); });
 onBeforeUnmount(() => { clearInterval(retry); reset(); signal?.close(); });
 function playing() { ready.value = true; emit('ready', true); updateAudioReady(); }
 defineExpose({ video });

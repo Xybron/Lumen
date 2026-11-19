@@ -2,14 +2,16 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { DialogRoot, DialogPortal, DialogOverlay, DialogContent, DialogTitle, DialogDescription, DialogClose } from 'reka-ui';
-import { ArrowLeft, ArrowUpRight, Check, ChevronDown, Clapperboard, Copy, Download, Film, FolderOpen, Grid2X2, HardDrive, Link2, List, LoaderCircle, Music2, PanelLeftClose, PanelLeftOpen, Play, RefreshCw, Scissors, Search, ShieldCheck, Trash2, Users, X } from 'lucide-vue-next';
+import { ArrowLeft, ArrowUpRight, Check, ChevronDown, Clapperboard, Copy, Download, Film, FolderOpen, Grid2X2, HardDrive, Link2, List, Music2, PanelLeftClose, PanelLeftOpen, Play, RefreshCw, Scissors, Search, ShieldCheck, Trash2, Users, X } from 'lucide-vue-next';
 import { toast } from 'vue-sonner';
+import { LoadingSkeleton, Skeleton, SkeletonIndicator } from '@/components/ui/skeleton';
 import WorkspaceHeader from '@/components/shell/WorkspaceHeader.vue';
 import LoginGate from '@/components/shell/LoginGate.vue';
 import RecordingThumbnail from '@/components/clips/RecordingThumbnail.vue';
 import LibraryActions from '@/components/clips/LibraryActions.vue';
 import type { LibraryAction } from '@/components/clips/LibraryActions.vue';
 import { clipsApi } from '@/lib/clips';
+import { mediaReturnPath } from '@/lib/media-navigation';
 import { copyTimeline, timelineDuration } from '@/lib/clip-timeline';
 import { audioExport, exportLabel, exportOptions } from '@/lib/clip-export';
 import { studioApi } from '@/lib/studio/api';
@@ -23,6 +25,8 @@ import '@/styles/recording-library.css';
 
 type Collection = 'recordings' | 'mine' | 'team' | 'exports';
 const identity = useIdentityStore(), route = useRoute(), router = useRouter();
+const mediaReturn = computed(() => mediaReturnPath(route.query));
+const focusedExportId = computed(() => typeof route.query.export === 'string' ? route.query.export : null);
 const { confirmAction } = useConfirmation();
 const workspace = ref<ClipWorkspace | null>(null), loading = ref(false), error = ref('');
 const search = ref(''), filter = ref<'all' | 'ready'>('all'), recovering = ref(''), copying = ref(''), cancelling = ref(''), deleting = ref(''), deletingProject = ref('');
@@ -30,14 +34,14 @@ const selectedExportIds = ref<string[]>([]), deletingExports = ref(false);
 const storageOpen = ref(false), storageLoading = ref(false), storageError = ref(''), storagePath = ref(''), stationPath = ref(''), backupPath = ref('');
 const sidebarOpen = ref(true), view = ref<'grid' | 'list'>('grid'), order = ref<'recent' | 'name'>('recent'), searchField = ref<HTMLInputElement | null>(null);
 const newProjectOpen = ref(false), newProjectSearch = ref(''), newProjectField = ref<HTMLInputElement | null>(null);
-const collection = computed<Collection>(() => ['mine', 'team', 'exports'].includes(String(route.query.collection)) ? route.query.collection as Collection : 'recordings');
+const collection = computed<Collection>(() => focusedExportId.value ? 'exports' : ['mine', 'team', 'exports'].includes(String(route.query.collection)) ? route.query.collection as Collection : 'recordings');
 const titles: Record<Collection, string> = { recordings: 'All recordings', mine: 'My projects', team: 'Team projects', exports: 'Previous exports' };
 const descriptions: Record<Collection, string> = { recordings: 'Original recordings, ready for your next edit.', mine: 'Your saved edits. Pick up where you left off.', team: 'Browse your team’s work, or make a copy to edit.', exports: 'Earlier exports kept on this station. New exports save to your device instead.' };
 let sequence = 0, timer: ReturnType<typeof setInterval> | undefined;
 const mine = computed(() => workspace.value?.drafts.filter(draft => draft.ownerId === identity.me?.id) ?? []);
 const team = computed(() => workspace.value?.drafts.filter(draft => draft.ownerId !== identity.me?.id) ?? []);
 const readyCount = computed(() => workspace.value?.recordings.filter(recording => recording.status === 'complete').length ?? 0);
-const previousExports = computed(() => workspace.value?.exports.filter(job => !job.temporary) ?? []);
+const previousExports = computed(() => workspace.value?.exports.filter(job => !job.temporary || job.id === focusedExportId.value) ?? []);
 const deletableExports = computed(() => previousExports.value.filter(job => identity.me?.isAdmin || job.ownerId === identity.me?.id));
 const selectedExports = computed(() => deletableExports.value.filter(job => selectedExportIds.value.includes(job.id)));
 const activeExports = computed(() => previousExports.value.filter(job => ['queued', 'waiting-live', 'exporting'].includes(job.status)).length);
@@ -56,8 +60,11 @@ const visibleCount = computed(() => collection.value === 'recordings' ? recordin
 const totalCount = computed(() => navigation.value.find(item => item.id === collection.value)?.count ?? 0);
 const availableRecordings = computed(() => [...workspace.value?.recordings ?? []].filter(recording => recording.status === 'complete' && recording.name.toLocaleLowerCase().includes(newProjectSearch.value.trim().toLocaleLowerCase())).sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
 const storedBytes = computed(() => workspace.value?.recordings.reduce((sum, recording) => sum + recording.bytes, 0) ?? 0);
-function collectionUrl(id: Collection) { return id === 'recordings' ? '/recordings' : { path: '/recordings', query: { collection: id } }; }
-function editorUrl(id: string, draftId?: string, play = false) { return `/recordings/${encodeURIComponent(id)}/editor${draftId ? `?draft=${encodeURIComponent(draftId)}` : play ? '?play=1' : ''}`; }
+function collectionUrl(id: Collection) { return { path: '/recordings', query: { ...(id === 'recordings' ? {} : { collection: id }), ...(mediaReturn.value ? { returnTo: mediaReturn.value } : {}) } }; }
+function editorUrl(id: string, draftId?: string, play = false) {
+  const query = new URLSearchParams({ ...(draftId ? { draft: draftId } : play ? { play: '1' } : {}), ...(mediaReturn.value ? { returnTo: mediaReturn.value } : {}) });
+  return `/recordings/${encodeURIComponent(id)}/editor${query.size ? `?${query}` : ''}`;
+}
 function recordingFor(id: string) { return workspace.value?.recordings.find(recording => recording.id === id); }
 function ownerFor(id: string) { return id === identity.me?.id ? 'You' : workspace.value?.drafts.find(draft => draft.ownerId === id)?.ownerName ?? 'Team member'; }
 function initial(name: string) { return name.trim().charAt(0).toUpperCase() || 'L'; }
@@ -198,6 +205,20 @@ function keyboard(event: KeyboardEvent) { if ((event.metaKey || event.ctrlKey) &
 function libraryChanged() { if (identity.isAuthenticated) void load(true); }
 function focusProjectSearch(event: Event) { event.preventDefault(); void nextTick(() => newProjectField.value?.focus()); }
 watch(collection, () => { search.value = ''; filter.value = 'all'; selectedExportIds.value = []; });
+let handledMediaExport: string | null = null;
+watch([focusedExportId, loading, workspace], async ([id]) => {
+  if (!id) { handledMediaExport = null; return; }
+  if (loading.value || !workspace.value || handledMediaExport === id) return;
+  handledMediaExport = id;
+  search.value = ''; filter.value = 'all';
+  if (!workspace.value.exports.some(job => job.id === id)) {
+    toast.info('This export is no longer available. Refresh its usage in Media.'); return;
+  }
+  await nextTick();
+  const card = document.querySelector<HTMLElement>(`[data-export-id="${CSS.escape(id)}"]`);
+  card?.scrollIntoView({ block: 'center' });
+  card?.querySelector<HTMLElement>('button, input, a')?.focus({ preventScroll: true });
+}, { flush: 'post', immediate: true });
 watch(() => identity.ready && identity.isAuthenticated, authenticated => { if (authenticated) void load(); else { sequence++; workspace.value = null; newProjectOpen.value = false; } }, { immediate: true });
 onMounted(async () => { window.addEventListener('keydown', keyboard); window.addEventListener('lumen:library-imported', libraryChanged); if (!identity.ready) await identity.load(); timer = setInterval(() => { if (identity.isAuthenticated && !document.hidden) void load(true); }, 5000); });
 onBeforeUnmount(() => { sequence++; if (timer) clearInterval(timer); window.removeEventListener('keydown', keyboard); window.removeEventListener('lumen:library-imported', libraryChanged); });
@@ -208,7 +229,7 @@ onBeforeUnmount(() => { sequence++; if (timer) clearInterval(timer); window.remo
   <main v-else class="clips-app recording-library" data-testid="recording-library">
     <WorkspaceHeader>
       <div class="clips-header-location library-header-location"><span class="clips-header-divider" /><Clapperboard :size="15" /><span>Post-production</span></div>
-      <div class="clips-header-actions"><span class="clips-safe-label"><ShieldCheck :size="14" />Separate from live production</span><RouterLink :to="identity.can('*', 'author') ? '/studio' : '/'" class="clip-button clip-button-quiet"><ArrowLeft :size="14" /><span>{{ identity.can('*', 'author') ? 'Back to Studio' : 'Back to Lumen' }}</span></RouterLink></div>
+      <div class="clips-header-actions"><span class="clips-safe-label"><ShieldCheck :size="14" />Separate from live production</span><RouterLink :to="mediaReturn ?? (identity.can('*', 'author') ? '/studio' : '/')" class="clip-button clip-button-quiet"><ArrowLeft :size="14" /><span>{{ mediaReturn ? 'Back to Media' : identity.can('*', 'author') ? 'Back to Studio' : 'Back to Lumen' }}</span></RouterLink></div>
     </WorkspaceHeader>
     <div class="library-workspace" :class="{ 'library-sidebar-collapsed': !sidebarOpen }">
       <aside class="library-sidebar" aria-label="Recording collections">
@@ -218,7 +239,7 @@ onBeforeUnmount(() => { sequence++; if (timer) clearInterval(timer); window.remo
         <div class="library-sidebar-bottom"><div class="library-station-health" :class="{ protected: workspace?.liveProtected }"><ShieldCheck :size="16" /><div><strong>{{ workspace?.liveProtected ? 'Exports on hold' : 'Production stays separate' }}</strong><p>{{ workspace?.blockReason || 'Your edits never change the live Program.' }}</p></div></div><div class="library-storage"><HardDrive :size="14" /><span>{{ workspace?.recordings.length ?? 0 }} recordings · {{ size(storedBytes) }}</span></div><div class="library-user"><span><img src="/images/lumen-profile-abstract.png" alt="" width="29" height="29" /></span><div><strong>{{ identity.me?.displayName || identity.me?.username }}</strong><small>Your editing workspace</small></div></div></div>
       </aside>
       <section class="library-main" aria-label="Media library">
-        <header class="library-main-header"><div><div class="library-breadcrumb"><FolderOpen :size="13" /><span>Library</span><span>/</span><span>{{ titles[collection] }}</span></div><h1>{{ titles[collection] }}</h1><p>{{ descriptions[collection] }}</p></div><div class="library-main-actions"><button v-if="collection === 'recordings' && identity.me?.isAdmin" class="clip-button" @click="showStorage"><HardDrive :size="14" />Storage</button><button v-if="collection === 'exports' && selectedExports.length" class="clip-button" :disabled="deletingExports" @click="deleteExports(selectedExports)"><Trash2 :size="14" />Delete selected ({{ selectedExports.length }})</button><button v-if="collection === 'exports' && deletableExports.length" class="clip-button" :disabled="deletingExports" @click="deleteExports(deletableExports, true)"><Trash2 :size="14" />{{ identity.me?.isAdmin ? 'Delete all exports' : 'Delete my exports' }}</button><button class="clip-icon-button" :disabled="loading" aria-label="Refresh recordings" title="Refresh library" @click="load()"><RefreshCw :size="15" :class="{ 'clip-spin': loading }" /></button><button v-if="readyCount && collection !== 'exports'" class="clip-button clip-button-primary" @click="newProjectSearch = ''; newProjectOpen = true"><Scissors :size="14" />New project</button></div></header>
+        <header class="library-main-header"><div><div class="library-breadcrumb"><FolderOpen :size="13" /><span>Library</span><span>/</span><span>{{ titles[collection] }}</span></div><h1>{{ titles[collection] }}</h1><p>{{ descriptions[collection] }}</p></div><div class="library-main-actions"><button v-if="collection === 'recordings' && identity.me?.isAdmin" class="clip-button" @click="showStorage"><HardDrive :size="14" />Storage</button><button v-if="collection === 'exports' && selectedExports.length" class="clip-button" :disabled="deletingExports" @click="deleteExports(selectedExports)"><Trash2 :size="14" />Delete selected ({{ selectedExports.length }})</button><button v-if="collection === 'exports' && deletableExports.length" class="clip-button" :disabled="deletingExports" @click="deleteExports(deletableExports, true)"><Trash2 :size="14" />{{ identity.me?.isAdmin ? 'Delete all exports' : 'Delete my exports' }}</button><button class="clip-icon-button" :disabled="loading" aria-label="Refresh recordings" title="Refresh library" @click="load()"><SkeletonIndicator v-if="loading" /><RefreshCw v-else :size="15" /></button><button v-if="readyCount && collection !== 'exports'" class="clip-button clip-button-primary" @click="newProjectSearch = ''; newProjectOpen = true"><Scissors :size="14" />New project</button></div></header>
         <div class="library-toolbar">
           <div v-if="collection === 'recordings'" class="library-tabs" aria-label="Filter recordings"><button :aria-pressed="filter === 'all'" :class="{ active: filter === 'all' }" @click="filter = 'all'">All recordings <span>{{ workspace?.recordings.length ?? 0 }}</span></button><button :aria-pressed="filter === 'ready'" :class="{ active: filter === 'ready' }" @click="filter = 'ready'">Ready to edit <span>{{ readyCount }}</span></button></div>
           <div v-else class="library-collection-count">{{ totalCount }} {{ collection === 'exports' ? 'exports' : 'projects' }}<span v-if="collection === 'exports' && activeExports">{{ activeExports }} in progress</span></div>
@@ -226,7 +247,12 @@ onBeforeUnmount(() => { sequence++; if (timer) clearInterval(timer); window.remo
         </div>
         <div class="library-scroll-area">
           <div v-if="error" class="clips-inline-error library-error" role="alert"><span>{{ error }}</span><button class="clip-button" @click="load()">Try again</button></div>
-          <div v-if="loading && !workspace" class="clips-empty"><LoaderCircle :size="26" class="clip-spin" /><h2>Loading your library</h2></div>
+          <LoadingSkeleton v-if="(!identity.ready || loading) && !workspace" label="Loading your library" class="library-cards library-skeleton" :class="{ 'library-view-list': view === 'list' }">
+            <div v-for="item in 6" :key="item" class="library-card" aria-hidden="true">
+              <Skeleton class="library-skeleton-preview" height="auto" :radius="9" />
+              <div class="library-card-details library-skeleton-details"><Skeleton :width="item % 2 ? '72%' : '86%'" :height="13" /><Skeleton width="54%" :height="10" /><div class="library-skeleton-footer"><Skeleton :width="80" :height="10" /><Skeleton :width="22" :height="22" :radius="5" /></div></div>
+            </div>
+          </LoadingSkeleton>
           <div v-else-if="!visibleCount && !error" class="clips-empty library-empty"><Search v-if="search || filter === 'ready'" :size="30" :stroke-width="1.2" /><Download v-else-if="collection === 'exports'" :size="30" :stroke-width="1.2" /><Users v-else-if="collection === 'team'" :size="30" :stroke-width="1.2" /><Scissors v-else-if="collection === 'mine'" :size="30" :stroke-width="1.2" /><Film v-else :size="32" :stroke-width="1.2" /><h2>{{ search || filter === 'ready' ? collection === 'recordings' ? 'No matching recordings' : 'Nothing matches your search' : collection === 'mine' ? 'Your next project starts here' : collection === 'team' ? 'A space for your team’s projects' : collection === 'exports' ? 'Your finished exports will appear here' : 'Your recordings start here' }}</h2><p>{{ search || filter === 'ready' ? 'Try a different search or show everything in this collection.' : collection === 'mine' ? 'Open a recording, build your edit, and save a project to return to it later.' : collection === 'team' ? 'Projects saved by other teammates appear here. View their work or make a separate copy.' : collection === 'exports' ? 'Export a saved project from the editor to create a video or audio file.' : 'Record Program in Studio. Completed recordings appear here, ready to edit.' }}</p><button v-if="search || filter === 'ready'" class="clip-button" @click="search = ''; filter = 'all'">Clear filters</button><RouterLink v-else-if="collection !== 'recordings'" to="/recordings" class="clip-button">Browse recordings<ArrowUpRight :size="14" /></RouterLink></div>
           <div v-else-if="collection === 'recordings'" class="library-cards" :class="`library-view-${view}`">
             <article v-for="recording in recordings" :key="recording.id" class="library-card library-recording" data-testid="recording-card" :data-recording-id="recording.id">
@@ -240,10 +266,10 @@ onBeforeUnmount(() => { sequence++; if (timer) clearInterval(timer); window.remo
               <div class="library-card-details"><div class="library-card-title"><h2><RouterLink :to="editorUrl(draft.recordingId, draft.id)">{{ draft.name }}</RouterLink></h2><LibraryActions :label="`Actions for project ${draft.name}`" :actions="projectActions(draft)" /></div><div class="library-card-summary"><span :title="fullDate(draft.updatedAt)">Edited {{ date(draft.updatedAt) }}</span><i />{{ projectDuration(draft) }}</div><div class="library-card-footer"><span class="library-owner"><i>{{ initial(draft.ownerName) }}</i><span>{{ draft.ownerId === identity.me?.id ? 'You' : draft.ownerName }}</span></span><span class="library-project-access"><Check v-if="draft.canEdit" :size="11" />{{ draft.canEdit ? 'Saved project' : 'View or copy' }}</span></div></div>
             </article>
           </div>
-          <div v-else class="library-cards" :class="`library-view-${view}`"><article v-for="job in exports" :key="job.id" class="library-card library-export" data-testid="export-card" :data-export-id="job.id">
+          <div v-else class="library-cards" :class="`library-view-${view}`"><article v-for="job in exports" :key="job.id" class="library-card library-export" :style="job.id === focusedExportId ? { borderColor: 'var(--accent)' } : undefined" data-testid="export-card" :data-export-id="job.id">
             <a v-if="job.status === 'complete'" :href="clipsApi.download(job.id)" class="library-card-preview clips-recording-open" :aria-label="`Download ${exportLabel(job)} ${job.name}`"><span v-if="audioExport(exportOptions(job).container)" class="library-no-preview"><Music2 :size="32" :stroke-width="1.2" /></span><RecordingThumbnail v-else-if="recordingFor(job.recordingId)" :recording="recordingFor(job.recordingId)!" /><span v-else class="library-no-preview"><Film :size="27" /></span><span class="library-export-file">{{ exportLabel(job) }} <Download :size="12" /></span><span class="clip-thumbnail-duration library-output-duration">{{ projectDuration(job.settings) }}</span></a>
             <div v-else class="library-card-preview"><span v-if="audioExport(exportOptions(job).container)" class="library-no-preview"><Music2 :size="32" :stroke-width="1.2" /></span><RecordingThumbnail v-else-if="recordingFor(job.recordingId)" :recording="recordingFor(job.recordingId)!" /><span v-else class="library-no-preview"><Film :size="27" /></span><span class="library-export-file">{{ exportLabel(job) }}</span><span class="clip-thumbnail-duration library-output-duration">{{ projectDuration(job.settings) }}</span></div>
-            <div class="library-card-details"><div class="library-card-title"><label v-if="identity.me?.isAdmin || job.ownerId === identity.me?.id" class="library-export-selection" :title="`Select ${job.name}`"><input type="checkbox" :checked="selectedExportIds.includes(job.id)" :disabled="deletingExports" :aria-label="`Select export ${job.name}`" @change="toggleExportSelection(job.id)" /></label><h2>{{ job.name }}</h2><a v-if="job.status === 'complete'" :href="clipsApi.download(job.id)" class="clip-icon-button" :aria-label="`Download export ${job.name}`" :title="`Download ${exportLabel(job)}`"><Download :size="16" /></a><button v-else-if="job.canCancel && isActive(job)" class="clip-icon-button" :disabled="!!cancelling" :aria-label="`Cancel export ${job.name}`" title="Cancel export" @click="cancelExport(job)"><X :size="15" /></button><LibraryActions v-if="exportActions(job).length" :label="`Actions for export ${job.name}`" :actions="exportActions(job)" /></div><div class="library-card-summary"><span>{{ exportLabel(job) }} · {{ audioExport(exportOptions(job).container) ? 'Audio' : exportOptions(job).resolution }}</span><i /><span>{{ date(job.createdAt) }}</span><i />{{ projectDuration(job.settings) }}<span v-if="job.status === 'complete'">· {{ size(job.bytes) }}</span></div><div v-if="job.status === 'exporting'" class="library-export-progress" role="progressbar" :aria-label="`Export progress ${job.name}`" :aria-valuenow="Math.round(job.progress * 100)" aria-valuemin="0" aria-valuemax="100"><span :style="{ width: `${Math.max(0, Math.min(100, job.progress * 100))}%` }" /></div><p v-if="job.status === 'waiting-live'" class="library-card-summary">{{ job.waitMessage || workspace?.blockReason }}</p><p v-if="job.error" class="library-card-error">{{ job.error }}</p><div class="library-card-footer"><span class="library-export-status" :class="`library-export-status-${job.status}`"><LoaderCircle v-if="isActive(job)" :size="12" :class="{ 'clip-spin': job.status === 'exporting' }" /><Check v-else-if="job.status === 'complete'" :size="12" />{{ exportStatus(job) }}</span><RouterLink v-if="workspace?.drafts.some(draft => draft.id === job.draftId)" :to="editorUrl(job.recordingId, job.draftId)" class="library-open-project" :aria-label="`Open project for ${job.name}`" title="Open source project"><ArrowUpRight :size="14" /></RouterLink></div></div>
+            <div class="library-card-details"><div class="library-card-title"><label v-if="identity.me?.isAdmin || job.ownerId === identity.me?.id" class="library-export-selection" :title="`Select ${job.name}`"><input type="checkbox" :checked="selectedExportIds.includes(job.id)" :disabled="deletingExports" :aria-label="`Select export ${job.name}`" @change="toggleExportSelection(job.id)" /></label><h2>{{ job.name }}</h2><a v-if="job.status === 'complete'" :href="clipsApi.download(job.id)" class="clip-icon-button" :aria-label="`Download export ${job.name}`" :title="`Download ${exportLabel(job)}`"><Download :size="16" /></a><button v-else-if="job.canCancel && isActive(job)" class="clip-icon-button" :disabled="!!cancelling" :aria-label="`Cancel export ${job.name}`" title="Cancel export" @click="cancelExport(job)"><X :size="15" /></button><LibraryActions v-if="exportActions(job).length" :label="`Actions for export ${job.name}`" :actions="exportActions(job)" /></div><div class="library-card-summary"><span>{{ exportLabel(job) }} · {{ audioExport(exportOptions(job).container) ? 'Audio' : exportOptions(job).resolution }}</span><i /><span>{{ date(job.createdAt) }}</span><i />{{ projectDuration(job.settings) }}<span v-if="job.status === 'complete'">· {{ size(job.bytes) }}</span></div><div v-if="job.status === 'exporting'" class="library-export-progress" role="progressbar" :aria-label="`Export progress ${job.name}`" :aria-valuenow="Math.round(job.progress * 100)" aria-valuemin="0" aria-valuemax="100"><span :style="{ width: `${Math.max(0, Math.min(100, job.progress * 100))}%` }" /></div><p v-if="job.status === 'waiting-live'" class="library-card-summary">{{ job.waitMessage || workspace?.blockReason }}</p><p v-if="job.error" class="library-card-error">{{ job.error }}</p><div class="library-card-footer"><span class="library-export-status" :class="`library-export-status-${job.status}`"><SkeletonIndicator v-if="isActive(job)" /><Check v-else-if="job.status === 'complete'" :size="12" />{{ exportStatus(job) }}</span><RouterLink v-if="workspace?.drafts.some(draft => draft.id === job.draftId)" :to="editorUrl(job.recordingId, job.draftId)" class="library-open-project" :aria-label="`Open project for ${job.name}`" title="Open source project"><ArrowUpRight :size="14" /></RouterLink></div></div>
           </article></div>
           <footer v-if="visibleCount" class="library-results-footer"><span>{{ visibleCount }} {{ collection === 'recordings' ? 'recordings' : collection === 'exports' ? 'exports' : 'projects' }}{{ visibleCount !== totalCount ? ` of ${totalCount}` : '' }}</span><span><ShieldCheck :size="12" />Edits leave originals unchanged</span></footer>
         </div>
@@ -259,7 +285,7 @@ onBeforeUnmount(() => { sequence++; if (timer) clearInterval(timer); window.remo
     <DialogRoot v-model:open="storageOpen">
       <DialogPortal><DialogOverlay class="library-picker-overlay" /><DialogContent class="library-picker library-storage-dialog">
         <div class="library-picker-heading"><div><DialogTitle class="library-picker-title">Recording storage</DialogTitle><DialogDescription class="library-picker-description">Originals are saved on this station.</DialogDescription></div><DialogClose class="clip-icon-button library-picker-close" aria-label="Close storage details"><X :size="17" /></DialogClose></div>
-        <p v-if="storageLoading" class="library-storage-message">Finding the recording folder…</p>
+        <LoadingSkeleton v-if="storageLoading" label="Finding the recording folder" class="library-storage-skeleton"><Skeleton width="35%" :height="10" /><Skeleton :height="38" :radius="6" /><Skeleton width="86%" :height="10" /><Skeleton width="62%" :height="10" /></LoadingSkeleton>
         <p v-else-if="storageError" class="library-storage-message" role="alert">{{ storageError }}</p>
         <template v-else><div class="library-storage-location"><span>Recording folder</span><code>{{ storagePath }}</code><button class="clip-button" @click="copyStoragePath"><Copy :size="13" />Copy path</button></div>
           <p class="library-storage-help">To change it, close Lumen, move the entire station folder to the new location, set <code>LUMEN_DATA_DIR</code> to that folder’s full path, then reopen Lumen. Keep the folder structure together so saved projects still find their recordings.</p>

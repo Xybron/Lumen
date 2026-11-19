@@ -66,8 +66,8 @@ try{
     assert.equal(await header.locator('.lumen-tabs').count(),0,'There is no empty segmented-switcher shell');
     assert.equal(await header.getByRole('link',{name:/^(Present|Studio)$/}).count(),0,'Channels and Studio are reached from the shared toolbar');
     assert.ok(await header.getByRole('link',{name:'Lumen home',exact:true}).isVisible());
-    assert.ok(await header.getByRole('button',{name:'Open Live View',exact:true}).isVisible());
-    assert.equal(await page.getByRole('button',{name:'Open Live View',exact:true}).count(),1,'One consistent live-view button per workspace');
+    assert.ok(await header.getByRole('button',{name:'Open Outputs',exact:true}).isVisible());
+    assert.equal(await page.getByRole('button',{name:'Open Outputs',exact:true}).count(),1,'One consistent Outputs button per workspace');
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Shared header has no horizontal overflow');
   };
   await checkSharedHeader();
@@ -120,9 +120,9 @@ try{
     const header=page.locator('.lumen-header');
     assert.equal(await page.locator('.w-workspace header').count(),0,'No secondary row above the panels');
     assert.ok(await header.getByRole('link',{name:'Lumen home',exact:true}).isVisible());
-    assert.ok(await header.getByRole('button',{name:'Open Live View',exact:true}).isVisible());
-    assert.equal(await page.getByRole('button',{name:'Open Live View',exact:true}).count(),1,'One consistent live-view button per channel');
-    assert.ok(await header.getByText('Offline library',{exact:true}).isVisible());
+    assert.ok(await header.getByRole('button',{name:'Open Outputs',exact:true}).isVisible());
+    assert.equal(await page.getByRole('button',{name:'Open Outputs',exact:true}).count(),1,'One consistent Outputs button per channel');
+    assert.equal(await header.getByText('Offline library',{exact:true}).count(),0,'Library status does not clutter the shared action header');
     const spacing=await page.evaluate(()=>({
       gap:document.querySelector('.w-layout').getBoundingClientRect().top-document.querySelector('.lumen-header').getBoundingClientRect().bottom,
       padding:parseFloat(getComputedStyle(document.querySelector('.w-workspace')).paddingTop),
@@ -227,7 +227,7 @@ try{
   await page.getByLabel('Search scripture',{exact:true}).fill('John 3:16');await until(()=>page.locator('.w-verse-result').first().innerText().then(value=>value.includes('3:16')),'restore initial verse after shortcut regression');
   await prepareClick(page.locator('.w-verse-result').first(),'3:16');await page.keyboard.press('Control+Enter');await until(async()=>(await workspace('scripture')).live.selection.verse===16,'restore initial live verse after shortcut regression');
   assert.deepEqual(await (await request.get(`${base}/api/studio`)).json(),beforePublishing,'Send live never routes, takes or modifies a Studio scene');
-  assert.equal(await page.getByTestId('channel-live-status').innerText(),'Ready in Studio');
+  assert.equal(await page.getByTestId('channel-live-status').innerText(),'Ready to present');
   const outputOpened=context.waitForEvent('page');await page.getByRole('button',{name:'Open channel output',exact:true}).click();
   const output=await outputOpened;await output.waitForURL(`${base}/live/scripture`);await output.getByText('For God so loved the world',{exact:false}).waitFor();
   await page.getByRole('button',{name:'Next',exact:true}).click();await until(()=>output.locator('.cue-reference').textContent().then(s=>s.includes('3:17')),'next verse mirrors output');
@@ -324,17 +324,18 @@ try{
   await page.getByRole('button',{name:'Collapse toolbar',exact:true}).press('Enter');
   await page.getByRole('button',{name:'Expand toolbar',exact:true}).press('Space');
   await grip.press('ArrowRight');await grip.press('Home');
-  await until(()=>page.locator('.w-offline').count().then(n=>n===0),'offline library status only appears for Scripture and Lyrics');
-  const liveViewButton=page.locator('.lumen-header').getByRole('button',{name:'Open Live View',exact:true});
-  assert.ok(await liveViewButton.isVisible(),'Presentation uses the same top-bar live-view button');
-  assert.equal(await page.getByRole('button',{name:'Open Live View',exact:true}).count(),1,'No duplicate desktop or mobile transport button');
-  assert.equal(await page.locator('.lumen-header').getByText('One service. Every screen.',{exact:true}).count(),0,'Live view replaces the slogan');
+  assert.equal(await page.locator('.lumen-header .w-offline').count(),0,'Presentation header contains navigation and actions only');
+  const screenButton=page.locator('.lumen-header').getByRole('button',{name:'Open Outputs',exact:true});
+  assert.ok(await screenButton.isVisible(),'Presentation uses the same top-bar Outputs button');
+  assert.equal(await page.getByRole('button',{name:'Open Outputs',exact:true}).count(),1,'No duplicate desktop or mobile transport button');
+  assert.equal(await page.locator('.lumen-header').getByText('One service. Every screen.',{exact:true}).count(),0,'Program controls replace the slogan');
   const slidesOpened=context.waitForEvent('page');await page.getByRole('button',{name:'More channel controls',exact:true}).click();await page.getByRole('button',{name:'Open channel output',exact:true}).click();
   const slidesOutput=await slidesOpened;await slidesOutput.waitForURL(`${base}/live/slides`);await slidesOutput.getByText('Welcome to Lumen',{exact:true}).waitFor();await slidesOutput.close();
   await page.screenshot({path:path.join(dir,'presentation-workspace.png'),fullPage:true});
-  await page.setViewportSize({width:390,height:844});assert.ok(await liveViewButton.isVisible());assert.equal(await page.getByRole('button',{name:'Open Live View',exact:true}).count(),1);
-  await liveViewButton.click({trial:true}); // Wait for responsive side rails to finish sliding away.
-  const liveButtonBounds=await liveViewButton.boundingBox();assert.ok(liveButtonBounds.x>=0&&liveButtonBounds.x+liveButtonBounds.width<=390,'Live-view button stays in bounds on mobile');
+  await page.setViewportSize({width:390,height:844});assert.ok(await screenButton.isVisible());assert.equal(await page.getByRole('button',{name:'Open Outputs',exact:true}).count(),1);
+  assert.equal(await screenButton.isEnabled(),true,'Output settings remain available before Program is selected');
+  await settleKeys();
+  const screenButtonBounds=await screenButton.boundingBox();assert.ok(screenButtonBounds.x>=0&&screenButtonBounds.x+screenButtonBounds.width<=390,'Outputs button stays in bounds on mobile');
   await page.screenshot({path:path.join(dir,'presentation-mobile.png'),fullPage:true});await page.setViewportSize({width:1512,height:982});
   await openStudio();
   for(const width of [320,390,768,1512]){await page.setViewportSize({width,height:844});await checkSharedHeader();}

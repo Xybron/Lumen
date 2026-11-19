@@ -173,7 +173,9 @@ export class ProgramBroadcastCapture {
       for (let attempt = 0; attempt < 2; attempt++) {
         if (active.stopped) return;
         const request = new AbortController(), abort = () => request.abort();
-        const timeout = setTimeout(abort, this.options.requestTimeoutMs ?? 8000);
+        // The station permits a bounded 16-second drain only while its encoder
+        // still makes progress. Do not retry that same in-flight chunk at 8s.
+        const timeout = setTimeout(abort, this.options.requestTimeoutMs ?? 25_000);
         active.controller.signal.addEventListener('abort', abort, { once: true });
         try {
           await this.withAbort(this.options.upload(active.id, sequence, data, request.signal), request.signal);

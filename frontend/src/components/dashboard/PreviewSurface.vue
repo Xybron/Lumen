@@ -3,6 +3,9 @@ import { computed, ref, useTemplateRef, watch, watchEffect, onMounted, onBeforeU
 import { Maximize2, Clock3, ChevronLeft, ChevronRight, Headphones, VolumeX } from 'lucide-vue-next';
 import BackgroundLayer from '@/components/live/BackgroundLayer.vue';
 import ContentLayer from '@/components/live/ContentLayer.vue';
+import PresentationGraphics from '@/components/live/PresentationGraphics.vue';
+import { useContentStore } from '@/stores/content';
+import { useEnginesStore } from '@/stores/engines';
 import {
   Dialog,
   DialogContent,
@@ -11,8 +14,15 @@ import {
 } from '@/components/ui/dialog';
 import { usePlaybackStore } from '@/stores/playback';
 import type { Item } from '@/types';
+import { ensureScenePosterMedia, scenePosterMedia } from '@/lib/studio/scene-poster-media';
+import { mediaUrl } from '@/lib/api';
 
 const playback = usePlaybackStore();
+const content = useContentStore(), engines = useEnginesStore();
+const graphicsChannel = computed(() => content.channels.find(c => c.id === engines.focusedChannelId));
+const graphicsClock = computed(() => ({ elapsedMs: playback.elapsedMs, receivedAt: performance.now() }));
+const showGraphics = computed(() => props.navigable && !props.blanked && !!props.item && props.item.id === playback.current?.id
+  && !!graphicsChannel.value && !['scripture', 'lyrics', 'notes'].includes(graphicsChannel.value.kind));
 
 const props = withDefaults(
   defineProps<{
@@ -30,6 +40,8 @@ const props = withDefaults(
     navigable?: boolean;
     /** Pre-computed prayer label ("1.", "1a.", …) for prayer-type items. */
     prayerLabel?: string;
+    /** Small cards use still artwork and release off-screen rendering. */
+    thumbnail?: boolean;
   }>(),
   { designWidth: 1920, expandable: false, navigable: false },
 );
@@ -41,6 +53,16 @@ const wrap = useTemplateRef<HTMLElement>('wrap');
 const scale = ref(1);
 const expanded = ref(false);
 const monitorAudio = ref(false);
+const visible = ref(false);
+const renderStage = computed(() => !props.thumbnail || visible.value);
+const previewBackground = computed(() => {
+  const background = props.item?.background;
+  if (!props.thumbnail || !background || !['image', 'video'].includes(background.kind)) return background;
+  const poster = scenePosterMedia(mediaUrl(background.src)?.replace(/^\//, ''), background.kind as 'image' | 'video');
+  return { ...background, kind: poster ? 'image' as const : 'color' as const, src: poster?.replace(/^\//, '') };
+});
+watch(() => props.thumbnail && visible.value ? props.item?.background?.src : undefined,
+  path => { const url = mediaUrl(path); if (url) ensureScenePosterMedia([url]); }, { immediate: true });
 watch(() => [props.item?.id, props.blanked, props.item?.background?.muted], () => { monitorAudio.value = false; });
 
 function recompute() {
@@ -50,16 +72,21 @@ function recompute() {
 }
 
 let ro: ResizeObserver | null = null;
+let intersection: IntersectionObserver | undefined;
 
 onMounted(() => {
   recompute();
+  if (wrap.value && typeof IntersectionObserver !== 'undefined') {
+    intersection = new IntersectionObserver(entries => { visible.value = entries.some(entry => entry.isIntersecting); }, { rootMargin: '100px' });
+    intersection.observe(wrap.value);
+  } else visible.value = true;
   if (typeof ResizeObserver !== 'undefined' && wrap.value) {
     ro = new ResizeObserver(recompute);
     ro.observe(wrap.value);
   }
 });
 
-onBeforeUnmount(() => { ro?.disconnect(); expandedRo?.disconnect(); });
+onBeforeUnmount(() => { ro?.disconnect(); expandedRo?.disconnect(); intersection?.disconnect(); });
 
 watchEffect(() => {
   void props.designWidth;
@@ -141,9 +168,12 @@ const totalLabel = computed(() => fmtTime(playback.totalMs));
     class="group relative aspect-video w-full rounded-lg overflow-hidden bg-black border border-hair"
   >
     <div class="absolute inset-0 overflow-hidden">
-      <div :style="stageStyle" class="relative overflow-hidden">
-        <BackgroundLayer :background="item?.background" :listen="monitorAudio && !blanked" />
+      <div v-if="renderStage" :style="stageStyle" class="relative overflow-hidden">
+        <BackgroundLayer :background="previewBackground" :listen="monitorAudio && !blanked" />
         <ContentLayer :item="item" :prayer-label="prayerLabel" />
+        <PresentationGraphics v-if="showGraphics" :graphics="graphicsChannel?.presentationGraphics" :clock="graphicsClock"
+          :duration-ms="playback.totalMs" :playing="playback.playing" :countdown-at-ms="content.content.settings.countdownAtMs"
+          :warning-at-ms="content.content.settings.warningAtMs" :title="item?.title" />
       </div>
     </div>
 
@@ -229,6 +259,9 @@ const totalLabel = computed(() => fmtTime(playback.totalMs));
             <div :style="expandedStageStyle" class="relative overflow-hidden">
               <BackgroundLayer :background="item?.background" />
               <ContentLayer :item="item" :prayer-label="prayerLabel" />
+        <PresentationGraphics v-if="showGraphics" :graphics="graphicsChannel?.presentationGraphics" :clock="graphicsClock"
+          :duration-ms="playback.totalMs" :playing="playback.playing" :countdown-at-ms="content.content.settings.countdownAtMs"
+          :warning-at-ms="content.content.settings.warningAtMs" :title="item?.title" />
             </div>
           </div>
           <div

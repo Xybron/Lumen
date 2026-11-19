@@ -42,18 +42,29 @@ export interface ListeningModelProfile {
   id: string; label: string; description: string; installed: boolean; downloadMiB: number; multilingual: boolean;
 }
 export interface ListeningStatus {
+  assemblyai?: {available:boolean;model:string};
   state: 'unavailable' | 'stopped' | 'starting' | 'ready' | 'error'; model: string; error?: string; local: true;
   modelId: string; profiles: ListeningModelProfile[]; decoding: 'beam-search';
+  speechDetection?: 'neural' | 'energy';
 }
 export interface ListeningSession {
+  provider?: 'local' | 'assemblyai';
   id: string; channelId: string; mode: 'assisted' | 'automatic'; language: string; commands: boolean; expiresAt: number;
 }
 export type ListeningDecision = 'listening' | 'prepared' | 'sent-live' | 'already-live' | 'partial' | 'review' | 'conflict' | 'unavailable' | 'cooldown' | 'stale';
+/** Decoder diagnostics, not a calibrated probability that the words are correct. */
+export interface ListeningRecognition {
+  status: 'clear' | 'uncertain' | 'no-speech' | 'unavailable'; reason: string;
+  avgLogprob: number | null; noSpeechProbability: number | null;
+  rejectedSegments: number; totalSegments: number;
+}
 export interface ListeningResult {
   transcript: string; elapsedMs: number; candidate: LiveCue | null; match: 'reference' | 'phrase' | 'lyrics' | 'command' | 'none';
   score: number; switched: boolean; reason: string; workspace: WorshipWorkspace;
   decision: ListeningDecision;
+  quoteAmbiguous?: boolean;
   suggestedQuery?: string;
+  recognition?: ListeningRecognition;
 }
 
 export interface ScripturePin { id: string; selection: ScriptureSelection; reference: string; text: string }

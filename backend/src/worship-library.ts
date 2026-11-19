@@ -199,7 +199,10 @@ export class WorshipLibrary {
       const verses = this.passage(selection), first = verses[0], last = verses.at(-1)!, end = last.endVerse ?? last.verse;
       const ref = `${first.bookName} ${first.chapter}:${first.verse}${end>first.verse ? `–${end}` : ''}`;
       const actual: ScriptureSelection = { ...selection, verse: first.verse, ...(end > first.verse ? { endVerse: end } : {}) };
-      return { selection:actual,title:ref,text:verses.map(v=>verses.length>1?`${v.verse}${v.endVerse ? `–${v.endVerse}` : ''} ${v.text}`:v.text).join('\n\n'),reference:`${ref} · ${selection.versionId}`,attribution:this.versions().find(v=>v.id===selection.versionId)!.attribution,takenAt:new Date().toISOString() };
+      // Passage validation already established the version. Fetch its metadata
+      // directly instead of counting every installed verse for each live cue.
+      const {attribution} = this.db.prepare('SELECT attribution FROM bible_versions WHERE id=?').get(selection.versionId) as {attribution:string};
+      return { selection:actual,title:ref,text:verses.map(v=>verses.length>1?`${v.verse}${v.endVerse ? `–${v.endVerse}` : ''} ${v.text}`:v.text).join('\n\n'),reference:`${ref} · ${selection.versionId}`,attribution,takenAt:new Date().toISOString() };
     }
     const song = this.song(selection.songId), section = song.sections.find(s=>s.id===selection.sectionId);
     if (!section) throw new ProductionError(404,'Song section not found.');

@@ -27,6 +27,8 @@ export default defineConfig({
       '/api': backendOrigin,
       '/media': backendOrigin,
       '/ws': { target: backendSocket, ws: true },
+      '/worship/listening/stream': {target:backendSocket,ws:true},
+      '/notes/listening/stream': {target:backendSocket,ws:true},
       '/studio/ws': { target: backendSocket, ws: true },
       '/mobile/signal': { target: backendSocket, ws: true },
     },

@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { LoadingSkeleton, Skeleton, SkeletonIndicator } from '@/components/ui/skeleton';
 import { computed, onMounted, ref, watch } from 'vue';
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router';
-import { ArrowLeft, UsersRound, Settings2, Plus, Search, Cloud, CloudOff, Layers, Presentation, BookOpen, Music2, Save, Download, Upload, ShieldCheck, ChevronDown, Copy, LogOut, Check, AlertCircle, Loader2, FolderOpen, UserPlus } from 'lucide-vue-next';
+import { ArrowLeft, UsersRound, Settings2, Plus, Search, Cloud, CloudOff, Layers, Presentation, BookOpen, Music2, Save, Download, Upload, ShieldCheck, ChevronDown, Copy, LogOut, Check, AlertCircle, FolderOpen, UserPlus } from 'lucide-vue-next';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import WorkspaceHeader from '@/components/shell/WorkspaceHeader.vue';
 import TeamDraftEditor from '@/components/team/TeamDraftEditor.vue';
@@ -143,7 +144,19 @@ onBeforeRouteLeave(async () => await mayDiscard());
       <RouterLink to="/studio" class="team-back-link"><ArrowLeft :size="14" /> Back to Studio</RouterLink>
     </WorkspaceHeader>
 
-    <main v-if="!team.ready" class="team-loading" aria-live="polite"><Loader2 :size="23" class="team-spinner" /><span>Opening team workspace…</span></main>
+    <LoadingSkeleton v-if="!team.ready" class="team-workspace-skeleton" label="Opening team workspace">
+      <div class="team-skeleton-sidebar" aria-hidden="true">
+        <div class="team-skeleton-heading"><Skeleton width="70%" :height="18" /><Skeleton :width="26" :height="26" /></div>
+        <Skeleton width="42%" :height="9" />
+        <Skeleton :height="36" :radius="7" />
+        <div class="team-skeleton-drafts"><div v-for="n in 5" :key="n" class="team-skeleton-row"><Skeleton :width="36" :height="36" :radius="8" /><div><Skeleton :width="n % 2 ? '78%' : '60%'" :height="11" /><Skeleton width="44%" :height="8" /></div></div></div>
+        <div class="team-skeleton-actions"><Skeleton :height="32" /><Skeleton :height="32" /><Skeleton :height="32" /><Skeleton :height="32" /></div>
+      </div>
+      <div class="team-skeleton-editor" aria-hidden="true">
+        <div class="team-skeleton-heading"><div class="team-skeleton-title"><Skeleton width="min(240px, 70%)" :height="19" /><Skeleton width="min(150px, 45%)" :height="10" /></div><Skeleton :width="90" :height="32" /></div>
+        <div class="team-skeleton-document"><Skeleton class="team-skeleton-preview" height="auto" :radius="10" /><div class="team-skeleton-lines"><Skeleton width="38%" :height="13" /><Skeleton width="92%" :height="10" /><Skeleton width="76%" :height="10" /></div></div>
+      </div>
+    </LoadingSkeleton>
     <main v-else-if="!team.enabled" class="team-onboarding"><div class="team-auth-card"><UsersRound :size="25" /><h1>Team workspace is not enabled</h1><p>Start Lumen with the local team test command to connect LAB and PowerSync. Your normal station remains independent.</p><RouterLink to="/studio" class="team-button">Return to Studio</RouterLink></div></main>
     <main v-else-if="!team.user" class="team-onboarding">
       <section class="team-auth-context"><span class="team-eyebrow">Lumen · team preparation</span><h1>One service. <br />A team in sync.</h1><p>Prepare scenes, presentations, Scripture and lyrics together. Keep editing when your internet drops; review conflicts without losing your work.</p><div class="team-safety-line"><ShieldCheck :size="17" /><span>Live switching, saved keys and Main audio stay on the station.</span></div><small>This is a separate team sign-in. It does not replace your local operator account.</small></section>
@@ -154,7 +167,7 @@ onBeforeRouteLeave(async () => await mayDiscard());
         <label class="team-field">Email<input v-model="email" type="email" name="email" autocomplete="email" required /></label>
         <label class="team-field">Password<input v-model="password" type="password" name="password" :autocomplete="authMode === 'signin' ? 'current-password' : 'new-password'" :minlength="authMode === 'signup' ? 12 : 1" required /><small v-if="authMode === 'signup'">At least 12 characters. Use a password unique to this account.</small></label>
         <p v-if="actionError || team.error" class="team-error" role="alert">{{ actionError || team.error }}</p><p v-if="notice" class="team-notice" role="status">{{ notice }}</p>
-        <button type="submit" class="team-button primary" :disabled="actionBusy || team.busy"><Loader2 v-if="actionBusy || team.busy" :size="15" class="team-spinner" />{{ authMode === 'signin' ? 'Sign in' : 'Create account' }}</button>
+        <button type="submit" class="team-button primary" :disabled="actionBusy || team.busy"><SkeletonIndicator v-if="actionBusy || team.busy" />{{ authMode === 'signin' ? 'Sign in' : 'Create account' }}</button>
         <p class="team-subtle">Accounts use LAB. Signing in requires internet; saved preparation remains available offline on this device.</p>
       </form>
     </main>
@@ -180,7 +193,7 @@ onBeforeRouteLeave(async () => await mayDiscard());
         <section class="team-editor-area">
           <div v-if="actionError || team.error" class="team-banner error" role="alert"><AlertCircle :size="14" /><span>{{ actionError || team.error }}</span></div><div v-if="notice" class="team-banner" role="status"><Check :size="14" /><span>{{ notice }}</span></div>
           <template v-if="editing">
-            <div class="team-editor-heading"><div><div class="team-editor-title"><component :is="kindIcon(draftKind)" :size="17" /><input v-model="draftName" :readonly="readonly" maxlength="100" aria-label="Draft name" /><span v-if="dirty" class="team-dirty-dot" title="Unsaved changes" aria-label="Unsaved changes" /></div><p>{{ kindLabel(draftKind) }} · {{ selectedId ? `Revision ${draftRevision}` : 'New draft' }}<span v-if="readonly"> · View only</span></p></div><div class="team-editor-actions"><button v-if="selected" type="button" class="team-button" :disabled="dirty || actionBusy || !!team.pendingCount || !!team.conflicts.length" title="Create a separate draft copy on this station. Does not send it live." @click="applyToStation"><Download :size="14" />Use on this station</button><button type="button" class="team-button primary" :disabled="!canSave" @click="saveDraft"><Loader2 v-if="actionBusy" :size="14" class="team-spinner" /><Save v-else :size="14" />Save draft</button></div></div>
+            <div class="team-editor-heading"><div><div class="team-editor-title"><component :is="kindIcon(draftKind)" :size="17" /><input v-model="draftName" :readonly="readonly" maxlength="100" aria-label="Draft name" /><span v-if="dirty" class="team-dirty-dot" title="Unsaved changes" aria-label="Unsaved changes" /></div><p>{{ kindLabel(draftKind) }} · {{ selectedId ? `Revision ${draftRevision}` : 'New draft' }}<span v-if="readonly"> · View only</span></p></div><div class="team-editor-actions"><button v-if="selected" type="button" class="team-button" :disabled="dirty || actionBusy || !!team.pendingCount || !!team.conflicts.length" title="Create a separate draft copy on this station. Does not send it live." @click="applyToStation"><Download :size="14" />Use on this station</button><button type="button" class="team-button primary" :disabled="!canSave" @click="saveDraft"><SkeletonIndicator v-if="actionBusy" /><Save v-else :size="14" />Save draft</button></div></div>
             <div v-if="newerRevision && dirty" class="team-banner warning" role="status"><AlertCircle :size="14" /><span>A teammate saved a newer revision. Your unsaved edits are kept; saving will let you review any conflict.</span></div>
             <TeamDraftEditor :kind="draftKind" v-model:document="draftDocument" :readonly="readonly" />
           </template>
@@ -199,7 +212,7 @@ onBeforeRouteLeave(async () => await mayDiscard());
           <button type="button" class="team-button" :disabled="!team.teamId" @click="copyWorkspaceId"><Check v-if="workspaceCopiedId === team.teamId" :size="14" /><Copy v-else :size="14" />{{ workspaceCopiedId === team.teamId ? 'Workspace ID copied' : 'Copy workspace ID' }}</button>
           <small>Stable identity for this team—not a publishing or viewer key.</small>
           <div class="team-station-identity" aria-live="polite">
-            <p v-if="stationIdentityBusy"><Loader2 :size="13" class="team-spinner" />Checking station identity…</p>
+            <LoadingSkeleton v-if="stationIdentityBusy" class="team-identity-skeleton" label="Checking station identity"><Skeleton width="70%" :height="11" /><Skeleton width="85%" :height="10" /><Skeleton width="55%" :height="10" /></LoadingSkeleton>
             <p v-else-if="stationIdentityError" class="team-error" role="alert">{{ stationIdentityError }}</p>
             <template v-else-if="stationWorkspace"><b>{{ stationIdentityLabel }}</b><code>{{ stationWorkspace.id }}</code><p>{{ stationWorkspace.message }}</p></template>
           </div>

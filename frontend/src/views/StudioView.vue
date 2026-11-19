@@ -1,20 +1,20 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import MusicMiniPlayer from '@/components/dashboard/MusicMiniPlayer.vue';
+import { computed, nextTick, onActivated, onDeactivated, onMounted, onBeforeUnmount, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { toast } from 'vue-sonner';
 import { useResizeObserver } from '@vueuse/core';
 import { VueDraggable } from 'vue-draggable-plus';
-import { Aperture, ArrowRightLeft, Plus, Copy, Trash2, Layers, Camera, Monitor,
-  Mic, Image, Film, Music2, Presentation, Lock, Volume2, VolumeX, Circle, Square as StopIcon,
-  FolderOpen, LoaderCircle, Power, ChevronRight, Headphones, CircleHelp, RotateCcw, Play, Pause, Repeat, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Maximize2, Minimize2, AlertCircle, Search, X, LayoutGrid, List, Keyboard, Settings2, GripVertical } from 'lucide-vue-next';
+import { ArrowLeft, ArrowRightLeft, Plus, Copy, Trash2, Layers, Camera, Monitor,
+  Mic, Image, Film, Music2, Presentation, Lock, Volume2, VolumeX,
+  ChevronRight, Headphones, CircleHelp, RotateCcw, Play, Pause, Repeat, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Maximize2, Minimize2, AlertCircle, Search, X, LayoutGrid, List, Keyboard, Settings2, GripVertical } from 'lucide-vue-next';
+import { LoadingSkeleton, Skeleton } from '@/components/ui/skeleton';
+import WorkspaceSkeleton from '@/components/shell/WorkspaceSkeleton.vue';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import LoginGate from '@/components/shell/LoginGate.vue';
 import WorkspaceHeader from '@/components/shell/WorkspaceHeader.vue';
-import LiveViewButton from '@/components/shell/LiveViewButton.vue';
-import BroadcastButton from '@/components/broadcast/BroadcastButton.vue';
-import MobileControlButton from '@/components/mobile/MobileControlButton.vue';
 import ChannelNav from '@/components/shell/ChannelNav.vue';
-import ProgramHealth from '@/components/studio/ProgramHealth.vue';
+import ProductionStatusBar from '@/components/studio/ProductionStatusBar.vue';
 import StudioMonitorPanel from '@/components/studio/StudioMonitorPanel.vue';
 import StudioMonitor from '@/components/studio/StudioMonitor.vue';
 import SceneThumbnail from '@/components/studio/SceneThumbnail.vue';
@@ -25,11 +25,12 @@ import StudioCanvas from '@/components/studio/StudioCanvas.vue';
 import StudioLayersPanel from '@/components/studio/StudioLayersPanel.vue';
 import SceneShortcutsDialog from '@/components/studio/SceneShortcutsDialog.vue';
 import OutputAudioControl from '@/components/studio/OutputAudioControl.vue';
-import StudioOutputsPanel from '@/components/studio/StudioOutputsPanel.vue';
+import OutputsSummary from '@/components/studio/OutputsSummary.vue';
+import { useOutputsStore } from '@/stores/outputs';
 import { useStudioStore } from '@/stores/studio';
+import { useBroadcastStore } from '@/stores/broadcast';
 import { useIdentityStore } from '@/stores/identity';
 import { useContentStore } from '@/stores/content';
-import { shortId } from '@/lib/ids';
 import { studioApi } from '@/lib/studio/api';
 import { useAnimationPreview } from '@/composables/useAnimationPreview';
 import { useStudioTransitions } from '@/composables/useStudioTransitions';
@@ -39,11 +40,16 @@ import { animationTotalMs } from '@/lib/studio/animation';
 import { sceneShortcutSurfaceBlocked } from '@/lib/studio/scene-shortcuts';
 import { describeMainAudioStatus } from '@/lib/studio/main-audio-status';
 import { audioMeterPercent } from '@/lib/studio/audio-meter';
+import { mediaReturnPath } from '@/lib/media-navigation';
 import type { StudioSource, StudioScene } from '../../../shared/production';
 import '@/styles/studio.css';
 import '@/styles/workspaces.css';
 
 const studio = useStudioStore(), identity = useIdentityStore(), content = useContentStore(), router = useRouter();
+const broadcast = useBroadcastStore();
+const route = useRoute(), outputs = useOutputsStore();
+const mediaReturn = computed(() => mediaReturnPath(route.query));
+const mediaOutputId = ref<string | null>(null);
 const motion = useAnimationPreview();
 const { confirmAction } = useConfirmation();
 const { fadeDurationInput, setFadeDuration, take, canTake } = useStudioTransitions();
@@ -124,7 +130,16 @@ async function collapseScenes() {
   await nextTick();
   scenesToggle.value?.focus({ preventScroll: true });
 }
-const studioHeader = ref<InstanceType<typeof WorkspaceHeader> | null>(null), headerHeight = ref(64);
+const studioHeader = ref<InstanceType<typeof WorkspaceHeader> | null>(null), headerHeight = ref(68);
+const statusBar = ref<InstanceType<typeof ProductionStatusBar> | null>(null), statusHeight = ref(44);
+const emit = defineEmits<{ 'status-height': [height: number] }>();
+useResizeObserver(statusBar, entries => {
+  const entry = entries[0];
+  if (entry && entry.target.getBoundingClientRect().height > 0) {
+    statusHeight.value = entry.target.getBoundingClientRect().height;
+    emit('status-height', statusHeight.value);
+  }
+});
 useResizeObserver(studioHeader, entries => { const entry = entries[0]; if (entry) headerHeight.value = entry.target.getBoundingClientRect().height; });
 const engineDiagnostics = ref(''), diagnosticsLoading = ref(false);
 const engineError = computed(() => {
@@ -161,11 +176,8 @@ async function inspectLayer() {
 }
 const monitorAudio = ref(false), programReady = ref(false), programAudioReady = ref(false);
 const monitorLabel = computed(() => !monitorAudio.value ? 'Monitor' : !programReady.value ? 'Connecting…' : !programAudioReady.value ? 'Waiting for audio…' : 'Listening');
-const now = ref(Date.now());
-const clock = window.setInterval(() => { now.value = Date.now(); }, 1000);
 const engineRunning = computed(() => studio.status.state === 'running');
 const recording = computed(() => studio.status.recording);
-const broadcastActive = computed(() => ['starting', 'live', 'stopping'].includes(studio.status.broadcast?.state ?? ''));
 const selected = computed(() => studio.selectedScene);
 const sceneAnimationDuration = computed(() => animationTotalMs(selected.value));
 const scenePreviewPlaying = computed(() => motion.playing.value && motion.sceneId.value === selected.value?.id && motion.layerId.value === null);
@@ -207,16 +219,76 @@ function setMainAudio(sourceId: string | null) {
 const icons = { camera: Camera, screen: Monitor, microphone: Mic, image: Image, video: Film, audio: Music2, channel: Presentation };
 const liveEdited = computed(() => selected.value?.id === studio.state?.program?.id && JSON.stringify(selected.value) !== JSON.stringify(studio.state?.program));
 
-async function init() { studio.reconnect(); await Promise.all([studio.load(), content.load(), studio.refreshRecordings()]); }
+async function init() { await Promise.all([studio.load(), content.load(), studio.refreshRecordings()]); }
 onMounted(async () => { await identity.load(); if (identity.isAuthenticated) await init(); });
 watch(() => identity.isAuthenticated, value => { if (value && identity.ready) void init(); });
-onBeforeUnmount(() => { clearInterval(clock); });
+let returningToStudio = false;
+onDeactivated(() => {
+  returningToStudio = true;
+  monitorAudio.value = false;
+  motion.stop(); motion.setOverride(null);
+  sourceOpen.value = guideOpen.value = sceneShortcutsOpen.value = false;
+});
+onActivated(() => {
+  if (returningToStudio && identity.isAuthenticated) void init();
+  returningToStudio = false;
+});
+
+let resolvingMediaLocation = false;
+async function openMediaLocation() {
+  if (resolvingMediaLocation || route.name !== 'studio' || !identity.ready || !identity.isAuthenticated || !canOperate.value || studio.loading || !studio.state) return;
+  const sourceId = typeof route.query.source === 'string' ? route.query.source : null;
+  const sceneId = typeof route.query.scene === 'string' ? route.query.scene : null;
+  const layerId = typeof route.query.layer === 'string' ? route.query.layer : null;
+  const outputId = typeof route.query.output === 'string' ? route.query.output : null;
+  if (!sourceId && !sceneId && !layerId && !outputId) return;
+  resolvingMediaLocation = true;
+  const location = route.fullPath;
+  try {
+    mediaOutputId.value = null;
+    if (sourceId) {
+      const source = studio.state.sources.find(item => item.id === sourceId);
+      if (source) editSourceDialog(source);
+      else toast.error('This source no longer exists. Refresh its usage in Media.');
+    } else if (sceneId) {
+      const scene = studio.state.scenes.find(item => item.id === sceneId);
+      const layer = scene?.layers.find(item => item.id === layerId);
+      if (!scene || (layerId && !layer)) toast.error('This scene or layer no longer exists. Refresh its usage in Media.');
+      else {
+        // Selecting Preview does not Take, clear, or change committed Program
+        // and pinned-output snapshots. The image is edited in its saved scene.
+        if (studio.selectedScene?.id !== sceneId) await studio.selectScene(sceneId);
+        if (route.fullPath !== location) return;
+        studio.selectedLayerId = layer?.id ?? null;
+        scenesCollapsed.value = false;
+        sceneSearch.value = '';
+        await inspectLayer();
+      }
+    } else if (outputId) {
+      const output = studio.state.outputs.find(item => item.id === outputId);
+      if (outputId !== 'program' && !output) toast.error('This output no longer exists. Refresh its usage in Media.');
+      else {
+        mediaOutputId.value = outputId;
+        await nextTick();
+        const target = outputId === 'program' ? document.querySelector<HTMLElement>('.program-panel button') : null;
+        target?.scrollIntoView({ block: 'center' });
+        target?.focus({ preventScroll: true });
+      }
+    }
+    if (route.fullPath !== location) return;
+    const { source: _source, scene: _scene, layer: _layer, output: _output, ...query } = route.query;
+    await router.replace({ path: '/studio', query: { ...query, returnTo: mediaReturn.value ?? '/media' } });
+    if (outputId && outputId !== 'program' && studio.state?.outputs.some(output => output.id === outputId)) outputs.show(outputId);
+  } catch { /* Studio mutations report the error; keep the saved output intact. */ }
+  finally {
+    resolvingMediaLocation = false;
+    if (route.fullPath !== location) void nextTick(openMediaLocation);
+  }
+}
+watch([() => route.fullPath, () => studio.loading, () => studio.state?.revision, canOperate, () => identity.ready], () => { void openMediaLocation(); }, { immediate: true, flush: 'post' });
 
 function run(promise: Promise<unknown>) { void promise.catch(() => {}); }
-function openRecordings() { window.open('/recordings', '_blank', 'noopener'); }
 function value(e: Event) { return (e.target as HTMLInputElement).value; }
-function time(ms: number) { const seconds = Math.floor(Math.max(0, ms) / 1000); return `${String(Math.floor(seconds / 3600)).padStart(2, '0')}:${String(Math.floor(seconds / 60) % 60).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`; }
-function bytes(n: number) { return n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB` : `${(n / 1024 ** 2).toFixed(1)} MB`; }
 function db(volume: number) { return volume <= 0 ? '−∞' : (20 * Math.log10(volume)).toFixed(1); }
 function isLive(scene: StudioScene) { return studio.state?.program?.id === scene.id; }
 async function deleteScene() {
@@ -278,30 +350,6 @@ function playback(source: StudioSource, restart = false) {
   const current = source.playback ?? { paused: false, restart: 0 };
   run(studio.updateSource(source.id, { playback: restart ? { ...current, paused: false, restart: current.restart + 1 } : { ...current, paused: !current.paused } }));
 }
-function addOutput() { run(studio.edit(d => d.outputs.push({ id: shortId('output'), name: `Output ${d.outputs.length + 1}`, mode: 'program', scene: null, blanked: false, audioEnabled: false }))); }
-function renameOutput(id: string, name: string) {
-  // Capture the input's submitted value now, not from a DOM event later when
-  // a previous queued save (or an engine status render) has changed the field.
-  const current = studio.state?.outputs.find(output => output.id === id);
-  const next = name.trim().slice(0, 100) || current?.name;
-  if (!next || next === current?.name) return;
-  run(studio.edit(draft => {
-    const output = draft.outputs.find(item => item.id === id);
-    if (output) output.name = next;
-  }));
-}
-async function removeOutput(id: string) {
-  const output = studio.state?.outputs.find(item => item.id === id);
-  if (!output || !canOperate.value) return;
-  const name = output.name;
-  if (!await confirmAction({
-    title: 'Remove output?',
-    description: `“${name}” will be removed. Any screen following this output will disconnect.`,
-    confirmLabel: 'Remove output',
-    tone: 'danger',
-  })) return;
-  if (canOperate.value && studio.state?.outputs.some(item => item.id === id)) run(studio.edit(d => { d.outputs = d.outputs.filter(o => o.id !== id); }));
-}
 function canUseLayerClipboard(key: string, target: Element | null) {
   if (!canOperate.value) return false;
   if (sceneShortcutSurfaceBlocked(target, document, motion.elapsedMs.value !== null) ||
@@ -330,6 +378,7 @@ function clipboardEvent(event: ClipboardEvent) {
   useLayerClipboard(key);
 }
 function keydown(e: KeyboardEvent) {
+  if (route.name !== 'studio') return;
   if (document.fullscreenElement?.classList.contains('monitor-panel')) return;
   const target = e.target instanceof Element ? e.target : null;
   if (e.defaultPrevented || e.isComposing || e.ctrlKey || e.metaKey || e.altKey ||
@@ -356,22 +405,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keydown));
 
 <template>
   <LoginGate v-if="identity.ready && !identity.isAuthenticated" />
-  <div v-else-if="!identity.ready || studio.loading && !studio.state" class="studio-loading"><Aperture :size="30" /><span>Preparing your studio…</span></div>
+  <WorkspaceSkeleton v-else-if="!identity.ready || studio.loading && !studio.state" studio label="Preparing your studio…" />
   <div v-else-if="!canOperate" class="studio-loading"><h1>Studio access</h1><p>Your account needs an author or owner role for all channels.</p><button class="s-button" @click="router.push('/')">Back to Present</button></div>
-  <div v-else-if="studio.state" class="studio-app" :class="{ 'inspector-collapsed': inspectorCollapsed, 'scenes-collapsed': scenesCollapsed }" :style="{ '--studio-header-height': headerHeight + 'px' }" @keydown.capture="clipboardKeydown" @copy.capture="clipboardEvent" @paste.capture="clipboardEvent">
+  <div v-else-if="studio.state" class="studio-app" :class="{ 'inspector-collapsed': inspectorCollapsed, 'scenes-collapsed': scenesCollapsed }" :style="{ '--studio-header-height': headerHeight + 'px', '--studio-footer-height': statusHeight + 'px' }" @keydown.capture="clipboardKeydown" @copy.capture="clipboardEvent" @paste.capture="clipboardEvent">
     <WorkspaceHeader ref="studioHeader">
-      <div class="engine-indicator"><span :class="['status-dot', { online: engineRunning, fault: studio.status.state === 'error' }]" /><span>{{ engineRunning ? 'Engine running' : studio.status.state === 'starting' ? 'Starting engine' : studio.status.state === 'error' ? 'Engine unavailable' : 'Engine offline' }}</span><small v-if="engineRunning">{{ studio.status.fps }} fps</small></div>
-      <div class="header-actions">
-        <MobileControlButton />
-        <BroadcastButton />
-        <button type="button" class="s-button recordings-button" aria-label="Recordings" title="Recordings & clips — opens in a new tab" @click="openRecordings"><FolderOpen :size="15" /><span class="button-label">Recordings</span></button>
-        <button class="s-button engine-button" :class="{ primary: !engineRunning }" :aria-label="studio.engineBusy ? 'Starting engine' : engineRunning ? 'Stop engine' : 'Start engine'" :title="broadcastActive ? 'End the stream before stopping the engine' : engineRunning ? 'Stop engine' : 'Start engine'" :disabled="studio.engineBusy || !!recording || broadcastActive" @click="studio.toggleEngine"><LoaderCircle v-if="studio.engineBusy" :size="14" class="spin" /><Power v-else :size="14" /><span class="button-label">{{ studio.engineBusy ? 'Starting…' : engineRunning ? 'Stop engine' : 'Start engine' }}</span></button>
-        <button class="s-button record-button" :class="{ recording: !!recording }" :disabled="studio.recordingBusy || !engineRunning || !studio.state.program || recording?.status === 'stopping'" @click="studio.toggleRecord"><StopIcon v-if="recording" :size="12" fill="currentColor" /><Circle v-else :size="12" fill="currentColor" />{{ recording ? time(now - Date.parse(recording.createdAt)) : 'Record' }}</button>
-        <span class="header-action-divider" />
-        <LiveViewButton studio />
-      </div>
+      <RouterLink v-if="mediaReturn" :to="mediaReturn" class="s-button"><ArrowLeft :size="14" />Back to Media</RouterLink>
     </WorkspaceHeader>
-    <ChannelNav studio />
+    <ChannelNav studio :status-height="statusHeight" />
     <SceneShortcutsDialog v-model:open="sceneShortcutsOpen" />
 
     <aside id="studio-scenes" v-show="!scenesCollapsed" class="scene-sidebar" aria-label="Scenes">
@@ -398,11 +438,16 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keydown));
         <details class="engine-diagnostics" @toggle="showEngineDiagnostics"><summary>Technical details</summary><pre>{{ diagnosticsLoading ? 'Loading details…' : engineDiagnostics }}</pre></details>
       </div>
       <div v-if="studio.state.channelInsert" class="studio-banner" role="status">An earlier channel override is still on Program. Cut or Fade a Studio scene to return to scene-only control.</div>
+      <div v-if="mediaOutputId" class="studio-banner" role="status">
+        <span>{{ mediaOutputId === 'program' ? 'Program still holds this image. Take a different scene or clear Program before deleting the image from Media.' : 'This pinned output still holds the image. Change its route or refresh it from the edited scene before deleting the image from Media.' }}</span>
+        <button v-if="mediaOutputId === 'program' && studio.state.program" class="s-button" @click="clearProgram">Clear Program</button>
+        <button class="s-icon" aria-label="Dismiss media usage guidance" @click="mediaOutputId = null"><X :size="14" /></button>
+      </div>
       <div v-if="!studio.state.scenes.length && studio.state.program" class="studio-banner studio-clear-program" role="status"><span>Program is still showing the last live scene.</span><button class="s-button" @click="clearProgram">Clear Program</button></div>
       <div class="monitors-grid">
         <StudioMonitorPanel label="Preview" class="preview-panel">
           <template #scene>{{ selected?.name ?? 'Choose a scene' }}<i v-if="liveEdited">Unpublished edits</i></template>
-          <template #default="{ fullscreen }"><StudioCanvas :inert="fullscreen" :scene="selected" :sources="studio.state.sources" :engine-running="engineRunning" @inspect="inspectLayer" /></template>
+          <template #default="{ fullscreen }"><StudioCanvas :inert="fullscreen" :scene="selected" :sources="studio.state.sources" :engine-running="engineRunning" :monitor-suspended="broadcast.open" @inspect="inspectLayer" /></template>
           <template #footer><span>Draft · 1920 × 1080</span><button v-if="sceneAnimationDuration" class="scene-rehearsal-button" :aria-label="scenePreviewPlaying ? 'Pause scene animation preview' : 'Preview scene animations'" title="Rehearse all element animations locally" @click="previewSceneAnimations"><Pause v-if="scenePreviewPlaying" :size="11" /><Play v-else :size="11" />{{ scenePreviewPlaying ? 'Pause' : 'Rehearse' }}</button><span>16:9</span></template>
         </StudioMonitorPanel>
         <div class="transition-controls" role="group" aria-label="Scene transitions">
@@ -412,8 +457,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keydown));
         </div>
         <StudioMonitorPanel label="Program" class="program-panel">
           <template #scene>{{ studio.state.program?.name ?? 'Nothing on air yet' }}</template>
-          <div class="monitor-frame"><div v-if="!programReady" class="program-empty"><Monitor :size="28" :stroke-width="1.25" /><b>{{ studio.state.program ? engineRunning ? 'Connecting to Program…' : 'Engine offline' : 'No scene on Program' }}</b><p>{{ studio.state.program ? studio.state.program.name : 'Choose a scene, then Cut or Fade to Program.' }}</p></div><StudioMonitor output-id="program" compact-program :audible="monitorAudio" @ready="programReady = $event" @audio-ready="programAudioReady = $event" @blocked="monitorAudio = false" /><span v-if="programReady" class="program-badge"><span />LIVE PROGRAM</span><span v-if="recording && programReady" class="recording-badge">● REC</span></div>
-          <template #footer><ProgramHealth v-if="engineRunning" /><span v-else>{{ recording ? 'Recording Program + master audio' : 'Live composition' }}</span><button :class="{ active: monitorAudio }" @click="monitorAudio = !monitorAudio" :title="monitorAudio ? !programReady ? 'Waiting for Program to connect' : !programAudioReady ? 'Program is connected but audio has not arrived. Check the Main input.' : 'Mute monitoring' : 'Monitor audio — use headphones'"><Headphones :size="12" />{{ monitorLabel }}</button></template>
+          <div class="monitor-frame"><LoadingSkeleton v-if="!programReady && studio.state.program && engineRunning" class="program-connecting-skeleton" label="Connecting to Program…"><Skeleton height="100%" :radius="0" /></LoadingSkeleton><div v-else-if="!programReady" class="program-empty"><Monitor :size="28" :stroke-width="1.25" /><b>{{ studio.state.program ? engineRunning ? 'Connecting to Program…' : 'Engine offline' : 'No scene on Program' }}</b><p>{{ studio.state.program ? studio.state.program.name : 'Choose a scene, then Cut or Fade to Program.' }}</p></div><StudioMonitor v-if="!broadcast.open || monitorAudio" output-id="program" compact-program :audible="monitorAudio" @ready="programReady = $event" @audio-ready="programAudioReady = $event" @blocked="monitorAudio = false" /><span v-if="programReady" class="program-badge"><span />LIVE PROGRAM</span><span v-if="recording && programReady" class="recording-badge">● REC</span></div>
+          <template #footer><span>Program · Main audio</span><button :class="{ active: monitorAudio }" @click="monitorAudio = !monitorAudio" :title="monitorAudio ? !programReady ? 'Waiting for Program to connect' : !programAudioReady ? 'Program is connected but audio has not arrived. Check the Main input.' : 'Mute monitoring' : 'Monitor audio — use headphones'"><Headphones :size="12" />{{ monitorLabel }}</button></template>
         </StudioMonitorPanel>
       </div>
       <p class="preview-note"><Lock :size="11" />Edits stay in Preview until you Cut or Fade.</p>
@@ -424,15 +469,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keydown));
             <p v-if="studio.state.sources.length" class="source-list-hint">Reusable inputs for your scenes</p>
             <div v-if="!studio.state.sources.length" class="sources-empty"><div class="source-empty-icons"><Camera :size="20" /><Mic :size="20" /><Image :size="20" /></div><b>No sources added</b><p>Connect a camera or microphone,<br />or add media and presentation channels.</p><button class="s-button" @click="addSourceDialog"><Plus :size="13" /> Add source</button></div>
             <div v-for="source in studio.state.sources" :key="source.id" class="source-row" :data-source-id="source.id">
-              <span class="source-type-icon"><component :is="icons[source.kind]" :size="15" /></span>
-              <button type="button" class="source-name source-properties-trigger" :aria-label="'Open properties for ' + source.name" title="Source properties" @click="editSourceDialog(source)"><div class="source-name-line"><b :title="source.name">{{ source.name }}</b><span v-if="source.id === studio.state.mainAudioSourceId && mainAudioBadge" class="main-audio-badge source-main-audio-badge" data-testid="source-main-audio-badge" :data-state="mainAudioBadge.state" :title="mainAudioBadge.title" role="status"><VolumeX v-if="mainAudioBadge.state === 'muted'" :size="10" aria-hidden="true" /><AlertCircle v-else-if="['disconnected', 'error', 'no-audio'].includes(mainAudioBadge.state)" :size="10" aria-hidden="true" />{{ mainAudioBadge.label }}</span></div><small :class="{ 'danger-text': studio.status.sources[source.id] === 'error' }" :title="studio.status.sourceErrors[source.id]">{{ studio.status.sourceErrors[source.id] || (source.playback?.paused ? 'Paused' : studio.status.sources[source.id] === 'ready' ? 'Ready' : studio.status.sources[source.id] === 'loading' && ['camera', 'screen'].includes(source.kind) ? 'Waiting for video signal' : ['camera', 'screen', 'microphone'].includes(source.kind) ? 'Input not connected' : engineRunning ? studio.status.sources[source.id] || 'Loading' : 'Ready when engine starts') }}</small></button>
+              <span class="source-type-icon"><component :is="source.id === 'lumen_presentation_music' ? Music2 : icons[source.kind]" :size="15" /></span>
+              <button type="button" class="source-name source-properties-trigger" :aria-label="'Open properties for ' + source.name" title="Source properties" @click="editSourceDialog(source)"><div class="source-name-line"><b :title="source.name">{{ source.name }}</b><span v-if="source.id === studio.state.mainAudioSourceId && mainAudioBadge" class="main-audio-badge source-main-audio-badge" data-testid="source-main-audio-badge" :data-state="mainAudioBadge.state" :title="mainAudioBadge.title" role="status"><VolumeX v-if="mainAudioBadge.state === 'muted'" :size="10" aria-hidden="true" /><AlertCircle v-else-if="['disconnected', 'error', 'no-audio'].includes(mainAudioBadge.state)" :size="10" aria-hidden="true" />{{ mainAudioBadge.label }}</span></div><small :class="{ 'danger-text': studio.status.sources[source.id] === 'error' }" :title="studio.status.sourceErrors[source.id]">{{ source.id === 'lumen_presentation_music' ? 'Controlled by the Studio music queue' : studio.status.sourceErrors[source.id] || (source.playback?.paused ? 'Paused' : studio.status.sources[source.id] === 'ready' ? 'Ready' : studio.status.sources[source.id] === 'loading' && ['camera', 'screen'].includes(source.kind) ? 'Waiting for video signal' : ['camera', 'screen', 'microphone'].includes(source.kind) ? 'Input not connected' : engineRunning ? studio.status.sources[source.id] || 'Loading' : 'Ready when engine starts') }}</small></button>
               <template v-if="['video', 'audio'].includes(source.kind)">
                 <button class="s-icon" :aria-label="(source.playback?.paused ? 'Play ' : 'Pause ') + source.name" :title="source.playback?.paused ? 'Play source' : 'Pause source'" @click="playback(source)"><Play v-if="source.playback?.paused" :size="13" /><Pause v-else :size="13" /></button>
                 <button class="s-icon" :aria-label="'Restart ' + source.name" title="Restart source" @click="playback(source, true)"><RotateCcw :size="13" /></button>
                 <button class="s-icon" :class="{ 'source-looping': source.loop }" :aria-label="'Loop ' + source.name" :aria-pressed="source.loop" title="Toggle loop" @click="run(studio.updateSource(source.id, { loop: !source.loop }))"><Repeat :size="13" /></button>
               </template>
               <button v-if="!['microphone', 'audio'].includes(source.kind)" class="s-icon" :aria-label="'Add ' + source.name + ' to scene'" title="Place in selected scene" :disabled="!selected" @click="run(studio.addLayer({ kind: 'source', name: source.name, sourceId: source.id, x: 0, y: 0, width: 100, height: 100 }))"><Layers :size="13" /></button>
-              <button v-if="['camera', 'screen', 'microphone'].includes(source.kind)" class="source-connect" @click="studio.connectedSources.includes(source.id) ? studio.disconnectSource(source.id) : connect(source)">{{ studio.connectedSources.includes(source.id) ? 'Disconnect' : 'Connect' }}</button>
+              <button v-if="source.id !== 'lumen_presentation_music' && ['camera', 'screen', 'microphone'].includes(source.kind)" class="source-connect" @click="studio.connectedSources.includes(source.id) ? studio.disconnectSource(source.id) : connect(source)">{{ studio.connectedSources.includes(source.id) ? 'Disconnect' : 'Connect' }}</button>
               <button class="s-icon" :aria-label="'Properties for ' + source.name" title="Source properties" @click="editSourceDialog(source)"><Settings2 :size="14" /></button>
               <button class="s-icon" title="Remove source" :aria-label="'Remove ' + source.name" @click="deleteSource(source)"><Trash2 :size="12" /></button>
             </div>
@@ -441,6 +486,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keydown));
         <StudioLayersPanel @add-source="addSourceDialog" @inspect="inspectLayer" />
         <section class="tool-panel audio-panel" aria-label="Audio mixer"><div class="tool-heading"><h2><Volume2 :size="15" />Audio <span class="panel-count">{{ audioSources.length }}</span></h2></div>
           <div class="audio-list">
+            <div class="studio-music-queue"><span>Music queue</span><MusicMiniPlayer /></div>
             <div v-if="audioSetupMessage" class="audio-setup-message" role="status"><AlertCircle :size="13" /><span>{{ audioSetupMessage }}</span><button v-if="mainAudio?.kind === 'camera' && (cameraAudioOff || ['disconnected', 'error'].includes(mainAudioBadge?.state ?? ''))" type="button" @click="editSourceDialog(mainAudio)">Camera settings</button></div>
             <div v-if="textOnlyMain && mainAudio" class="audio-main-warning legacy-main-warning" data-testid="main-audio-status" role="status"><AlertCircle :size="12" /><span><b>{{ mainAudio.name }}</b> is text-only. Choose an audio input as Main.</span><button class="s-icon" aria-label="Clear Main audio" title="Clear Main audio and mute this input" :disabled="!!studio.saving" @click="setMainAudio(null)"><X :size="12" /></button></div>
             <div v-if="!audioSources.length" class="panel-empty"><Mic :size="22" /><span>Add a microphone, video, or audio file<br />to start mixing.</span></div>
@@ -455,12 +501,16 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keydown));
           <OutputAudioControl />
         </section>
       </div>
-      <StudioOutputsPanel :outputs="studio.state.outputs" :scenes="studio.state.scenes" :pending="!!studio.saving" :can-operate="canOperate" @add="addOutput" @rename="renameOutput" @route="(id, sceneId) => run(studio.command({ type: 'route', outputId: id, sceneId }))" @blank="(id, blanked) => run(studio.command({ type: 'blank', outputId: id, blanked }))" @audio="id => run(studio.edit(d => { const output = d.outputs.find(item => item.id === id); if (output) output.audioEnabled = !output.audioEnabled; }))" @refresh="id => { const output = studio.state?.outputs.find(item => item.id === id); if (output?.scene) run(studio.command({ type: 'route', outputId: id, sceneId: output.scene.id })); }" @remove="removeOutput" />
+      <OutputsSummary :outputs="studio.state.outputs" :engine-running="engineRunning" :program-selected="!!studio.state.program" />
     </main>
 
     <StudioInspector v-show="!inspectorCollapsed" @collapse="collapseInspector" />
-    <footer class="studio-statusbar"><span><span class="tiny-dot" :class="{ online: engineRunning }" />{{ studio.saving ? 'Saving…' : 'All changes saved' }}</span><span>LOCAL STATION<ChevronRight :size="10" />{{ studio.state.scenes.length }} scenes<ChevronRight :size="10" />{{ studio.state.outputs.length }} outputs</span><span>{{ recording ? recording.status === 'stopping' ? 'Finishing recording…' : `Recording · ${bytes(recording.bytes)} saved` : '1920 × 1080 · 30 fps' }}</span></footer>
+    <ProductionStatusBar ref="statusBar" />
     <SourceDialog v-model:open="sourceOpen" :source-id="propertiesSourceId" />
     <Dialog v-model:open="guideOpen"><DialogContent class="studio-dialog sm:max-w-[520px]"><DialogHeader><DialogTitle>Your production, in focus.</DialogTitle><DialogDescription>A quick guide to the Studio workflow.</DialogDescription></DialogHeader><ol class="studio-guide"><li><b>Build your scenes.</b><span>Add sources and arrange layers in Preview. Select a layer to edit it; drag to move and use its corner to resize.</span></li><li><b>Start the engine.</b><span>The station runs a dedicated renderer. File playback, outputs, and recording continue when you change workspaces or close the control page.</span></li><li><b>Take the moment live.</b><span>Cut instantly with Space, or Fade with Shift + Space. Preview goes live and the previous Program scene returns to Preview, ready to switch back. Set the fade duration between the monitors. Shortcuts pause while you type or use a dialog. Draft edits stay separate from Program and pinned output snapshots.</span></li><li><b>Choose each screen’s picture.</b><span>Follow Program, or pin a scene. Reapply a pinned scene with its refresh button. Blanking only hides that output’s picture; audio has its own control.</span></li><li><b>Keep a record.</b><span>Record captures Program plus master audio. Browser cameras and screen shares require their publishing tab to remain open. Use headphones for monitoring.</span></li></ol></DialogContent></Dialog>
   </div>
 </template>
+
+<style scoped>
+.studio-music-queue {padding:10px 8px; border-bottom:1px solid var(--border-hair); min-width:0}.studio-music-queue>span {display:block;font-size:10px;color:var(--text-muted);margin-bottom:6px}.studio-music-queue :deep(.music-mini-player) {width:100%;min-width:0;flex-wrap:wrap}.studio-music-queue :deep(.music-mini-player>*) {min-width:0}
+</style>

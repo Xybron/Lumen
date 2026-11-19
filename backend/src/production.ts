@@ -13,6 +13,7 @@ import { ProductionSchema, CommandSchema } from './production-schema.js';
 import { RecordingStore } from './production-recordings.js';
 import { createClips } from './clips.js';
 import { ProductionDataTransfer } from './production-data-transfer.js';
+import { MediaCatalog, createMediaCatalogRouter } from './media-catalog.js';
 import { createBroadcast, type BroadcastWatchRelay } from './broadcast.js';
 import type { BroadcastSpawn } from './broadcast-process.js';
 import { createWatchRelayFromEnv } from './broadcast-relay.js';
@@ -20,6 +21,7 @@ import { ProductionHub } from './production-hub.js';
 import { createOutputDelivery } from './output-delivery.js';
 import { createExternalOutput } from './output-external.js';
 import { rendererFailureMessage, RendererStartupError, resolveRendererOrigin, waitForStationEngine, type RendererAttempt, type RendererOriginOptions } from './renderer-startup.js';
+import { createRendererDiagnosticsSampler } from './renderer-diagnostics.js';
 import type { ProductionState, StudioStatus } from '../../shared/production.js';
 import type { BroadcastSnapshot } from '../../shared/broadcast.js';
 
@@ -55,6 +57,10 @@ export async function createProduction(rendererOptions: Pick<RendererOriginOptio
   };
   let browser: Browser | null = null;
   let rendererPage: Page | null = null;
+  const sampleRendererDiagnostics = createRendererDiagnosticsSampler((page: Page) => page.evaluate(async () => {
+    const inspect = (window as unknown as { __lumenDiagnostics?: () => Promise<unknown> }).__lumenDiagnostics;
+    return inspect ? inspect() : null;
+  }));
   let launchTask: Promise<void> | null = null;
   let stopping = false;
   let recoveryRequests = 0;
@@ -63,7 +69,8 @@ export async function createProduction(rendererOptions: Pick<RendererOriginOptio
   let status: StudioStatus = { state: 'offline', fps: 0, levels: {}, sources: {}, sourceErrors: {}, recording: null };
   let broadcast: Awaited<ReturnType<typeof createBroadcast>> | null = null;
   let broadcastChanging = false;
-  const store = new ProductionStore(DATA_DIR, state => hub.broadcast({ t: 'state', state }), cueGates);
+  const store = new ProductionStore(DATA_DIR, state => hub.broadcast({ t: 'state', state }), cueGates,
+    () => !!browser || !!launchTask || status.state === 'starting' || status.state === 'running');
   const recordings = new RecordingStore(path.join(DATA_DIR, 'recordings'), () => publishStatus());
   const snapshot = (): StudioStatus => {
     const session = broadcast?.sessionStatus();
@@ -258,6 +265,8 @@ export async function createProduction(rendererOptions: Pick<RendererOriginOptio
   watchdog.unref();
 
   const router = Router();
+  const media = new MediaCatalog(store, 'transfer' in clips ? clips.transfer : undefined);
+  router.use(createMediaCatalogRouter(media));
   router.use(clips.router);
   const outputControl = (req: Request, res: Response, next: NextFunction) => {
     res.set({ 'Cache-Control': 'private, no-store', 'Referrer-Policy': 'no-referrer' });
@@ -319,7 +328,7 @@ export async function createProduction(rendererOptions: Pick<RendererOriginOptio
     } finally { broadcastChanging = false; }
   }));
   for (const action of ['retry', 'stop'] as const) router.post(`/studio/broadcast/destinations/:id/${action}`, operator, asyncRoute(async (req, res) => {
-    const id = z.enum(['facebook', 'youtube', 'watch']).parse(req.params.id);
+    const id = z.enum(['facebook', 'youtube', 'instagram', 'watch']).parse(req.params.id);
     if (action === 'retry') await broadcastService().retryDestination(id);
     else await broadcastService().stopDestination(id);
     res.json(broadcastSnapshot());
@@ -337,11 +346,8 @@ export async function createProduction(rendererOptions: Pick<RendererOriginOptio
   router.get('/studio/status', (_req, res) => res.json(snapshot()));
   router.get('/studio/engine/probe', (_req, res) => res.set('Cache-Control', 'no-store').json({ station: stationId }));
   router.get('/studio/diagnostics', operator, asyncRoute(async (_req, res) => {
-    const details = rendererPage && !rendererPage.isClosed() ? await rendererPage.evaluate(async () => {
-      const inspect = (window as unknown as { __lumenDiagnostics?: () => Promise<unknown> }).__lumenDiagnostics;
-      return inspect ? inspect() : null;
-    }).catch(() => null) : null;
-    res.json({ status: snapshot(), renderer: details, broadcast: broadcast?.diagnostics() ?? null, startup });
+    const sample = await sampleRendererDiagnostics(rendererPage && !rendererPage.isClosed() ? rendererPage : null);
+    res.json({ status: snapshot(), renderer: sample.details, rendererDiagnostics: { state: sample.state }, broadcast: broadcast?.diagnostics() ?? null, startup });
   }));
   router.put('/studio', operator, asyncRoute(async (req, res) => {
     const parsed = ProductionSchema.safeParse(req.body);
@@ -365,6 +371,7 @@ export async function createProduction(rendererOptions: Pick<RendererOriginOptio
     if (broadcasting() || broadcastChanging) throw new ProductionError(409, 'Stop streaming before stopping the engine.');
     if (launchTask) throw new ProductionError(409, 'Engine is still starting.');
     stopping = true; await browser?.close(); browser = null;
+    store.releaseMediaTransitions();
     status = { state: 'offline', fps: 0, levels: {}, sources: {}, sourceErrors: {}, recording: null };
     stopping = false; publishStatus(); res.json(snapshot());
   }));
@@ -375,9 +382,11 @@ export async function createProduction(rendererOptions: Pick<RendererOriginOptio
     sources: z.record(z.enum(['ready', 'missing', 'loading', 'error'])),
     sourceErrors: z.record(z.string().max(500)),
     backgroundErrors: z.record(z.string().max(500)).default({}),
+    mediaSettledRevision: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable().optional(),
   });
   router.post('/studio/engine/heartbeat', requireEngine, asyncRoute(async (req, res) => {
-    const data = heartbeatSchema.parse(req.body); lastHeartbeat = Date.now();
+    const { mediaSettledRevision, ...data } = heartbeatSchema.parse(req.body); lastHeartbeat = Date.now();
+    if (mediaSettledRevision != null) store.releaseMediaTransitions(mediaSettledRevision);
     status = { ...status, ...data }; publishStatus(); res.json({ ok: true });
   }));
   router.get('/studio/engine/bootstrap', requireEngine, (_req, res) => res.json(store.get()));
@@ -431,7 +440,7 @@ export async function createProduction(rendererOptions: Pick<RendererOriginOptio
     if (code === 500) console.error('[studio]', 'The operation could not be completed.');
     res.status(code).json({ error: error instanceof z.ZodError ? error.issues[0].message : error.message });
   });
-  return { router, wss: hub.wss,
+  return { router, wss: hub.wss, media,
     transfer: new ProductionDataTransfer(store, recordings, 'transfer' in clips ? clips.transfer : undefined, productionBusy),
     mobile: {
       get: () => store.get(), status: snapshot,

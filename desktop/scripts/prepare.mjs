@@ -129,10 +129,15 @@ if (!chromium.startsWith(chromiumDir + path.sep)) throw new Error('Chromium inst
 
 const { prepareListening } = await import('./prepare-listening.mjs');
 const listening = await prepareListening(resources, cache);
+const { prepareDocuments } = await import('./prepare-documents.mjs');
+const documents = await prepareDocuments(resources, cache);
+const { prepareVirtualDevices } = await import('./prepare-virtual-devices.mjs');
+await prepareVirtualDevices();
 const manifest = {
   schemaVersion: 1, platform: process.platform, arch: process.arch, nodeVersion,
   nodeRelativePath: relative(nodeBinary), chromiumRelativePath: relative(chromium), ffmpegRelativePath: relative(ffmpeg),
   ...listening,
+  ...documents,
 };
 await fs.writeFile(path.join(resources, 'runtime-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 await fs.writeFile(path.join(resources, 'THIRD-PARTY-NOTICES.txt'), [
@@ -145,6 +150,7 @@ await fs.writeFile(path.join(resources, 'THIRD-PARTY-NOTICES.txt'), [
   'On Windows, Microsoft Visual C++ runtime notices are in runtime/MICROSOFT-VC-RUNTIME-NOTICE.txt.',
   'Electron license and Chromium credits accompany the Electron application runtime.',
   'Local listening runtime/model notices are included under listening/.',
+  'LibreOffice document converter and license/source notices are included under documents/.',
   '',
 ].join('\n'));
 console.log(`Prepared offline desktop resources at ${resources}`);

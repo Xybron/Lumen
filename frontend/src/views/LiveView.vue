@@ -5,9 +5,7 @@ import { useFullscreen, useIdle, useWakeLock, useEventListener } from '@vueuse/c
 import { Music2 } from 'lucide-vue-next';
 import BackgroundLayer from '@/components/live/BackgroundLayer.vue';
 import ContentLayer from '@/components/live/ContentLayer.vue';
-import ProgressBar from '@/components/live/ProgressBar.vue';
-import WarningPill from '@/components/live/WarningPill.vue';
-import CountdownChip from '@/components/live/CountdownChip.vue';
+import PresentationGraphics from '@/components/live/PresentationGraphics.vue';
 import { useContentStore } from '@/stores/content';
 import { useChannelMirror } from '@/lib/useChannelMirror';
 import { useShortcuts } from '@/lib/keyboard';
@@ -23,15 +21,12 @@ const channelId = computed(
 
 const {
   state,
-  remainingMs,
   connection,
   reconnecting,
   currentItem,
   currentPrayerLabel,
   settings,
   clock,
-  showWarning,
-  showCountdown,
   musicPlaying,
 } = useChannelMirror(channelId);
 
@@ -72,14 +67,10 @@ useEventListener(document, 'dblclick', () => {
       </div>
     </Transition>
 
-    <ProgressBar v-if="!state.blanked" :clock="clock" :duration-ms="state.durationMs" :playing="state.playing" :manual="state.mode === 'manual'" />
-
-    <WarningPill :visible="showWarning" :remaining-ms="remainingMs" />
-    <CountdownChip
-      :visible="showCountdown"
-      :remaining-ms="remainingMs"
-      :threshold-ms="settings.countdownAtMs"
-    />
+    <PresentationGraphics v-if="!state.blanked && currentItem && !['scripture', 'lyrics', 'notes'].includes(contentStore.channels.find(c => c.id === channelId)?.kind ?? '')"
+      :graphics="contentStore.channels.find(c => c.id === channelId)?.presentationGraphics" :clock="clock"
+      :duration-ms="state.durationMs" :playing="state.playing" :countdown-at-ms="settings.countdownAtMs"
+      :warning-at-ms="settings.warningAtMs" :title="currentItem.title" />
 
     <Transition
       enter-active-class="transition duration-200 ease-out-cubic"

@@ -1,8 +1,9 @@
 import { computed, effectScope, ref, watch, type ComputedRef, type Ref } from 'vue';
 import { createTimer } from '@/lib/timer';
-import { preload } from '@/lib/preload';
+import { preload, releasePreload } from '@/lib/preload';
 import { broadcast } from '@/lib/broadcast';
 import { computePrayerLabels, type PrayerLabel } from '@/lib/prayers';
+import { presentationItem } from '@/lib/presentation-state';
 import { useContentStore } from '@/stores/content';
 import type { Item, Mode, ProjectionState } from '@/types';
 
@@ -49,7 +50,8 @@ export function createPlaybackEngine(channelId: string, opts?: { defaultMode?: M
   const scope = effectScope(true);
 
   return scope.run(() => {
-    const mode = ref<Mode>(opts?.defaultMode ?? 'auto');
+    // Auto is a deliberate session choice, including for legacy saved channels.
+    const mode = ref<Mode>('manual');
     const index = ref(0);
     const playing = ref(false);
     const blanked = ref(false);
@@ -58,6 +60,15 @@ export function createPlaybackEngine(channelId: string, opts?: { defaultMode?: M
     const items = computed<Item[]>(() => content.playlistForChannel(channelId)?.items ?? []);
     const externalCue = ref<Item | null>(null);
     const current = computed<Item | undefined>(() => opts?.external ? externalCue.value ?? undefined : items.value[index.value]);
+
+    // Keep the on-air cue anchored by ID when groups or slide order are edited.
+    // Moving a slide must not silently replace it with its new neighbour.
+    watch(() => items.value.map(item => item.id), (ids, previous) => {
+      if (opts?.external || !previous.length) return;
+      const nextIndex = ids.indexOf(previous[index.value] ?? '');
+      if (nextIndex >= 0) index.value = nextIndex;
+      else { index.value = Math.max(0, Math.min(index.value, ids.length - 1)); playing.value = false; onSlideChange(); }
+    });
 
     const prayerLabels = computed<Record<string, PrayerLabel>>(() => computePrayerLabels(items.value));
     function prayerLabelFor(id: string): PrayerLabel | undefined {
@@ -88,16 +99,16 @@ export function createPlaybackEngine(channelId: string, opts?: { defaultMode?: M
 
     timer.onComplete(() => {
       if (mode.value === 'auto') goNext();
+      else playing.value = false;
     });
 
     function play() {
       if (opts?.external) return;
-      if (mode.value !== 'auto') return;
-      if (!current.value) return;
+      if (!current.value || current.value.type === 'section' || current.value.durationMs <= 0) return;
       if (timer.running.value) return;
       if (timer.remaining.value > 0) timer.resume();
       else timer.start(current.value.durationMs);
-      playing.value = true;
+      playing.value = timer.running.value;
     }
 
     function pause() {
@@ -146,13 +157,8 @@ export function createPlaybackEngine(channelId: string, opts?: { defaultMode?: M
     function setMode(m: Mode) {
       if (opts?.external) return;
       mode.value = m;
-      if (m === 'manual') {
-        timer.stop();
-        playing.value = false;
-      } else if (current.value) {
-        timer.start(current.value.durationMs);
-        playing.value = true;
-      }
+      // Switching to Manual only disables advancement; keep the prayer clock.
+      if (m === 'auto') play();
     }
 
     function toggleMode() {
@@ -165,12 +171,11 @@ export function createPlaybackEngine(channelId: string, opts?: { defaultMode?: M
     }
 
     function onSlideChange() {
-      preload(next.value);
-      if (mode.value === 'auto' && current.value) {
+      if (playing.value && current.value) {
         timer.start(current.value.durationMs);
-        playing.value = true;
+        playing.value = timer.running.value;
       } else {
-        timer.stop();
+        timer.reset(current.value?.durationMs ?? 0);
         playing.value = false;
       }
     }
@@ -179,6 +184,7 @@ export function createPlaybackEngine(channelId: string, opts?: { defaultMode?: M
       channelId,
       playlistId: content.playlistForChannel(channelId)?.id ?? null,
       index: index.value,
+      itemId: current.value?.id,
       mode: mode.value,
       playing: playing.value,
       blanked: blanked.value,
@@ -188,14 +194,18 @@ export function createPlaybackEngine(channelId: string, opts?: { defaultMode?: M
 
     function sendState() {
       if (opts?.external) return;
-      broadcast({ t: 'state', channel: channelId, payload: projectionState.value });
+      broadcast({ t: 'state', channel: channelId, payload: { ...projectionState.value, elapsedMs: elapsedMs.value } });
+      broadcast({ t: 'tick', channel: channelId, elapsedMs: elapsedMs.value, remainingMs: remainingMs.value });
     }
     function applyExternal(state: ProjectionState) { if (opts?.external) { externalCue.value=state.cue??null;blanked.value=state.blanked;mode.value='manual';playing.value=false; } }
     function applyRemotePresentation(state: ProjectionState) {
       if (opts?.external || state.channelId !== channelId || state.playlistId !== content.playlistForChannel(channelId)?.id) return;
+      const requested = presentationItem(items.value, state);
+      if (state.itemId && !requested) return;
       timer.stop(); mode.value = 'manual'; playing.value = false;
-      index.value = Math.max(0, Math.min(items.value.length - 1, Number.isInteger(state.index) ? state.index : 0));
+      index.value = requested ? items.value.indexOf(requested) : Math.max(0, Math.min(items.value.length - 1, Number.isInteger(state.index) ? state.index : 0));
       blanked.value = state.blanked;
+      timer.reset(current.value?.durationMs ?? 0);
     }
 
     // Broadcast this channel's state on any meaningful change — runs whether or
@@ -221,10 +231,16 @@ export function createPlaybackEngine(channelId: string, opts?: { defaultMode?: M
       else tick();
     });
 
-    // Arm on creation, mirroring the previous single-session auto-start behavior.
+    // Also refresh after playlist edits and remote selection, and release when
+    // there is no next slide. External scripture/lyrics cues never warm media.
+    if (!opts?.external) watch(() => [next.value?.background?.kind, next.value?.background?.src],
+      () => preload(channelId, next.value), { immediate: true });
+
+    // Prepare the current cue without starting its timer or advancing slides.
     if (!opts?.external) onSlideChange();
 
     function dispose() {
+      releasePreload(channelId);
       if (tickHandle !== null) clearInterval(tickHandle);
       timer.stop();
       scope.stop();

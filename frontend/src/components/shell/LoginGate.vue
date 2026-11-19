@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { SkeletonIndicator } from '@/components/ui/skeleton';
 import { ref } from 'vue';
 import { Aperture, ArrowRight, Eye, EyeOff, ShieldCheck } from 'lucide-vue-next';
 import { useIdentityStore } from '@/stores/identity';
@@ -68,7 +69,7 @@ async function submit() {
         :disabled="busy || !username.trim() || !password"
         class="login-submit"
       >
-        {{ busy ? 'Signing in…' : 'Sign in' }}<ArrowRight v-if="!busy" :size="15" />
+        {{ busy ? 'Signing in…' : 'Sign in' }}<SkeletonIndicator v-if="busy" /><ArrowRight v-else :size="15" />
       </button>
       <details class="login-setup"><summary>First time setting up Lumen?</summary><p>A new station starts with <code>admin</code> / <code>admin</code>. Change this password in Team &amp; roles after signing in. Existing stations use your assigned account.</p></details>
       </form>

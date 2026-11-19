@@ -26,7 +26,7 @@ export const usePlaybackStore = defineStore('playback', () => {
     fn();
   }
 
-  const mode = computed<Mode>(() => e()?.mode.value ?? 'auto');
+  const mode = computed<Mode>(() => e()?.mode.value ?? 'manual');
   // Writable so callers that still assign playback.index (e.g. drag-reorder index
   // correction) drive the focused engine.
   const index = computed<number>({

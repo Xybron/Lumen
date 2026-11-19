@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { SkeletonIndicator } from '@/components/ui/skeleton';
 import { ref } from 'vue';
-import { UsersRound, Trash2, Loader2 } from 'lucide-vue-next';
+import { UsersRound, Trash2 } from 'lucide-vue-next';
 import { useTeamStore } from '@/stores/team';
 import { useConfirmation } from '@/composables/useConfirmation';
 
@@ -29,7 +30,7 @@ function changeFromEvent(member: { user_id: string; role: string; name?: string 
   <section class="team-members" aria-label="Team access">
     <h3><UsersRound :size="15" />Team access<span>{{ team.members.length }}</span></h3>
     <p>Owners manage membership. Editors prepare drafts; viewers can read them. The last owner cannot be removed.</p>
-    <div class="team-members-list"><div v-for="member in team.members" :key="member.user_id" class="team-member"><span><b>{{ label(member) }}</b><small v-if="member.user_id === team.user?.id">You</small></span><select :value="member.role" :aria-label="`Access for ${label(member)}`" :disabled="!!working || team.role !== 'owner'" @change="changeFromEvent(member, $event)"><option value="owner">Owner</option><option value="editor">Editor</option><option value="viewer">Viewer</option></select><button type="button" class="team-icon-button danger" :disabled="!!working || team.role !== 'owner'" :aria-label="`Remove ${label(member)} from team`" @click="change(member, null)"><Loader2 v-if="working === member.user_id" :size="14" class="team-spinner" /><Trash2 v-else :size="14" /></button></div></div>
+    <div class="team-members-list"><div v-for="member in team.members" :key="member.user_id" class="team-member"><span><b>{{ label(member) }}</b><small v-if="member.user_id === team.user?.id">You</small></span><select :value="member.role" :aria-label="`Access for ${label(member)}`" :disabled="!!working || team.role !== 'owner'" @change="changeFromEvent(member, $event)"><option value="owner">Owner</option><option value="editor">Editor</option><option value="viewer">Viewer</option></select><button type="button" class="team-icon-button danger" :disabled="!!working || team.role !== 'owner'" :aria-label="`Remove ${label(member)} from team`" @click="change(member, null)"><SkeletonIndicator v-if="working === member.user_id" /><Trash2 v-else :size="14" /></button></div></div>
     <p v-if="error" class="team-error" role="alert">{{ error }}</p><p v-if="notice" class="team-notice" role="status">{{ notice }}</p>
   </section>
 </template>

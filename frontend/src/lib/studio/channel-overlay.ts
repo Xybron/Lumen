@@ -21,6 +21,13 @@ export interface ChannelOverlayLayout {
 }
 
 export function channelText(item: Item): string {
+  if (item.type === 'notes' && item.body?.trim()) {
+    const body = item.body.trim();
+    if ((item.layout ?? 'key-points') === 'key-points') return body.split('\n').filter(line => line.trim())
+      .map(line => `• ${line.trim().replace(/^(?:[-*•]\s+|\d+[.)]\s+)/, '')}`).join('\n');
+    if (item.layout === 'quote') return `“${body}”`;
+    return body;
+  }
   return item.type === 'lyrics' && item.stanzas?.length
     ? item.stanzas.map(stanza => stanza.lines).join('\n\n')
     : item.body || item.title || '';
@@ -34,6 +41,7 @@ export function layoutChannelOverlay(item: Item, width: number, height: number, 
   const insets = resolveTextPadding(width, height, style.textPadding, 'overlay');
   const contentWidth = Math.max(1, width - insets.left - insets.right), contentHeight = Math.max(1, height - insets.top - insets.bottom);
   const body = transformText(channelText(item).trim(), style);
+  const title = transformText(item.type === 'notes' && item.body?.trim() ? item.title?.trim() ?? '' : '', style);
   const reference = transformText(item.reference?.trim() ?? '', style);
   const credit = transformText(item.id.startsWith('cue_') ? item.subtitle?.trim() ?? '' : '', style);
   const wrap = (value: string, size: number, weight: number) => {
@@ -63,6 +71,7 @@ export function layoutChannelOverlay(item: Item, width: number, height: number, 
     const add = (text: string, fontSize: number, fontWeight: number, opacity: number) => {
       if (text) blocks.push({ lines: wrap(text, fontSize, fontWeight), fontSize, fontWeight, top: 0, lineHeight: fontSize * lineHeight, opacity });
     };
+    add(title, Math.max(1, size * .68), 600, .94);
     add(body, size, requestedWeight, 1);
     add(reference, Math.max(1, size * .62), 600, .94);
     add(credit, Math.max(1, size * .4), 400, .68);

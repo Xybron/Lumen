@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { Film, Image as ImageIcon, LoaderCircle, Music2, RotateCw, TriangleAlert } from 'lucide-vue-next';
+import { Skeleton, LoadingSkeleton, SkeletonIndicator } from '@/components/ui/skeleton';
+import { Film, Image as ImageIcon, Music2, RotateCw, TriangleAlert } from 'lucide-vue-next';
 
 type AssetMetadata = { width?: number; height?: number; duration?: number };
 const props = withDefaults(defineProps<{
@@ -97,7 +98,7 @@ function failed(event: Event) {
   <section class="asset-preview" data-testid="media-asset-preview" :data-preview-state="state" :aria-busy="state === 'loading'" :aria-label="`${typeLabel} preview`">
     <div class="preview-heading">
       <span><component :is="mediaIcon" :size="14" aria-hidden="true" /> Preview</span>
-      <span v-if="loading && !failure" class="import-status"><LoaderCircle :size="12" aria-hidden="true" /> Importing…</span>
+      <span v-if="loading && !failure" class="import-status"><SkeletonIndicator /> Importing…</span>
       <span v-else class="preview-type">{{ typeLabel }}</span>
     </div>
 
@@ -115,7 +116,10 @@ function failed(event: Event) {
             Your browser does not support audio previews.
           </audio>
         </div>
-        <div v-if="pending" class="preview-loading" role="status"><LoaderCircle :size="19" aria-hidden="true" /><span>{{ loading && kind === 'video' ? 'Preparing preview…' : 'Loading preview…' }}</span></div>
+        <LoadingSkeleton v-if="pending" class="preview-loading" :class="{ 'preview-loading-audio': kind === 'audio' }" :label="loading && kind === 'video' ? 'Preparing preview' : 'Loading preview'">
+          <template v-if="kind === 'audio'"><Skeleton :width="74" :height="74" :radius="17" /><Skeleton width="62%" /><Skeleton width="42%" :height="9" /><Skeleton width="90%" :height="32" :radius="18" /></template>
+          <template v-else><Skeleton class="preview-picture-skeleton" height="100%" :radius="0" /><div class="preview-skeleton-caption"><Skeleton width="48%" :height="11" /><Skeleton width="70%" :height="8" /></div></template>
+        </LoadingSkeleton>
       </template>
 
       <div v-else-if="failure" class="preview-message" role="alert">
@@ -158,8 +162,9 @@ function failed(event: Event) {
 .audio-name { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font-size: 12px; font-weight: 500; }
 .audio-hint { margin-top: 6px; color: var(--text-subtle); font-size: 10px; line-height: 1.5; }
 .audio-preview audio { display: block; flex-shrink: 0; width: 100%; max-width: 360px; height: 36px; margin-top: 21px; color-scheme: dark; }
-.preview-loading { position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--text-muted); background: #101113e6; font-size: 11px; pointer-events: none; }
-.preview-loading svg, .import-status svg { animation: preview-spin 1s linear infinite; }
+.preview-loading { position: absolute; inset: 0; z-index: 1; overflow: hidden; background: #101113; pointer-events: none; }
+.preview-loading-audio { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 22px; }
+.preview-skeleton-caption { position: absolute; left: 20px; right: 20px; bottom: 20px; display: flex; flex-direction: column; gap: 10px; }
 .preview-message { display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; padding: 30px 24px; text-align: center; }
 .preview-message > svg { color: var(--text-subtle); }
 .preview-message strong { color: var(--text-primary); font-size: 12px; font-weight: 500; }
@@ -174,7 +179,6 @@ function failed(event: Event) {
 .asset-details { display: inline-flex; flex-wrap: wrap; gap: 5px 10px; font-variant-numeric: tabular-nums; }
 .asset-details > span + span::before { content: '·'; margin-right: 10px; color: var(--text-subtle); }
 .playback-note { flex-shrink: 0; }
-@keyframes preview-spin { to { transform: rotate(360deg); } }
 @media (max-width: 480px) {
   .audio-preview { padding: 20px 14px 14px; }
   .audio-artwork { width: 56px; height: 56px; margin-bottom: 12px; border-radius: 13px; }
@@ -182,5 +186,4 @@ function failed(event: Event) {
   .audio-preview audio { margin-top: 15px; }
   .preview-message { padding: 24px 18px; }
 }
-@media (prefers-reduced-motion: reduce) { .preview-loading svg, .import-status svg { animation: none; } }
 </style>

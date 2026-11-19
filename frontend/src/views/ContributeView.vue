@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { SkeletonIndicator } from '@/components/ui/skeleton';
 import { computed, ref } from 'vue';
-import { UploadCloud, ImageIcon, Music, CheckCircle2, Loader2 } from 'lucide-vue-next';
+import { UploadCloud, ImageIcon, Music, CheckCircle2 } from 'lucide-vue-next';
 import { mediaApi } from '@/lib/api';
 
 // Public mobile-first page for teammates to send media to the station. No login;
@@ -94,7 +95,7 @@ function reset() {
           class="h-11 rounded-xl bg-accent text-black font-medium text-sm hover:bg-accent/90 transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
           @click="submit"
         >
-          <Loader2 v-if="busy" :size="15" class="animate-spin" />
+          <SkeletonIndicator v-if="busy" />
           {{ busy ? 'Sending…' : 'Send to operator' }}
         </button>
       </template>

@@ -1,5 +1,6 @@
 import net from 'node:net';
 import tls from 'node:tls';
+import { broadcastIngestPrefix } from './broadcast-destinations.js';
 import type { BroadcastFailureCode } from './broadcast-process.js';
 
 export type BroadcastTlsConnect = (options: tls.ConnectionOptions) => tls.TLSSocket;
@@ -18,8 +19,8 @@ export async function openBroadcastRtmpsTransport(target: string, options: {
 } = {}): Promise<BroadcastRtmpsTransport> {
   let remote: URL;
   try { remote = new URL(target); } catch { throw new Error('Invalid secure stream destination.'); }
-  const prefix = remote.hostname === 'a.rtmps.youtube.com' ? '/live2/' : remote.hostname === 'live-api-s.facebook.com' ? '/rtmp/' : '';
-  if (!prefix || remote.protocol !== 'rtmps:' || remote.port && remote.port !== '443' || remote.username || remote.password || remote.hash || !remote.pathname.startsWith(prefix)) throw new Error('Only the fixed secure streaming providers are supported.');
+  const prefix = broadcastIngestPrefix(remote);
+  if (!prefix || !remote.pathname.startsWith(prefix)) throw new Error('Only the fixed secure streaming providers are supported.');
   let accepted = false, closing = false, code: BroadcastFailureCode = 'unknown', client: net.Socket | null = null, upstream: tls.TLSSocket | null = null, closeTask: Promise<void> | null = null;
   let handshakeTimer: ReturnType<typeof setTimeout> | undefined;
   const server = net.createServer({ pauseOnConnect: true }, socket => {

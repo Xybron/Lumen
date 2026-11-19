@@ -3,6 +3,7 @@ import { defineStore } from 'pinia';
 import { toast } from 'vue-sonner';
 import { studioApi } from '@/lib/studio/api';
 import { useContentStore } from '@/stores/content';
+import { useIdentityStore } from '@/stores/identity';
 import { StudioPeer, StudioSignal } from '@/lib/studio/signal';
 import { shortId } from '@/lib/ids';
 import { reorderScenes } from '@/lib/studio/scene-order';
@@ -10,6 +11,7 @@ import { animationFromPreset, cloneAnimation } from '@/lib/studio/animation';
 import { textPaddingForLayer, type TextPaddingInsets } from '@/lib/studio/text-padding';
 import { openDeviceCapture, type InputSelection } from '@/lib/studio/device-capture';
 import { arrangeLayers, layerAlignment, layerPreset, nudgeLayerGeometry, reorderLayers, type LayerAlignment, type LayerArrangeAction, type LayerPreset } from '@/lib/studio/layer-layout';
+import { notesLayerPreset } from '@/lib/studio/notes-layout';
 import type { ProductionState, StudioStatus, StudioRecording, StudioScene, SceneLayer, StudioSource, StudioCommand, LayerAnimation } from '../../../shared/production';
 
 export function newLayer(patch: Partial<SceneLayer> = {}): SceneLayer {
@@ -27,6 +29,11 @@ export const useStudioStore = defineStore('studio', () => {
   const connectedSources = ref<string[]>([]);
   const captures = new Map<string, { stream: MediaStream; peer: StudioPeer | null }>();
   const signal = new StudioSignal();
+  const identity = useIdentityStore();
+  // Socket permissions are captured at connection time. Refresh them when the
+  // operator or their access changes, never merely because a workspace mounts.
+  watch([() => identity.ready ? identity.me?.id ?? null : null,
+    () => identity.ready && identity.can('*', 'author')], () => signal.reconnect());
   const selectedScene = computed(() => state.value?.scenes.find(s => s.id === state.value?.previewSceneId) ?? null);
   const selectedLayer = computed(() => selectedScene.value?.layers.find(l => l.id === selectedLayerId.value) ?? null);
   // A session-only layer clipboard. Each Copy owns a separate entry so a
@@ -169,7 +176,9 @@ export const useStudioStore = defineStore('studio', () => {
   async function addLayer(patch: Partial<SceneLayer>) {
     const sceneId = selectedScene.value?.id;
     if (!sceneId) return;
-    const layer = newLayer(patch);
+    const source = state.value?.sources.find(item => item.id === patch.sourceId);
+    const notes = source?.kind === 'channel' && useContentStore().channels.find(channel => channel.id === source.channelId)?.kind === 'notes';
+    const layer = newLayer({ ...(notes ? { channelStyle: 'slide' as const, fontSize: 54, background: '#11151be6', align: 'left' as const } : {}), ...patch });
     await edit(d => { d.scenes.find(s => s.id === sceneId)?.layers.push(layer); });
     if (state.value?.previewSceneId === sceneId) selectedLayerId.value = layer.id;
   }
@@ -327,23 +336,32 @@ export const useStudioStore = defineStore('studio', () => {
     });
   }
   function alignLayer(id: string, alignment: LayerAlignment) { return transformLayer(id, layer => layerAlignment(layer, alignment)); }
-  function presetLayer(id: string, preset: LayerPreset) { return transformLayer(id, layer => layerPreset(layer, preset)); }
+  function presetLayer(id: string, preset: LayerPreset) {
+    return transformLayer(id, layer => {
+      const source = state.value?.sources.find(item => item.id === layer.sourceId);
+      const notes = source?.kind === 'channel' && useContentStore().channels.find(channel => channel.id === source.channelId)?.kind === 'notes';
+      return notes ? notesLayerPreset(layer, preset) : layerPreset(layer, preset);
+    });
+  }
   function nudgeLayer(id: string, dx: number, dy: number) { return transformLayer(id, layer => nudgeLayerGeometry(layer, dx, dy)); }
   async function addSource(source: StudioSource) {
     const sceneId = selectedScene.value?.id;
     // New inputs are opt-in audio. Importing a video or connecting a camera
     // must never interrupt the main feed, even through another creation path.
     const safeSource = { ...source, audio: { ...source.audio, muted: true } };
-    const textChannel = source.kind === 'channel' && ['scripture', 'lyrics'].includes(useContentStore().content?.channels.find(c => c.id === source.channelId)?.kind ?? '');
+    const channelKind = source.kind === 'channel' ? useContentStore().content?.channels.find(c => c.id === source.channelId)?.kind : undefined;
+    const textChannel = ['scripture', 'lyrics'].includes(channelKind ?? '');
+    const notesChannel = channelKind === 'notes';
     const layer = newLayer({ name: source.name, kind: 'source', sourceId: source.id, x: 0, y: 0, width: 100, height: 100,
-      ...(textChannel ? { channelStyle: 'overlay' as const, fontSize: 68 } : {}) });
+      ...(textChannel ? { channelStyle: 'overlay' as const, fontSize: 68 } : {}),
+      ...(notesChannel ? { channelStyle: 'slide' as const, fontSize: 54, background: '#11151be6', align: 'left' as const } : {}) });
     await edit(d => {
       d.sources.push(safeSource);
       const scene = d.scenes.find(s => s.id === sceneId);
       if (scene && !['audio', 'microphone'].includes(source.kind)) {
         // Text sources belong above the camera; new media backgrounds stay
         // behind existing text and graphics. Operators can reorder either.
-        if (textChannel) scene.layers.push(layer);
+        if (textChannel || notesChannel) scene.layers.push(layer);
         else scene.layers.unshift(layer);
       }
     });
@@ -396,7 +414,51 @@ export const useStudioStore = defineStore('studio', () => {
     };
     signal.send({ t: 'publish', sourceId: id });
   }
+  // Presentation music is a captured audio input, not another independent file
+  // player. Program receives the exact transport, fades and volume the operator
+  // controls, and the existing Main bus applies its mute/volume once.
+  const presentationMusicId = 'lumen_presentation_music';
+  let musicPublication: Promise<void> | null = null;
+  watch([() => identity.me?.id, () => identity.can('*', 'author')], () => {
+    disconnectSource(presentationMusicId);
+  });
+  async function publishPresentationMusic(stream: MediaStream) {
+    if (musicPublication) return musicPublication;
+    musicPublication = (async () => {
+      const operator = identity.me?.id;
+      const authorize = () => {
+        if (!operator || identity.me?.id !== operator || !identity.can('*', 'author')) {
+          disconnectSource(presentationMusicId);
+          throw new Error('Sending music to Program requires production operator access.');
+        }
+      };
+      authorize();
+      if (!stream.getAudioTracks().some(track => track.readyState === 'live')) throw new Error('The presentation music input is unavailable.');
+      if (!state.value) await load();
+      authorize();
+      if (!state.value) throw new Error('Program is unavailable. Try again when the station is connected.');
+      const existing = state.value.sources.find(source => source.id === presentationMusicId);
+      if (existing && existing.kind !== 'microphone') throw new Error('The presentation music input has an incompatible type.');
+      if (!existing) await edit(draft => {
+        if (!draft.sources.some(source => source.id === presentationMusicId)) draft.sources.push({
+          id: presentationMusicId, name: 'Presentation music', kind: 'microphone', loop: false,
+          audio: { volume: 1, muted: false, mode: 'always', delayMs: 0 },
+        });
+      });
+      authorize();
+      // Clone so disconnecting/reconnecting Studio never ends the music player's
+      // original destination track. A paused music player sends silence.
+      if (!captures.has(presentationMusicId)) publishCapture(presentationMusicId,
+        new MediaStream(stream.getAudioTracks().map(track => track.clone())));
+      try {
+        if (status.value.state !== 'running') status.value = await studioApi.start();
+        authorize();
+      } catch (error) { disconnectSource(presentationMusicId); throw error; }
+    })().finally(() => { musicPublication = null; });
+    return musicPublication;
+  }
   async function connectSource(source: StudioSource, videoDeviceId?: string, audioDeviceId?: string, includeAudio?: boolean, preparedStream?: MediaStream, format?: Pick<InputSelection, 'width' | 'height' | 'frameRate'>) {
+    if (source.id === presentationMusicId) throw new Error('Use Play in the presentation music player to connect this input.');
     if (!navigator.mediaDevices) throw new Error('Device access requires localhost or HTTPS.');
     // Device IDs belong to this browser, not the shared production document.
     // Remember explicit selections so reconnecting Camera 2 cannot silently
@@ -488,8 +550,8 @@ export const useStudioStore = defineStore('studio', () => {
   window.addEventListener('beforeunload', e => {
     if (captures.size) { e.preventDefault(); e.returnValue = ''; }
   });
-  return { state, status, loading, saving, recordings, engineBusy, recordingBusy, selectedLayerId, selectedScene, selectedLayer, connectedSources, animationPresets, canPasteLayer, copiedLayerName, reconnect: () => signal.reconnect(),
+  return { state, status, loading, saving, recordings, engineBusy, recordingBusy, selectedLayerId, selectedScene, selectedLayer, connectedSources, animationPresets, canPasteLayer, copiedLayerName,
     load, edit, command, selectScene, reorderScene, addScene, removeScene, updateScene, addLayer, updateLayer, updateLayerMediaBackground, updateLayerTextEffect, updateLayerTextPadding, removeLayer, moveLayer, copyLayer, pasteLayer, duplicateLayer, reorderLayer, arrangeLayer, alignLayer, presetLayer, nudgeLayer, addSource, removeSource, updateSource,
-    connectSource, disconnectSource, sourceStream, cameraStreams, inputSelection, saveSourceProperties, setMainAudio, toggleEngine, refreshRecordings, toggleRecord, recoverRecording,
+    connectSource, disconnectSource, sourceStream, cameraStreams, inputSelection, saveSourceProperties, setMainAudio, publishPresentationMusic, toggleEngine, refreshRecordings, toggleRecord, recoverRecording,
     saveAnimationPreset, renameAnimationPreset, deleteAnimationPreset, applyAnimationPreset };
 });

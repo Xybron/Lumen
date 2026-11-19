@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { LoadingSkeleton, Skeleton, SkeletonIndicator } from '@/components/ui/skeleton';
 import { onBeforeUnmount, ref } from 'vue';
-import { Video, MonitorUp, Radio, Loader2 } from 'lucide-vue-next';
+import { Video, MonitorUp, Radio } from 'lucide-vue-next';
 import { createPublisher, type Publisher } from '@/lib/webrtc';
 
 // Public page: a phone/laptop becomes a camera or screen SOURCE the operator can
@@ -62,7 +63,8 @@ onBeforeUnmount(stop);
 
       <div class="relative aspect-video w-full rounded-xl overflow-hidden bg-black border border-hair">
         <video ref="videoEl" class="h-full w-full object-contain" autoplay muted playsinline />
-        <div v-if="!live" class="absolute inset-0 flex items-center justify-center text-white/35 text-sm">
+        <LoadingSkeleton v-if="busy" label="Preparing source preview" class="absolute inset-0 p-5 flex flex-col justify-end gap-2"><Skeleton class="flex-1" height="auto" :radius="8" /><Skeleton width="42%" :height="10" /><Skeleton width="65%" :height="8" /></LoadingSkeleton>
+        <div v-else-if="!live" class="absolute inset-0 flex items-center justify-center text-white/35 text-sm">
           Preview appears here
         </div>
         <div v-if="live" class="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-red-500/80 text-white text-[10px] font-bold uppercase tracking-wide">
@@ -98,7 +100,7 @@ onBeforeUnmount(stop);
           class="h-11 rounded-xl bg-accent text-black font-medium text-sm hover:bg-accent/90 transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
           @click="goLive"
         >
-          <Loader2 v-if="busy" :size="15" class="animate-spin" />
+          <SkeletonIndicator v-if="busy" />
           {{ busy ? 'Starting…' : 'Go live' }}
         </button>
       </template>

@@ -6,6 +6,7 @@ export type ItemType =
   | 'section'
   | 'prayer'
   | 'prayer-sub'
+  | 'notes'
   | 'lyrics'
   | 'announcement';
 
@@ -25,7 +26,7 @@ export type MusicMode = 'loop' | 'playlist' | 'off';
 // *references* a playlist for its content rather than owning items directly, so
 // the deck content (playlists[]) stays the unit of record and the same playlist
 // can back more than one channel.
-export type ChannelKind = 'presentation' | 'prayer' | 'lyrics' | 'scripture' | 'announcement';
+export type ChannelKind = 'presentation' | 'prayer' | 'lyrics' | 'scripture' | 'announcement' | 'notes';
 
 export interface Background {
   kind: BackgroundKind;
@@ -57,12 +58,19 @@ export interface Item {
   color?: string;
   stanzas?: Stanza[]; // lyrics
   subtitle?: string; // announcement secondary line (lower-third)
+  layout?: 'general' | 'statement' | 'quote' | 'key-points';
+  groupId?: string;
+  /** Source Note for a generated slide; the source itself has no marker. */
+  notesSourceId?: string;
+  document?: { type: 'pdf' | 'powerpoint'; sourceName: string; page: number; totalPages: number };
 }
 
+export interface PresentationGroup { id: string; name: string; parentId?: string }
 export interface Playlist {
   id: string;
   name: string;
   items: Item[];
+  groups?: PresentationGroup[];
 }
 
 export interface Channel {
@@ -71,6 +79,26 @@ export interface Channel {
   kind: ChannelKind;
   playlistId: string; // -> Playlist.id
   defaultMode?: Mode;
+  presentationGraphics?: PresentationGraphics;
+  presentationGraphicPresets?: Array<{ name: string; graphics: PresentationGraphics }>;
+}
+
+export interface PresentationGraphics {
+  template: 'flame' | 'minimal' | 'broadcast' | 'segments' | 'ember';
+  progress: boolean;
+  timer: boolean;
+  countdown: boolean;
+  warning: boolean;
+  timerMode: 'elapsed' | 'remaining';
+  position: 'top' | 'bottom';
+  size: 'small' | 'medium' | 'large';
+  color: string;
+  caption?: boolean;
+  thickness?: number;
+  tip?: 'glow' | 'plain' | 'icon' | 'none';
+  tipIcon?: 'flame' | 'star' | 'cross' | 'diamond' | 'heart';
+  colorMode?: 'original' | 'solid' | 'gradient';
+  gradientColors?: string[];
 }
 
 // ── Routing-matrix seam ──────────────────────────────────────────────────────
@@ -182,11 +210,14 @@ export interface ProjectionState {
   channelId: string;
   playlistId: string | null;
   index: number;
+  // Stable presentation identity across independently delivered state/content.
+  itemId?: string;
   mode: Mode;
   playing: boolean;
   blanked: boolean;
   startedAt: number | null;
   durationMs: number;
+  elapsedMs?: number;
 }
 
 export interface User {

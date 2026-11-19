@@ -35,7 +35,7 @@ const relay = await createWatchRelay({ dataDir: path.join(DATA_DIR, 'watch-relay
 await new Promise(resolve => relay.server.listen(0, '127.0.0.1', resolve));
 const relayOrigin = `http://127.0.0.1:${relay.server.address().port}`;
 const adapter = createBroadcastRelay({ baseUrl: relayOrigin, token, slug: 'live', allowLocalhostForTests: true });
-const receivers = await localRtmpsReceivers(path.join(DATA_DIR, 'local-rtmps'), { paths: { youtube: '/live2/fixture-youtube-key-loopback-only', facebook: '/rtmp/fixture-facebook-key-loopback-only' } });
+const receivers = await localRtmpsReceivers(path.join(DATA_DIR, 'local-rtmps'), { paths: { youtube: '/live2/fixture-youtube-key-loopback-only', facebook: '/rtmp/fixture-facebook-key-loopback-only', instagram: '/rtmp/fixture-instagram-key-loopback-only?s_bl=1&s_fbp=lhr11-1&s_prp=' } });
 const spawned = [], tlsDials = [];
 function broadcastSpawn(file, originalArguments, options) {
   const args = [...originalArguments], target = args.at(-1);
@@ -44,19 +44,19 @@ function broadcastSpawn(file, originalArguments, options) {
   if (typeof target === 'string' && target.startsWith('rtmp:')) {
     if (new URL(target).hostname !== '127.0.0.1') throw new Error('Only a private loopback RTMP bridge is permitted.');
     const tcurl = args[args.indexOf('-rtmp_tcurl') + 1], hostname = new URL(tcurl).hostname;
-    kind = hostname === 'a.rtmps.youtube.com' ? 'youtube' : hostname === 'live-api-s.facebook.com' ? 'facebook' : '';
+    kind = hostname === 'a.rtmps.youtube.com' ? 'youtube' : hostname === 'live-api-s.facebook.com' ? 'facebook' : hostname === 'edgetee-upload-los4-1.xx.fbcdn.net' ? 'instagram' : '';
     if (!kind) throw new Error('Only the fixed platform authorities may be used by the disposable fixture.');
   }
   const child = spawn(file, args, options);
   const record = { kind, pid: child.pid, codec: args.includes('-c:v') ? args[args.indexOf('-c:v') + 1] : 'copy', startedAt: Date.now(), running: true, diagnostics: '' };
   // Fixture-only generated keys are redacted; production diagnostics remain
   // classified rather than retaining FFmpeg's credential-bearing stderr.
-  child.stderr?.on('data', bytes => { record.diagnostics = (record.diagnostics + bytes.toString()).replaceAll('fixture-youtube-key-loopback-only', '[REDACTED]').replaceAll('fixture-facebook-key-loopback-only', '[REDACTED]').slice(-4000); });
+  child.stderr?.on('data', bytes => { record.diagnostics = (record.diagnostics + bytes.toString()).replaceAll('fixture-youtube-key-loopback-only', '[REDACTED]').replaceAll('fixture-facebook-key-loopback-only', '[REDACTED]').replaceAll('fixture-instagram-key-loopback-only?s_bl=1&s_fbp=lhr11-1&s_prp=', '[REDACTED]').slice(-4000); });
   spawned.push(record); child.once('close', code => { record.running = false; record.exitCode = code; });
   return child;
 }
 function broadcastConnectTls(options) {
-  const kind = options.host === 'a.rtmps.youtube.com' ? 'youtube' : options.host === 'live-api-s.facebook.com' ? 'facebook' : '';
+  const kind = options.host === 'a.rtmps.youtube.com' ? 'youtube' : options.host === 'live-api-s.facebook.com' ? 'facebook' : options.host === 'edgetee-upload-los4-1.xx.fbcdn.net' ? 'instagram' : '';
   if (!kind || options.servername !== options.host || Number(options.port) !== 443 || options.rejectUnauthorized !== true) throw new Error('The production bridge must request a verified, fixed-platform TLS connection.');
   const endpoint = new URL(receivers.endpoints[kind].url);
   const secure = tls.connect({ ...options, host: '127.0.0.1', port: Number(endpoint.port), servername: 'localhost', ca: receivers.certificate });
@@ -94,6 +94,20 @@ app.use('/media', express.static(MEDIA_DIR, { fallthrough: false }));
 if (process.env.LUMEN_FIXTURE_BLOCK_WORKER === '1') {
   app.get(/^\/assets\/broadcast-encoder\.worker-.*\.js$/, (_req, res) => {
     res.type('application/javascript').send("self.onmessage = () => self.postMessage('error')");
+  });
+}
+// Reproduce a Chromium audio engine that reports a running renderer but never
+// starts its audio clock. Only the first AudioContext in each disposable engine
+// page is stalled; a newly constructed compositor can recover before going live.
+if (process.env.LUMEN_FIXTURE_STALL_FIRST_AUDIO === '1') {
+  app.get('/studio/engine', async (_request, response) => {
+    const html = await fs.readFile(path.join(FRONTEND_DIST, 'index.html'), 'utf8');
+    response.type('html').send(html.replace('<head>', `<head><script>
+      const NativeAudioContext = window.AudioContext; let first = true;
+      window.AudioContext = class extends NativeAudioContext {
+        constructor(...args) { super(...args); if (first) { first = false; void super.suspend(); this.resume = () => new Promise(() => {}); } }
+      };
+    </script>`));
   });
 }
 app.use(express.static(FRONTEND_DIST)); app.get('*', (_request, response) => response.sendFile(path.join(FRONTEND_DIST, 'index.html')));

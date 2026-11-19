@@ -60,9 +60,9 @@ test('local Watch clones saved social setup read-only and supports every destina
   try {
     assert.equal(service.snapshot().mode, 'local-watch'); assert.equal(service.snapshot().preflight.ready, true);
     assert.equal(service.snapshot().config.profile, '1080p'); assert.equal(service.snapshot().config.recordOnStart, true); assert.equal(service.snapshot().session, null);
-    assert.deepEqual(service.snapshot().config.destinations, [{ id: 'youtube', enabled: true, configured: true }, { id: 'facebook', enabled: false, configured: true }]);
+    assert.deepEqual(service.snapshot().config.destinations, [{ id: 'youtube', enabled: true, configured: true }, { id: 'facebook', enabled: false, configured: true }, { id: 'instagram', enabled: false, configured: false, streamUrl: '', hasKey: false }]);
     const filename = path.join(config.broadcastDirectory, 'broadcast-private.json'); assert.equal((await fs.stat(filename)).mode & 0o777, 0o600);
-    assert.deepEqual(JSON.parse(await fs.readFile(filename, 'utf8')), { ...saved, watch: { enabled: true } });
+    assert.deepEqual(JSON.parse(await fs.readFile(filename, 'utf8')), { ...saved, version: 2, destinations: [...saved.destinations, { id: 'instagram', enabled: false }], watch: { enabled: true } });
     await service.configure({ destinations: [{ id: 'youtube', enabled: true, streamKey: 'fixture-new-youtube' }, { id: 'facebook', enabled: false, clearKey: true }] });
     await service.configure({ destinations: [{ id: 'facebook', enabled: true, streamKey: 'fixture-new-facebook' }] });
     assert.equal(spawned.length, 0, 'Restored enabled states and Save setup never start a public stream.');
@@ -168,7 +168,7 @@ test('dedicated local child requires IPC, starts with isolated Watch settings an
     const startup = await ready; assert.equal(startup.backendUrl, `http://127.0.0.1:${backendPort}`); assert.equal(startup.watchUrl, `http://127.0.0.1:${relayPort}/watch/live`);
     const status = await (await fetch(`http://127.0.0.1:${backendPort}/api/studio/status`)).json(); assert.equal(status.state, 'offline'); assert.equal(status.recording, null);
     assert.ok(await fs.stat(path.join(station, '.lumen-runtime.lock'))); assert.deepEqual(await fs.readFile(sourceFile), sourceBefore);
-    assert.deepEqual(JSON.parse(await fs.readFile(path.join(config.broadcastDirectory, 'broadcast-private.json'), 'utf8')), { ...saved, watch: { enabled: true } });
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(config.broadcastDirectory, 'broadcast-private.json'), 'utf8')), { ...saved, version: 2, destinations: [...saved.destinations, { id: 'instagram', enabled: false }], watch: { enabled: true } });
     const duplicate = fork(entry, [], { execArgv: ['--import', 'tsx'], env: environment, silent: true }); duplicate.stdout?.resume(); duplicate.stderr?.resume();
     const secondConfig = await temporaryConfig();
     const duplicateExit = new Promise<number | null>(resolve => duplicate.once('exit', resolve));

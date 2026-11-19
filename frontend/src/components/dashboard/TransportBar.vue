@@ -13,7 +13,6 @@ import {
 } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
 import ModeToggle from './ModeToggle.vue';
-import MusicMiniPlayer from './MusicMiniPlayer.vue';
 import ChannelOutputControls from '@/components/channel/ChannelOutputControls.vue';
 import { usePlaybackStore } from '@/stores/playback';
 import { usePresenceStore } from '@/stores/presence';
@@ -79,9 +78,9 @@ const inlineModeClass = 'inline-flex';
       <Button
         :variant="playback.playing ? 'accent' : 'default'"
         size="icon"
-        :disabled="playback.mode !== 'auto' || !playback.current || playback.readOnly"
-        :title="playback.playing ? 'Pause presentation (Space)' : 'Play presentation (Space)'"
-        :aria-label="playback.playing ? 'Pause presentation' : 'Play presentation'"
+        :disabled="!playback.current || playback.current.durationMs <= 0 || playback.readOnly"
+        :title="playback.playing ? 'Pause timer (Space)' : 'Start timer (Space)'"
+        :aria-label="playback.playing ? 'Pause timer' : 'Start timer'"
         @click="playback.toggle"
       >
         <Pause v-if="playback.playing" :size="16" />
@@ -120,7 +119,6 @@ const inlineModeClass = 'inline-flex';
     />
 
     <div class="hidden md:block h-6 w-px bg-hair shrink-0" />
-    <MusicMiniPlayer class="hidden md:flex presentation-music" />
 
     <div class="flex-1" />
 
@@ -158,8 +156,8 @@ const inlineModeClass = 'inline-flex';
 
 <style scoped>
 .presentation-controls { min-height: 46px; display: flex; align-items: center; gap: 10px; padding: 6px 10px; }
-.presentation-music { max-width: 330px; flex: 1 1 220px; }
+.presentation-controls :deep(.presentation-music) { max-width: 330px; flex: 1 1 220px; }
 .transport-key { align-items: center; justify-content: center; width: 17px; height: 18px; margin-left: 4px; border: 1px solid var(--border-hair); border-radius: 4px; font-size: 9px; color: var(--text-muted); }
-@media (max-width: 1100px) { .presentation-controls { flex-wrap: wrap; gap: 6px; padding: 6px; } .presentation-music { min-width: 180px; } }
+@media (max-width: 1100px) { .presentation-controls { flex-wrap: wrap; gap: 6px; padding: 6px; } .presentation-controls :deep(.presentation-music) { min-width: 180px; } }
 @media (max-width: 460px) { .presentation-controls { gap: 4px; } }
 </style>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { LoadingSkeleton, Skeleton, SkeletonIndicator } from '@/components/ui/skeleton';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
-import { Aperture, ArrowLeft, ArrowUpRight, Check, ChevronDown, Copy, CircleAlert, CircleCheck, Facebook, Film, LoaderCircle, Radio, RefreshCw, Settings2, ShieldCheck, Square, Volume2, VolumeX, X, Youtube } from 'lucide-vue-next';
+import { Aperture, ArrowLeft, ArrowUpRight, Check, ChevronDown, Copy, CircleAlert, CircleCheck, Facebook, Film, Instagram, Radio, RefreshCw, Settings2, ShieldCheck, Square, Volume2, VolumeX, X, Youtube } from 'lucide-vue-next';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import StudioMonitor from '@/components/studio/StudioMonitor.vue';
 import { useBroadcastStore } from '@/stores/broadcast';
@@ -14,7 +15,10 @@ const phase = ref<'main' | 'start' | 'stop'>('main');
 const recordWithStream = ref(true), stopRecording = ref(false), title = ref(''), saved = ref(false), readinessExpanded = ref(false);
 const formBaseline = ref(''), previewReady = ref(false), copyMessage = ref('');
 const expandedDestination = ref<BroadcastDestinationId | 'watch' | null>(null);
-const form = reactive({ profile: '720p' as BroadcastProfile, recordOnStart: true, youtube: { enabled: false, streamKey: '', clearKey: false }, facebook: { enabled: false, streamKey: '', clearKey: false }, watchEnabled: false });
+const socialIds = ['youtube', 'facebook', 'instagram'] as const;
+const socialNames = { youtube: 'YouTube', facebook: 'Facebook', instagram: 'Instagram' };
+const socialIcons = { youtube: Youtube, facebook: Facebook, instagram: Instagram };
+const form = reactive({ profile: '720p' as BroadcastProfile, recordOnStart: true, youtube: { enabled: false, streamKey: '', clearKey: false }, facebook: { enabled: false, streamKey: '', clearKey: false }, instagram: { enabled: false, streamUrl: '', streamKey: '', clearKey: false }, watchEnabled: false });
 let detach: (() => void) | undefined;
 onMounted(() => { detach = broadcast.attach(); });
 onBeforeUnmount(() => { detach?.(); clearSecrets(); });
@@ -23,16 +27,17 @@ const localWatch = computed(() => broadcast.snapshot?.mode === 'local-watch');
 const production = computed(() => broadcast.snapshot?.production);
 const configFor = (id: BroadcastDestinationId) => config.value?.destinations.find(value => value.id === id);
 const settingsDisabled = computed(() => !identity.me?.isAdmin || broadcast.active || !!broadcast.busy);
-function clearSecrets() { form.youtube.streamKey = ''; form.facebook.streamKey = ''; form.youtube.clearKey = form.facebook.clearKey = false; }
-function formState() { return JSON.stringify({ profile: form.profile, recordOnStart: form.recordOnStart, watchEnabled: form.watchEnabled, youtube: form.youtube.enabled, facebook: form.facebook.enabled }); }
+function clearSecrets() { for (const id of socialIds) { form[id].streamKey = ''; form[id].clearKey = false; } }
+function formState() { return JSON.stringify({ profile: form.profile, recordOnStart: form.recordOnStart, watchEnabled: form.watchEnabled, youtube: form.youtube.enabled, facebook: form.facebook.enabled, instagram: form.instagram.enabled, instagramUrl: form.instagram.streamUrl }); }
 function hydrate(resetRecording = false) {
   if (!config.value) return;
   if (resetRecording || !formBaseline.value) recordWithStream.value = config.value.recordOnStart;
   form.profile = config.value.profile; form.recordOnStart = config.value.recordOnStart; form.watchEnabled = config.value.watch.enabled;
-  for (const id of ['youtube', 'facebook'] as const) form[id].enabled = !!configFor(id)?.enabled;
+  for (const id of socialIds) form[id].enabled = !!configFor(id)?.enabled;
+  form.instagram.streamUrl = configFor('instagram')?.streamUrl ?? '';
   clearSecrets(); formBaseline.value = formState();
 }
-const dirty = computed(() => !!formBaseline.value && (formState() !== formBaseline.value || (['youtube', 'facebook'] as const).some(id => !!form[id].streamKey || form[id].clearKey)));
+const dirty = computed(() => !!formBaseline.value && (formState() !== formBaseline.value || socialIds.some(id => !!form[id].streamKey || form[id].clearKey)));
 watch(() => broadcast.open, open => {
   phase.value = 'main'; saved.value = false; copyMessage.value = ''; readinessExpanded.value = false; expandedDestination.value = null;
   if (open) { hydrate(true); void broadcast.refresh(); }
@@ -51,16 +56,18 @@ function changeEnabled(id: BroadcastDestinationId | 'watch', event: Event) {
   const configured = id === 'watch' ? config.value?.watch.configured : configFor(id)?.configured;
   if (enabled && !configured) expandedDestination.value = id;
 }
-const destinations = computed(() => (['youtube', 'facebook', 'watch'] as const).map(id => {
+const destinations = computed(() => ([...socialIds, 'watch'] as const).map(id => {
   const enabled = id === 'watch' ? !!config.value?.watch.enabled : !!configFor(id)?.enabled;
   const configured = id === 'watch' ? !!config.value?.watch.configured : !!configFor(id)?.configured;
   const sink = id === 'watch' ? broadcast.snapshot?.session?.watch : broadcast.snapshot?.session?.destinations.find(value => value.id === id);
   const state = sink?.state ?? (!enabled ? 'disabled' : configured ? 'stopped' : 'unconfigured');
-  const pending = draftEnabled(id) !== enabled || id !== 'watch' && (!!form[id].streamKey || form[id].clearKey);
-  const draftConfigured = id === 'watch' ? configured : !form[id].clearKey && (!!form[id].streamKey.trim() || configured);
+  const hasKey = id !== 'watch' && (configFor(id)?.hasKey ?? configured);
+  const urlChanged = id === 'instagram' && form.instagram.streamUrl !== (configFor(id)?.streamUrl ?? '');
+  const pending = urlChanged || draftEnabled(id) !== enabled || id !== 'watch' && (!!form[id].streamKey || form[id].clearKey);
+  const draftConfigured = id === 'watch' ? configured : !form[id].clearKey && (!!form[id].streamKey.trim() || hasKey) && (id !== 'instagram' || !!form.instagram.streamUrl.trim());
   const idleLabel = !draftEnabled(id) ? 'Off' : draftConfigured ? 'Ready' : 'Setup needed';
   const showRuntime = broadcast.active || state === 'error' && enabled && !pending;
-  return { id, name: id === 'youtube' ? 'YouTube' : id === 'facebook' ? 'Facebook' : 'Lumen Watch', icon: id === 'youtube' ? Youtube : id === 'facebook' ? Facebook : Aperture, enabled, configured, state, pending, error: sink?.error, retries: sink?.retries ?? 0,
+  return { id, name: id === 'watch' ? 'Lumen Watch' : socialNames[id], icon: id === 'watch' ? Aperture : socialIcons[id], enabled, configured, hasKey, state, pending, error: sink?.error, retries: sink?.retries ?? 0,
     label: showRuntime ? id === 'watch' && state === 'live' ? 'Live view ready' : states[state] : idleLabel,
     tone: showRuntime ? state : !draftEnabled(id) ? 'disabled' : draftConfigured ? 'ready' : 'unconfigured' };
 }));
@@ -81,7 +88,7 @@ watch(() => production.value?.engineState, () => { previewReady.value = false; }
 async function copyWatchLink() { if (!watchUrl.value) return; try { await navigator.clipboard.writeText(watchUrl.value); copyMessage.value = 'Watch link copied.'; } catch { copyMessage.value = 'Copy is unavailable in this browser. Open Watch and copy its address.'; } }
 async function saveSettings() {
   if (settingsDisabled.value || !dirty.value) return;
-  const success = await broadcast.save({ profile: form.profile, recordOnStart: form.recordOnStart, watch: { enabled: form.watchEnabled }, destinations: (['youtube', 'facebook'] as const).map(id => ({ id, enabled: form[id].enabled, ...(!form[id].clearKey && form[id].streamKey.trim() ? { streamKey: form[id].streamKey.trim() } : {}), ...(form[id].clearKey ? { clearKey: true } : {}) })) });
+  const success = await broadcast.save({ profile: form.profile, recordOnStart: form.recordOnStart, watch: { enabled: form.watchEnabled }, destinations: socialIds.map(id => ({ id, enabled: form[id].enabled, ...(id === 'instagram' ? { streamUrl: form.instagram.streamUrl.trim() } : {}), ...(!form[id].clearKey && form[id].streamKey.trim() ? { streamKey: form[id].streamKey.trim() } : {}), ...(form[id].clearKey ? { clearKey: true } : {}) })) });
   if (success) { hydrate(); saved.value = true; }
 }
 async function prepareStart() { if (broadcast.busy || dirty.value) return; saved.value = false; const checks = await broadcast.check(); if (checks) phase.value = 'start'; }
@@ -96,26 +103,29 @@ function shortcuts(event: KeyboardEvent) { if (event.key === 'Enter' && (event.c
     <DialogContent class="broadcast-panel" :class="{ 'is-confirmation': phase !== 'main' }" :show-close-button="false" @keydown.capture="shortcuts">
       <header class="broadcast-panel-heading">
         <span class="broadcast-heading-icon"><Radio :size="19" :stroke-width="1.6" /></span>
-        <div><DialogTitle>Go Live</DialogTitle><DialogDescription>Stream your Studio Program.</DialogDescription></div>
+        <div><DialogTitle>Go Live</DialogTitle><DialogDescription>Stream your Program picture and Main audio.</DialogDescription></div>
         <span v-if="broadcast.active" class="broadcast-running"><i />{{ broadcast.snapshot?.session?.state === 'starting' ? 'Connecting' : broadcast.snapshot?.session?.state === 'stopping' ? 'Ending stream' : 'Stream active' }}</span>
         <button type="button" class="broadcast-icon" aria-label="Close Go Live controls" @click="broadcast.open = false"><X :size="17" /></button>
       </header>
       <p v-if="broadcast.notice" class="broadcast-notice-inline" :data-tone="broadcast.notice.tone" :role="broadcast.notice.tone === 'info' ? 'status' : 'alert'">
         <Radio v-if="broadcast.notice.tone === 'info'" :size="16" /><CircleAlert v-else :size="16" /><span><b>{{ broadcast.notice.label }}</b> · {{ broadcast.notice.message }}</span>
       </p>
-      <aside v-if="localWatch" class="broadcast-local-notice" aria-label="Local Lumen Watch"><Aperture :size="15" aria-hidden="true" /><div><strong>Local Lumen Watch</strong><p>Watch is local to this computer. Facebook and YouTube stream publicly when enabled.</p></div></aside>
+      <aside v-if="localWatch" class="broadcast-local-notice" aria-label="Local Lumen Watch"><Aperture :size="15" aria-hidden="true" /><div><strong>Local Lumen Watch</strong><p>Watch is local to this computer. Enabled social destinations stream publicly when you publish in their live dashboard.</p></div></aside>
       <div class="broadcast-panel-body">
-        <div v-if="broadcast.loading && !config" class="broadcast-loading"><LoaderCircle :size="21" class="broadcast-spin" />Connecting to this station…</div>
+        <LoadingSkeleton v-if="broadcast.loading && !config" class="broadcast-workspace broadcast-skeleton" label="Connecting to this station…">
+          <div class="broadcast-skeleton-column" aria-hidden="true"><Skeleton width="28%" :height="10" /><Skeleton height="auto" class="broadcast-skeleton-monitor" /><div v-for="n in 3" :key="n" class="broadcast-skeleton-row"><Skeleton :width="n === 2 ? '40%' : '60%'" :height="10" /><Skeleton :height="34" /></div></div>
+          <div class="broadcast-skeleton-column" aria-hidden="true"><Skeleton width="38%" :height="12" /><Skeleton width="72%" :height="8" /><div v-for="n in 4" :key="n" class="broadcast-skeleton-card"><Skeleton :width="32" :height="32" :radius="8" /><div><Skeleton width="55%" :height="12" /><Skeleton width="32%" :height="8" /></div><Skeleton :width="30" :height="17" :radius="9" /></div></div>
+        </LoadingSkeleton>
         <template v-else-if="config">
           <div v-if="phase === 'main'" class="broadcast-workspace">
             <section class="broadcast-picture-column" aria-label="Program and recording">
               <div class="broadcast-section-heading"><h3><span class="broadcast-program-dot" />Program</h3><span><VolumeX :size="12" />Muted preview</span></div>
               <div class="broadcast-program-monitor" role="region" aria-label="Program preview">
                 <template v-if="broadcast.open && production?.engineState === 'running'">
-                  <span v-if="!previewReady" class="broadcast-monitor-placeholder"><LoaderCircle :size="18" class="broadcast-spin" />Connecting to Program…</span>
+                  <LoadingSkeleton v-if="!previewReady" class="broadcast-monitor-placeholder" label="Connecting to Program…"><Skeleton height="100%" :radius="0" /></LoadingSkeleton>
                   <StudioMonitor :output-id="PROGRAM_MONITOR_OUTPUT_ID" :audible="false" @ready="previewReady = $event" />
                 </template>
-                <div v-else class="broadcast-monitor-empty"><Aperture :size="30" :stroke-width="1.2" /><strong>{{ production?.programName || 'No scene on Program' }}</strong><span>{{ production?.programName ? 'The engine starts when you go live.' : 'Take a scene to Program in Studio first.' }}</span></div>
+                <div v-else class="broadcast-monitor-empty"><Aperture :size="30" :stroke-width="1.2" /><strong>{{ production?.programName || 'No scene on Program' }}</strong><span>{{ production?.programName ? 'The engine starts when you go live.' : 'Send a presentation to Program, or choose a scene in Studio first.' }}</span></div>
               </div>
               <dl class="broadcast-program"><div><dt><Film :size="14" />Picture</dt><dd>{{ production?.programName || 'No Program selected' }}</dd></div><div><dt><Volume2 :size="14" />Main audio</dt><dd>{{ production?.mainAudioName || 'Existing Program mix' }}<em v-if="production?.masterMuted">Muted</em></dd></div></dl>
               <section class="broadcast-quality" aria-label="Stream setup">
@@ -131,7 +141,7 @@ function shortcuts(event: KeyboardEvent) { if (event.key === 'Enter' && (event.c
                 </details>
               </div>
               <section v-if="!broadcast.active || attentionChecks.length" class="broadcast-preflight" aria-label="Stream readiness">
-                <div class="broadcast-readiness-summary" :class="{ ready: preflight?.ready && !dirty && !attentionChecks.length, attention: !preflight?.ready || dirty || attentionChecks.length }"><CircleCheck v-if="preflight?.ready && !dirty && !attentionChecks.length" :size="16" /><CircleAlert v-else :size="16" /><strong>{{ readinessLabel }}</strong><button type="button" class="broadcast-icon" :disabled="!!broadcast.busy" aria-label="Refresh stream checks" @click="broadcast.check()"><RefreshCw :size="13" :class="{ 'broadcast-spin': broadcast.busy === 'check' }" /></button></div>
+                <div class="broadcast-readiness-summary" :class="{ ready: preflight?.ready && !dirty && !attentionChecks.length, attention: !preflight?.ready || dirty || attentionChecks.length }"><CircleCheck v-if="preflight?.ready && !dirty && !attentionChecks.length" :size="16" /><CircleAlert v-else :size="16" /><strong>{{ readinessLabel }}</strong><button type="button" class="broadcast-icon" :disabled="!!broadcast.busy" aria-label="Refresh stream checks" @click="broadcast.check()"><SkeletonIndicator v-if="broadcast.busy === 'check'" /><RefreshCw v-else :size="13" /></button></div>
                 <p v-if="dirty && attentionChecks.length" class="broadcast-caption">Checks below reflect your saved setup.</p>
                 <ul v-if="attentionChecks.length" class="broadcast-attention-checks"><li v-for="check in attentionChecks" :key="check.id" :class="`check-${checkState(check)}`"><CircleAlert :size="13" /><span>{{ check.message }}</span></li></ul>
                 <button type="button" class="broadcast-readiness-toggle" :aria-expanded="readinessExpanded" :aria-label="readinessExpanded ? 'Hide readiness details' : 'Show readiness details'" @click="readinessExpanded = !readinessExpanded"><span>{{ passedCount }} checks passed<span v-if="preflight?.estimatedUploadKbps"> · ~{{ (preflight.estimatedUploadKbps / 1000).toFixed(1) }} Mb/s upload</span></span><ChevronDown :size="13" :class="{ expanded: readinessExpanded }" /></button>
@@ -150,22 +160,25 @@ function shortcuts(event: KeyboardEvent) { if (event.key === 'Enter' && (event.c
                   </div>
                   <p v-if="destination.error && (broadcast.active || destination.state === 'error')" class="broadcast-destination-error">{{ destination.error }}</p>
                   <div class="broadcast-destination-toolbar">
-                    <button type="button" class="broadcast-text-button" :aria-label="`Configure ${destination.name} destination`" :aria-expanded="expandedDestination === destination.id" @click="expandedDestination = expandedDestination === destination.id ? null : destination.id"><Settings2 :size="12" />{{ destination.id === 'watch' ? 'Watch setup' : destination.configured ? 'Manage key' : 'Configure' }}<ChevronDown :size="12" :class="{ expanded: expandedDestination === destination.id }" /></button>
+                    <button type="button" class="broadcast-text-button" :aria-label="`Configure ${destination.name} destination`" :aria-expanded="expandedDestination === destination.id" @click="expandedDestination = expandedDestination === destination.id ? null : destination.id"><Settings2 :size="12" />{{ destination.id === 'watch' ? 'Watch setup' : destination.hasKey ? 'Manage key' : 'Configure' }}<ChevronDown :size="12" :class="{ expanded: expandedDestination === destination.id }" /></button>
                     <div v-if="broadcast.active && destination.enabled" class="broadcast-destination-actions"><button v-if="['error', 'stopped'].includes(destination.state) && destination.configured" type="button" :aria-label="`Retry ${destination.name} destination`" :disabled="!!broadcast.busy" @click="broadcast.retry(destination.id)"><RefreshCw :size="12" />Retry</button><button v-if="['live', 'connecting', 'retrying'].includes(destination.state)" type="button" :aria-label="`Stop ${destination.name} destination`" :disabled="!!broadcast.busy" @click="broadcast.stopDestination(destination.id)"><Square :size="10" />Stop</button></div>
                     <span v-else-if="destination.configured" class="broadcast-destination-saved"><Check :size="11" />{{ destination.id === 'watch' ? 'Relay configured' : 'Key saved' }}</span>
                   </div>
                   <fieldset v-if="expandedDestination === destination.id" class="broadcast-destination-setup" :disabled="settingsDisabled">
                     <template v-if="destination.id !== 'watch'">
-                      <label class="broadcast-field"><span>Stream key<span>{{ destination.configured ? 'Saved on station' : 'Not configured' }}</span></span><input v-model="form[destination.id].streamKey" type="password" :aria-label="`${destination.name} stream key`" autocomplete="new-password" spellcheck="false" :placeholder="destination.configured ? 'Leave blank to keep the saved key' : 'Paste your stream key'" maxlength="1024" :disabled="settingsDisabled || form[destination.id].clearKey" /></label>
+                      <label v-if="destination.id === 'instagram'" class="broadcast-field"><span>Stream URL</span><input v-model="form.instagram.streamUrl" type="url" aria-label="Instagram stream URL" autocomplete="off" spellcheck="false" placeholder="Paste the Stream URL from Instagram" maxlength="2048" /></label>
+                      <label class="broadcast-field"><span>Stream key<span>{{ destination.hasKey ? 'Saved on station' : 'Not configured' }}</span></span><input v-model="form[destination.id].streamKey" type="password" :aria-label="`${destination.name} stream key`" autocomplete="new-password" spellcheck="false" :placeholder="destination.hasKey ? 'Leave blank to keep the saved key' : 'Paste your stream key'" maxlength="2048" :disabled="settingsDisabled || form[destination.id].clearKey" /></label>
                       <p class="broadcast-caption">Secure RTMPS connection. Keys are never sent back to this browser.</p>
-                      <label v-if="destination.configured" class="broadcast-checkbox"><input v-model="form[destination.id].clearKey" type="checkbox" :aria-label="`Remove saved ${destination.name} stream key`" />Remove saved key</label>
+                      <p v-if="destination.id === 'instagram'" class="broadcast-caption">Copy both values from Instagram Live Producer. Replace a single-use key before each broadcast, or use a persistent key if your account offers one.</p>
+                      <label v-if="destination.hasKey" class="broadcast-checkbox"><input v-model="form[destination.id].clearKey" type="checkbox" :aria-label="`Remove saved ${destination.name} stream key`" />Remove saved key</label>
                     </template>
                     <template v-else><p class="broadcast-caption">{{ localWatch ? 'Local Watch is available while this launcher is running.' : config.watch.configured ? 'Watch relay is configured on this station.' : 'Public Watch is not configured on this station.' }}</p><p v-if="!localWatch" class="broadcast-caption">An administrator sets the public domain, relay and access credentials on the server.</p></template>
                   </fieldset>
                   <div v-if="destination.id === 'watch' && watchUrl && (draftEnabled('watch') || broadcast.active)" class="broadcast-watch"><span :title="watchUrl">{{ watchUrl.replace(/^https?:\/\//, '') }}</span><div class="broadcast-watch-actions"><button type="button" aria-label="Copy Lumen Watch link" @click="copyWatchLink"><Copy :size="12" />Copy link</button><a :href="watchUrl" target="_blank" rel="noopener noreferrer" aria-label="Open Lumen Watch"><ArrowUpRight :size="13" />Open</a></div><p v-if="copyMessage" role="status">{{ copyMessage }}</p></div>
                 </article>
               </div>
-              <p class="broadcast-caption broadcast-destination-caption">{{ broadcast.active ? 'Sending confirms the connection. YouTube and Facebook may still need you to publish in their live dashboard.' : 'Your Studio picture and audio go to every enabled destination. Nothing starts until you confirm.' }}</p>
+              <p v-if="draftEnabled('instagram')" class="broadcast-caption">Keep Instagram Live Producer open and click Go Live there once the preview appears. End the live video there before stopping its feed in Lumen.</p>
+              <p class="broadcast-caption broadcast-destination-caption">{{ broadcast.active ? 'Sending confirms the connection. Publish in each platform’s live dashboard when its preview is ready.' : 'Your Studio picture and audio go to every enabled destination. Nothing starts until you confirm.' }}</p>
             </section>
           </div>
           <section v-else-if="phase === 'start'" class="broadcast-confirmation" aria-label="Confirm stream start">
@@ -175,13 +188,15 @@ function shortcuts(event: KeyboardEvent) { if (event.key === 'Enter' && (event.c
             <label v-if="recordWithStream" class="broadcast-field"><span>Service recording name <small>Optional</small></span><input v-model="title" type="text" maxlength="100" aria-label="Service recording name" :disabled="!!broadcast.busy" placeholder="Service or event name" /></label>
             <ul v-if="attentionChecks.length" class="broadcast-confirm-checks"><li v-for="check in attentionChecks" :key="check.id" :class="`check-${checkState(check)}`"><CircleAlert :size="14" /><span>{{ check.message }}</span></li></ul>
             <p v-else class="broadcast-confirm-ready"><CircleCheck :size="15" />{{ passedCount }} checks passed. Your stream is ready.</p>
-            <p class="broadcast-caption">YouTube and Facebook may still require you to publish the event. Manage platform titles in their live dashboard.</p>
+            <p v-if="configFor('instagram')?.enabled" class="broadcast-caption">Keep Instagram Live Producer open. Once its preview appears, click Go Live on Instagram. Instagram receives the same landscape Program as your other destinations.</p>
+            <p class="broadcast-caption">Manage platform titles and publish the event in each platform’s live dashboard.</p>
           </section>
           <section v-else class="broadcast-confirmation" aria-label="Confirm stream end">
             <button type="button" class="broadcast-text-button" :disabled="!!broadcast.busy" @click="phase = 'main'"><ArrowLeft :size="13" />Back to setup</button>
             <h2>End this stream?</h2><p>Stop sending Program to all destinations. Your Studio stays as it is.</p>
             <label class="broadcast-stop-choice" :class="{ selected: !stopRecording }"><input v-model="stopRecording" type="radio" :value="false" name="broadcast-stop-recording" aria-label="Keep recording when ending stream" :disabled="!!broadcast.busy" /><span><strong>Keep recording<em>Recommended</em></strong><small>Leave the local recording running.</small></span></label>
             <label class="broadcast-stop-choice" :class="{ selected: stopRecording }"><input v-model="stopRecording" type="radio" :value="true" name="broadcast-stop-recording" aria-label="Stop recording when ending stream" :disabled="!!broadcast.busy" /><span><strong>Stop stream and recording</strong><small>Finish the local recording as well.</small></span></label>
+            <p v-if="configFor('instagram')?.enabled" class="broadcast-caption">End the live video in Instagram first, then end the stream here.</p>
             <p class="broadcast-caption">Your scenes, camera sources and Main audio stay unchanged.</p>
           </section>
         </template>
@@ -193,12 +208,12 @@ function shortcuts(event: KeyboardEvent) { if (event.key === 'Enter' && (event.c
         <span v-else-if="saved && phase === 'main'" class="broadcast-footer-message is-saved" role="status"><Check :size="13" />Setup saved</span>
         <span v-else class="broadcast-footer-message"><ShieldCheck :size="13" />Program + Main audio</span>
         <div class="broadcast-footer-actions">
-          <button v-if="phase === 'start'" type="button" class="broadcast-primary" :disabled="!!broadcast.busy || !preflight?.ready || dirty" @click="start"><LoaderCircle v-if="broadcast.busy" :size="14" class="broadcast-spin" /><Radio v-else :size="14" />{{ broadcast.busy === 'start' ? 'Starting stream…' : 'Go Live' }}</button>
-          <button v-else-if="phase === 'stop'" type="button" class="broadcast-danger" :disabled="!!broadcast.busy" @click="stop"><LoaderCircle v-if="broadcast.busy" :size="14" class="broadcast-spin" /><Square v-else :size="12" />{{ broadcast.busy === 'stop' ? 'Ending stream…' : 'End stream' }}</button>
+          <button v-if="phase === 'start'" type="button" class="broadcast-primary" :disabled="!!broadcast.busy || !preflight?.ready || dirty" @click="start"><SkeletonIndicator v-if="broadcast.busy" /><Radio v-else :size="14" />{{ broadcast.busy === 'start' ? 'Starting stream…' : 'Go Live' }}</button>
+          <button v-else-if="phase === 'stop'" type="button" class="broadcast-danger" :disabled="!!broadcast.busy" @click="stop"><SkeletonIndicator v-if="broadcast.busy" /><Square v-else :size="12" />{{ broadcast.busy === 'stop' ? 'Ending stream…' : 'End stream' }}</button>
           <template v-else>
-            <button v-if="dirty" type="button" class="broadcast-secondary" :disabled="settingsDisabled || !dirty" @click="saveSettings"><LoaderCircle v-if="broadcast.busy === 'save'" :size="14" class="broadcast-spin" />Save setup</button>
+            <button v-if="dirty" type="button" class="broadcast-secondary" :disabled="settingsDisabled || !dirty" @click="saveSettings"><SkeletonIndicator v-if="broadcast.busy === 'save'" />Save setup</button>
             <button v-if="broadcast.active" type="button" class="broadcast-danger" :disabled="!!broadcast.busy" @click="prepareStop"><Square :size="12" />End stream</button>
-            <button v-else type="button" class="broadcast-primary" :disabled="!!broadcast.busy || dirty" @click="prepareStart"><LoaderCircle v-if="broadcast.busy && broadcast.busy !== 'save'" :size="14" class="broadcast-spin" /><ArrowUpRight v-else :size="14" />Review stream</button>
+            <button v-else type="button" class="broadcast-primary" :disabled="!!broadcast.busy || dirty" @click="prepareStart"><SkeletonIndicator v-if="broadcast.busy && broadcast.busy !== 'save'" /><ArrowUpRight v-else :size="14" />Review stream</button>
           </template>
         </div>
       </footer>
