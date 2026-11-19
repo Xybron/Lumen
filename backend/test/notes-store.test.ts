@@ -69,3 +69,23 @@ test('private notes persist ordered idempotent segments separately from reviewed
     assert.equal(store.get('prayer','other-item').segments.length,0,'Each Notes item has a separate transcript');
   }finally{store.close();await fs.rm(directory,{recursive:true,force:true});}
 });
+
+test('clearing captured phrases preserves drafts, other notes, later speech and duplicate protection',()=>{
+  const store=new NotesStore(':memory:');
+  try{
+    const original=store.get('channel','one',{body:'Keep my written point'});
+    const old=store.appendSegment('channel','one','session',1,'Old speech',true)!;
+    const later=store.appendSegment('channel','one','session',2,'New speech during confirmation',true)!;
+    store.appendSegment('channel','two','session',1,'Other note',true);
+    const result=store.clearTranscript('channel','one',old.id);
+    assert.deepEqual(result.segments.map(s=>s.id),[later.id]);
+    assert.equal(store.get('channel','one').draft.body,original.draft.body);
+    assert.equal(store.get('channel','one').revision,original.revision);
+    assert.equal(store.get('channel','two').segments.length,1);
+    assert.equal(store.appendSegment('channel','one','session',1,'Old speech',true),undefined);
+    assert.equal(store.db.prepare('SELECT text FROM notes_segments WHERE id=?').get(old.id).text,'');
+    store.appendSegment('channel','one','session',3,'Continuing speech',true);
+    assert.deepEqual(store.segmentsSince('channel','one').map(s=>s.sequence),[2,3]);
+    assert.equal(store.clearedThrough('channel','one'),old.id);
+  }finally{store.close();}
+});

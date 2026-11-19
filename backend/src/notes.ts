@@ -157,9 +157,15 @@ export function createNotes(options:{listener:LocalListener;otherListeningActive
   }
   function linkResponse(channelId:string,itemId:string,after:number){
     pruneLinks();const link=links.get(linkKey(channelId,itemId));
-    return {sessionId:link?.sessionId??null,linked:!!link,afterTurn:link?.afterTurn??-1,segments:store.segmentsSince(channelId,itemId,after)};
+    return {clearedThrough:store.clearedThrough(channelId,itemId),sessionId:link?.sessionId??null,linked:!!link,afterTurn:link?.afterTurn??-1,segments:store.segmentsSince(channelId,itemId,after)};
   }
   const prefix='/notes/channels/:channelId/items/:itemId';
+  router.delete(`${prefix}/transcript`,requireSession,route(async(req,res)=>{
+    const a=await authorize(req,true),input=z.object({throughId:z.number().int().nonnegative().safe()}).strict().parse(req.body);
+    const last=store.get(a.channelId,a.itemId).segments.at(-1)?.id??store.clearedThrough(a.channelId,a.itemId);
+    if(input.throughId>last)throw new ProductionError(409,'Refresh the transcript before clearing it.');
+    res.json(store.clearTranscript(a.channelId,a.itemId,input.throughId));
+  }));
   router.get(`${prefix}`,requireSession,route(async(req,res)=>{const a=await authorize(req);res.json(store.get(a.channelId,a.itemId,initialDraft(a)));}));
   router.put(`${prefix}`,requireSession,route(async(req,res)=>{const a=await authorize(req,true),input=z.object({revision:z.number().int().nonnegative(),draft:NotesDraftSchema}).strict().parse(req.body),transcript=z.enum(['include','omit']).default('include').parse(req.query.transcript);res.json(store.saveDraft(a.channelId,a.itemId,input.revision,input.draft,transcript!=='omit'));}));
   router.get(`${prefix}/listening/link`,requireSession,route(async(req,res)=>{const a=await authorize(req),after=z.coerce.number().int().nonnegative().parse(req.query.after??0);res.json(linkResponse(a.channelId,a.itemId,after));}));

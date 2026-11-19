@@ -30,12 +30,24 @@ export class NotesStore {
       CREATE TABLE IF NOT EXISTS notes_segments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,channelId TEXT NOT NULL,itemId TEXT NOT NULL,sessionId TEXT NOT NULL,sequence INTEGER NOT NULL,text TEXT NOT NULL,receivedAt TEXT NOT NULL,uncertain INTEGER NOT NULL,
       UNIQUE(channelId,itemId,sessionId,sequence),FOREIGN KEY(channelId,itemId) REFERENCES notes_documents(channelId,itemId) ON DELETE CASCADE);`);
+    if(!(this.db.pragma('table_info(notes_documents)') as Array<{name:string}>).some(column=>column.name==='clearedThrough'))this.db.exec('ALTER TABLE notes_documents ADD COLUMN clearedThrough INTEGER NOT NULL DEFAULT 0');
+  }
+  clearedThrough(channelId:string,itemId:string):number {
+    return (this.db.prepare('SELECT clearedThrough FROM notes_documents WHERE channelId=? AND itemId=?').get(channelId,itemId) as {clearedThrough:number}|undefined)?.clearedThrough??0;
+  }
+  clearTranscript(channelId:string,itemId:string,throughId:number) {
+    this.ensure(channelId,itemId);
+    this.db.transaction(()=>{
+      this.db.prepare("UPDATE notes_segments SET text='' WHERE channelId=? AND itemId=? AND id<=?").run(channelId,itemId,throughId);
+      this.db.prepare('UPDATE notes_documents SET clearedThrough=MAX(clearedThrough,?) WHERE channelId=? AND itemId=?').run(throughId,channelId,itemId);
+    })();
+    return {clearedThrough:this.clearedThrough(channelId,itemId),segments:this.segmentsSince(channelId,itemId)};
   }
   private ensure(channelId:string,itemId:string,initial:Partial<NotesDraft>={}) {
     this.db.prepare('INSERT OR IGNORE INTO notes_documents(channelId,itemId,updatedAt,draft) VALUES(?,?,?,?)').run(channelId,itemId,new Date().toISOString(),JSON.stringify(NotesDraftSchema.parse({title:'',body:'',reference:'',layout:'key-points',...initial})));
   }
   segmentsSince(channelId:string,itemId:string,after=0):NotesSegment[] {
-    const segments=this.db.prepare('SELECT id,sessionId,sequence,text,receivedAt,uncertain FROM notes_segments WHERE channelId=? AND itemId=? AND id>? ORDER BY id').all(channelId,itemId,after) as Array<Omit<NotesSegment,'uncertain'>&{uncertain:number}>;
+    const segments=this.db.prepare('SELECT id,sessionId,sequence,text,receivedAt,uncertain FROM notes_segments WHERE channelId=? AND itemId=? AND id>? ORDER BY id').all(channelId,itemId,Math.max(after,this.clearedThrough(channelId,itemId))) as Array<Omit<NotesSegment,'uncertain'>&{uncertain:number}>;
     return segments.map(segment=>({...segment,uncertain:!!segment.uncertain}));
   }
   get(channelId:string,itemId:string,initial:Partial<NotesDraft>={}):NotesDocument {
@@ -44,7 +56,7 @@ export class NotesStore {
   }
   private document(channelId:string,itemId:string,includeTranscript:boolean):NotesDocument {
     const row=this.db.prepare('SELECT * FROM notes_documents WHERE channelId=? AND itemId=?').get(channelId,itemId) as {revision:number;updatedAt:string;draft:string};
-    return {channelId,itemId,revision:row.revision,updatedAt:row.updatedAt,draft:JSON.parse(row.draft),segments:includeTranscript?this.segmentsSince(channelId,itemId):[]};
+    return {channelId,itemId,clearedThrough:this.clearedThrough(channelId,itemId),revision:row.revision,updatedAt:row.updatedAt,draft:JSON.parse(row.draft),segments:includeTranscript?this.segmentsSince(channelId,itemId):[]};
   }
   saveDraft(channelId:string,itemId:string,revision:number,draft:NotesDraft,includeTranscript=true) {
     const next=NotesDraftSchema.parse(draft);this.ensure(channelId,itemId);
@@ -62,8 +74,8 @@ export class NotesStore {
     this.ensure(channelId,itemId);
     if(text.trim()) {
       const prior=this.db.prepare('SELECT id,sessionId,sequence,text,receivedAt,uncertain FROM notes_segments WHERE channelId=? AND itemId=? AND sessionId=? AND sequence=?').get(channelId,itemId,sessionId,sequence) as (Omit<NotesSegment,'uncertain'>&{uncertain:number})|undefined;
-      if(prior)return {...prior,uncertain:!!prior.uncertain};
-      const count=(this.db.prepare('SELECT COUNT(*) AS count FROM notes_segments WHERE channelId=? AND itemId=?').get(channelId,itemId) as {count:number}).count;
+      if(prior)return prior.id<=this.clearedThrough(channelId,itemId)?undefined:{...prior,uncertain:!!prior.uncertain};
+      const count=(this.db.prepare('SELECT COUNT(*) AS count FROM notes_segments WHERE channelId=? AND itemId=? AND id>?').get(channelId,itemId,this.clearedThrough(channelId,itemId)) as {count:number}).count;
       if(count>=10000)throw new ProductionError(409,'This transcript is full. Create a new Notes slide to continue.');
       // Transcript appends do not conflict with an operator editing the draft.
       const receivedAt=new Date().toISOString();

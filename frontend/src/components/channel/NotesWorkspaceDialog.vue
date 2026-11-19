@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed,nextTick,onBeforeUnmount,ref,watch } from 'vue';
-import { Copy,Mic,Square,Check,AudioLines,Link,Unlink,NotebookPen,Monitor,ChevronLeft,ChevronRight,SlidersHorizontal,ArrowDownToLine,AlignLeft,AlignCenter,AlignRight,Image,Palette,ChevronDown,Quote,List,Type,Layers,LoaderCircle } from 'lucide-vue-next';
+import { Trash2,Copy,Mic,Square,Check,AudioLines,Link,Unlink,NotebookPen,Monitor,ChevronLeft,ChevronRight,SlidersHorizontal,ArrowDownToLine,AlignLeft,AlignCenter,AlignRight,Image,Palette,ChevronDown,Quote,List,Type,Layers,LoaderCircle } from 'lucide-vue-next';
 import { Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription } from '@/components/ui/dialog';
 import PreviewSurface from '@/components/dashboard/PreviewSurface.vue';
 import MediaImagePicker from '@/components/media/MediaImagePicker.vue';
@@ -9,6 +9,7 @@ import { useIdentityStore } from '@/stores/identity';
 import { usePresenceStore } from '@/stores/presence';
 import { useSharedListeningStore } from '@/stores/shared-listening';
 import { useNotesListeningStore } from '@/stores/notes-listening';
+import { useConfirmation } from '@/composables/useConfirmation';
 import { useListeningInput } from '@/composables/useListeningInput';
 import { captureListening,listeningInputError } from '@/lib/worship/audio';
 import { openNotesProgramAudio } from '@/lib/notes-program-audio';
@@ -18,6 +19,8 @@ import type { NotesDocument,NotesDraft,NotesListeningSession,NotesSegment } from
 import type { ListeningStatus } from '../../../../shared/worship';
 
 const props=defineProps<{open:boolean;channel:Channel|null;item:Item|null;series:Item[];commit:(items:Item[])=>Promise<boolean>}>();
+const {confirmAction}=useConfirmation();
+const clearing=ref(false),clearedThrough=ref(0);
 const emit=defineEmits<{'update:open':[value:boolean]}>();
 const identity=useIdentityStore(),presence=usePresenceStore(),shared=useSharedListeningStore(),producer=useNotesListeningStore();
 const {devices,deviceId,processing,refreshDevices,missing,canUse,selectedLabel,syncCaptureInfo,error:inputError}=useListeningInput();
@@ -73,14 +76,31 @@ const ownProducer=computed(()=>producer.channelId===props.channel?.id);
 const inputLevel=computed(()=>active.value?level.value:ownProducer.value?producer.level:0);
 let generation=0,loadAbort:AbortController|undefined,captureAbort:AbortController|undefined,stopCapture:(()=>void)|undefined,closeProgram:(()=>void)|undefined,heartbeat:number|undefined,sessionEndpoint='';
 let linkRequest=0,refreshQueued=false,refreshingLink=false;
-interface LinkState {linked:boolean;sessionId:string|null;afterTurn?:number;segments:NotesSegment[]}
+interface LinkState {clearedThrough?:number;linked:boolean;sessionId:string|null;afterTurn?:number;segments:NotesSegment[]}
 async function request<T>(url:string,options:RequestInit={}):Promise<T> {
   const response=await fetch(url,{...options,headers:{...(options.body instanceof Blob?{}:{'Content-Type':'application/json'}),...options.headers}});
   const value=await response.json();if(!response.ok)throw new Error(value.error||'The station could not save these notes.');return value;
 }
+function applyClear(through=0){
+  clearedThrough.value=Math.max(clearedThrough.value,through);
+  if(privateDocument.value)privateDocument.value.segments=privateDocument.value.segments.filter(segment=>segment.id>clearedThrough.value);
+}
+async function clearTranscript(){
+  if(!canEdit.value||clearing.value||!privateDocument.value?.segments.length)return;
+  const sequence=generation,path=endpoint.value,throughId=privateDocument.value.segments.at(-1)!.id;
+  if(!await confirmAction({title:'Clear transcript?',description:'Remove the captured phrases from this note. Your written notes and slides stay unchanged. Linked listening will keep adding new speech.',confirmLabel:'Clear transcript',tone:'danger'}))return;
+  if(sequence!==generation)return;
+  clearing.value=true;++linkRequest;
+  try{
+    const result=await request<LinkState>(`${path}/transcript`,{method:'DELETE',body:JSON.stringify({throughId})});
+    if(sequence!==generation)return;
+    applyClear(result.clearedThrough);appendSegments(result.segments);selectedText.value='';notice.value='Transcript cleared';
+  }catch(cause){if(sequence===generation)error.value=(cause as Error).message;}
+  finally{if(sequence===generation){clearing.value=false;void refreshLink();}}
+}
 function appendSegments(segments:NotesSegment[]){
   if(!privateDocument.value||!segments.length)return;
-  const byId=new Map(privateDocument.value.segments.map(segment=>[segment.id,segment]));for(const segment of segments)byId.set(segment.id,segment);
+  const byId=new Map(privateDocument.value.segments.map(segment=>[segment.id,segment]));for(const segment of segments.filter(segment=>segment.id>clearedThrough.value))byId.set(segment.id,segment);
   privateDocument.value={...privateDocument.value,segments:[...byId.values()].sort((a,b)=>a.id-b.id)};
 }
 async function refreshLink(){
@@ -93,7 +113,7 @@ async function refreshLink(){
     if(sequence!==generation||requestId!==linkRequest)return;
     linkSessionId.value=state.linked?state.sessionId:null;afterTurn.value=state.afterTurn??-1;
     if(state.linked&&loading.value)transcriptVisible.value=true;
-    appendSegments(state.segments);
+    applyClear(state.clearedThrough);appendSegments(state.segments);
   }catch(cause){if(sequence===generation&&requestId===linkRequest)error.value=(cause as Error).message;}
   finally{refreshingLink=false;if(refreshQueued){refreshQueued=false;void refreshLink();}}
 }
@@ -124,13 +144,13 @@ async function stopListening(){
 async function load(){
   clearTimeout(autosaveTimer);hydrating=true;saving.value=false;updating.value=false;saveTask=undefined;bodyCursor=null;allocatedIds.length=0;previewIndex.value=0;mobilePane.value='write';audioSettings.value=false;imagePickerOpen.value=false;
   const sequence=++generation;++linkRequest;loadAbort?.abort();loadAbort=new AbortController();void stopListening();
-  privateDocument.value=null;selectedText.value='';error.value='';notice.value='';linkSessionId.value=null;transcriptVisible.value=false;linkBusy.value=false;
+  privateDocument.value=null;clearing.value=false;clearedThrough.value=0;selectedText.value='';error.value='';notice.value='';linkSessionId.value=null;transcriptVisible.value=false;linkBusy.value=false;
   if(!props.open||!endpoint.value||!canEdit.value){hydrating=false;return;}
   loading.value=true;const path=endpoint.value;
   try{
     const [document,status]=await Promise.all([request<NotesDocument>(path,{signal:loadAbort.signal}),request<ListeningStatus>('/api/worship/listening/status',{signal:loadAbort.signal}).catch(()=>null),shared.refresh()]);
     if(sequence!==generation)return;
-    privateDocument.value=document;
+    privateDocument.value=document;applyClear(document.clearedThrough);
     draft.value=JSON.parse(JSON.stringify({...document.draft,grouping:document.draft.grouping??(props.series.length>1?'pointers':'single'),background:document.draft.background??props.item?.background,typography:document.draft.typography??props.item?.typography}));
     savedDraft.value=JSON.stringify(draft.value);lastApplied.value=publicationSignature(props.series.length?props.series:props.item?[props.item]:[]);model.value=status;await refreshLink();
   }catch(cause){if(sequence===generation&&!loadAbort.signal.aborted)error.value=(cause as Error).message;}
@@ -147,7 +167,7 @@ async function saveDraft(){
       const document=await request<NotesDocument>(`${path}?transcript=omit`,{method:'PUT',body:JSON.stringify({revision,draft:snapshot})});
       if(sequence!==generation)return false;
       privateDocument.value={...document,segments:(privateDocument.value?.segments.length??0)>document.segments.length?privateDocument.value!.segments:document.segments};
-      savedDraft.value=JSON.stringify(snapshot);return true;
+      applyClear(document.clearedThrough);savedDraft.value=JSON.stringify(snapshot);return true;
     }catch(cause){if(sequence===generation)error.value=(cause as Error).message;return false;}
     finally{if(sequence===generation)saving.value=false;}
   })();
@@ -246,7 +266,9 @@ onBeforeUnmount(()=>{clearTimeout(autosaveTimer);++generation;++linkRequest;load
       </nav>
       <div v-if="privateDocument" class="notes-workspace" :class="{'has-transcript':showTranscript}">
         <aside v-if="showTranscript" class="notes-transcript-pane" :class="{'is-mobile-active':mobilePane==='transcript'}" aria-label="Private transcript">
-          <header class="notes-pane-heading"><div><AudioLines :size="15" /><h3>Transcript</h3><span v-if="linked" class="notes-connected"><i class="notes-live-dot" />Live</span></div><button class="notes-icon-button" :disabled="!transcript" aria-label="Copy transcript" title="Copy transcript" @click="copyTranscript"><Copy :size="14" /></button></header>
+          <header class="notes-pane-heading"><div><AudioLines :size="15" /><h3>Transcript</h3><span v-if="linked" class="notes-connected"><i class="notes-live-dot" />Live</span></div><div class="notes-transcript-toolbar" role="group" aria-label="Transcript actions">
+            <button class="notes-icon-button" :disabled="!!shared.session||active||producer.active" :aria-expanded="audioSettings" aria-label="Audio settings" title="Audio settings" @click="audioSettings=!audioSettings"><SlidersHorizontal :size="15" /></button>
+            <button class="notes-icon-button" :disabled="!transcript" aria-label="Copy transcript" title="Copy transcript" @click="copyTranscript"><Copy :size="14" /></button><button class="notes-icon-button" :disabled="!transcript||!canEdit||clearing" aria-label="Clear transcript" title="Clear transcript" @click="clearTranscript"><Trash2 :size="14" /></button></div></header>
           <div class="notes-transcript-controls" aria-label="Notes transcript connection">
             <template v-if="shared.session">
               <div class="notes-connection-summary"><i :class="{'notes-live-dot':linked}" /><span>{{linked?'Linked to live transcript':'Listening is running'}}</span></div>
@@ -261,7 +283,6 @@ onBeforeUnmount(()=>{clearTimeout(autosaveTimer);++generation;++linkRequest;load
               <div class="notes-start-row">
                 <button v-if="producer.active" :disabled="producer.finishing" @click="producer.stop(false)"><Square :size="12" />Cancel start</button>
                 <button v-else class="notes-listen-button" :disabled="!active&&(!canEdit||!modelReady||source==='microphone'&&(!canUse||missing))" @click="active?stopListening():startListening()"><Square v-if="active" :size="12" /><Mic v-else :size="14" />{{starting?'Cancel start':active?'Stop local listening':provider==='assemblyai'?'Start shared listening':'Start local listening'}}</button>
-                <button class="notes-icon-button" :aria-expanded="audioSettings" aria-label="Audio settings" title="Audio settings" @click="audioSettings=!audioSettings"><SlidersHorizontal :size="15" /></button>
               </div>
               <p class="notes-input-summary">{{producer.starting?'Connecting…':active?busy?'Transcribing…':'Listening':source==='program'?'Program · Main mix':selectedLabel||'System default microphone'}}</p>
               <div v-if="audioSettings&&!active&&!producer.active" class="notes-audio-settings">
@@ -352,4 +373,13 @@ label { display:flex;flex-direction:column;gap:7px;min-width:0;color:#a6adb9;fon
 @media(max-width:960px) and (min-width:761px) { :global(.notes-workspace-dialog) { max-width:calc(100vw - 24px); }.notes-workspace.has-transcript { grid-template-columns:220px minmax(250px,1fr); }.has-transcript .notes-preview-pane { grid-column:2;border-top:1px solid #ffffff0b;overflow:visible; }.has-transcript .notes-transcript-pane { grid-row:1/3; }.notes-workspace.has-transcript { overflow-y:auto; }.has-transcript .notes-writing-pane { min-height:410px;overflow:visible; }.has-transcript .notes-preview-stage { max-width:410px;width:100%;align-self:center; }.notes-header { padding:18px 48px 17px 20px; }.notes-save-state { display:none; } }
 @media(max-width:760px) { :global(.notes-workspace-dialog) { width:100%;max-width:calc(100vw - 12px);height:calc(100dvh - 12px);max-height:calc(100dvh - 12px);border-radius:12px; }.notes-header { padding:15px 44px 13px 16px;gap:10px; }.notes-heading-icon { width:33px;height:33px;border-radius:8px; }.notes-heading-copy :deep([data-slot="dialog-title"]) { font-size:14px; }.notes-heading-copy :deep([data-slot="dialog-description"]) { font-size:9px;line-height:1.4;max-width:210px;margin-top:3px; }.notes-header-actions { display:none; }.notes-mobile-tabs { display:flex;padding:8px 14px;gap:5px;border-bottom:1px solid #ffffff0b;flex-shrink:0; }.notes-mobile-tabs button { flex:1;border:0;background:transparent;font-size:11px;padding:7px 4px;color:#7e8b9d; }.notes-mobile-tabs button[aria-pressed="true"] { color:#b8e1ef;background:#28404b60; }.notes-count { font-size:9px;min-width:15px;height:15px;border-radius:4px;background:#ffffff08; }.notes-workspace,.notes-workspace.has-transcript { display:block;overflow:hidden; }.notes-writing-pane,.notes-preview-pane,.notes-transcript-pane { display:none;height:100%;border:0;padding:18px 18px; }.notes-workspace .is-mobile-active { display:flex; }.notes-writing-pane { gap:17px; }.notes-body-label { min-height:160px; }.notes-body-label textarea { font-size:14px; }.notes-preview-pane { gap:15px; }.notes-transcript-pane { gap:12px; }.notes-insert-footer { padding-bottom:0; }.notes-title-label input { font-size:19px; }.notes-layout-switch button { font-size:10px; }.notes-footer { gap:10px;padding:12px 15px; }.notes-footer-status { font-size:9px;line-height:1.5; }.notes-shortcut { display:none; }.notes-footer-actions { gap:0; }.notes-update-button { min-width:112px;padding:9px 10px;font-size:11px; }.notes-style-row { flex-wrap:wrap; }.notes-size-label { flex:1;min-width:95px; }.notes-error-banner { padding:9px 16px;font-size:10px; }.notes-empty-preview { font-size:11px; } }
 @media(prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none!important;transition:none!important; } }
+</style>
+
+<style scoped>
+.notes-pane-heading > .notes-transcript-toolbar { gap:2px;flex-shrink:0;padding:3px;border:1px solid #ffffff12;border-radius:9px;background:#ffffff03; }
+.notes-transcript-toolbar .notes-icon-button { border:0;background:transparent;border-radius:6px; }
+.notes-transcript-toolbar .notes-icon-button:hover:not(:disabled),.notes-transcript-toolbar .notes-icon-button[aria-expanded="true"] { background:#ffffff0b; }
+.notes-transcript-toolbar .notes-icon-button:last-child { margin-left:4px;position:relative; }
+.notes-transcript-toolbar .notes-icon-button:last-child::before { content:'';position:absolute;left:-4px;top:6px;bottom:6px;width:1px;background:#ffffff12; }
+.notes-start-row > button { flex:1; }
 </style>

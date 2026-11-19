@@ -33,6 +33,8 @@ test('Notes keeps speech private, checks authorship, deduplicates windows and re
   const url=`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/notes/channels/channel/items/note`;
   const get=()=>fetch(url,{headers:admin});
   assert.equal((await fetch(url)).status,401);assert.equal((await fetch(url,{headers:limited})).status,403);assert.equal((await fetch(url,{headers:authorHeaders})).status,403,'A grant on another channel cannot read this transcript');
+  assert.equal((await fetch(`${url}/transcript`,{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({throughId:0})})).status,401);
+  assert.equal((await fetch(`${url}/transcript`,{method:'DELETE',headers:{...limited,'Content-Type':'application/json'},body:JSON.stringify({throughId:0})})).status,403);
   const initial=await get();assert.equal(initial.headers.get('cache-control'),'private, no-store');const document=await initial.json();assert.equal(document.draft.body,'Only approved text');
   content.channels[0].kind='notes';await fs.writeFile(CONTENT_FILE,JSON.stringify(content));
   assert.deepEqual((await(await get()).json()).draft,document.draft,'The dedicated Notes channel retains access to the existing private document');

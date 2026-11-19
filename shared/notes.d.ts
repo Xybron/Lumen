@@ -10,6 +10,6 @@ export interface NotesDraft {
   grouping?: 'single' | 'pointers'; background?: NotesBackground; typography?: NotesTypography;
 }
 export interface NotesSegment { id: number; sessionId: string; sequence: number; text: string; receivedAt: string; uncertain: boolean }
-export interface NotesDocument { channelId: string; itemId: string; revision: number; updatedAt: string; draft: NotesDraft; segments: NotesSegment[] }
+export interface NotesDocument { clearedThrough?: number; channelId: string; itemId: string; revision: number; updatedAt: string; draft: NotesDraft; segments: NotesSegment[] }
 export interface NotesListeningSession { id: string; channelId: string; itemId: string; expiresAt: number; provider?: 'local' | 'assemblyai' }
 export interface NotesListeningLink { sessionId: string | null; linked: boolean; afterTurn: number; segments: NotesSegment[] }
