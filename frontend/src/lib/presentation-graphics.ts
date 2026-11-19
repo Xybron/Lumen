@@ -112,10 +112,11 @@ export function drawPresentationGraphics(ctx: CanvasRenderingContext2D, frame: P
   const remaining = timed ? Math.max(0, frame.durationMs - elapsed) : 0, progress = timed ? elapsed / frame.durationMs : 0;
   const scale = ({ small: .75, medium: 1, large: 1.35 })[g.size];
   const flame = g.template === 'flame';
-  const margin = 46, hasText = g.timer || g.caption;
+  const showTimer = g.timer && !flame;
+  const margin = 46, hasText = showTimer || g.caption;
   const panelHeight = (hasText ? 82 : 42) * scale;
-  // The original flame sits at the picture's edge; its optional caption/timer
-  // stay in the safe area below, leaving the presentation's title untouched.
+  // The original flame keeps only its optional caption in the safe area.
+  // Its progress and countdown cues do not need a persistent footer timer.
   const panelY = flame ? 1080 - margin - panelHeight : g.position === 'bottom' ? 1080 - margin - panelHeight : margin;
   const x = margin, w = 1920 - margin * 2, inset = g.template === 'broadcast' ? 24 * scale : 0;
   const textY = panelY + 27 * scale;
@@ -130,7 +131,7 @@ export function drawPresentationGraphics(ctx: CanvasRenderingContext2D, frame: P
   if (hasText) {
     ctx.font = `500 ${28 * scale}px Inter, system-ui, sans-serif`;
     ctx.shadowColor = '#000000'; ctx.shadowBlur = 6 * scale; ctx.fillStyle = '#ffffff';
-    const timer = g.timer ? `${presentationTime(g.timerMode === 'elapsed' ? elapsed : remaining)} ${g.timerMode}` : '';
+    const timer = showTimer ? `${presentationTime(g.timerMode === 'elapsed' ? elapsed : remaining)} ${g.timerMode}` : '';
     ctx.textAlign = 'right'; if (timer) ctx.fillText(timer, x + w - inset, textY);
     const timerWidth = timer ? ctx.measureText(timer).width + 80 * scale : 0;
     let title = g.caption ? frame.title?.replace(/\s+/g, ' ').trim() ?? '' : '';

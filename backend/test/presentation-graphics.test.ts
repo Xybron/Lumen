@@ -31,7 +31,7 @@ test('all audience graphics can be hidden without changing timing data', () => {
 
 test('countdown and elapsed timer render independently of progress visibility', () => {
   const { ctx, marks } = context();
-  drawPresentationGraphics(ctx, { ...frame, graphics: { ...frame.graphics, timerMode: 'elapsed', progress: false } }, 1920, 1080);
+  drawPresentationGraphics(ctx, { ...frame, graphics: { ...frame.graphics, template: 'minimal', timerMode: 'elapsed', progress: false } }, 1920, 1080);
   assert(marks.some(mark => mark.kind === 'fillText' && mark.args[0] === '01:50 elapsed'));
   assert(marks.some(mark => mark.kind === 'fillText' && mark.args[0] === '10'));
   assert(!marks.some(mark => mark.kind === 'fillRect'));
@@ -47,3 +47,10 @@ test('graphics and named presets survive validation per channel, invalid colours
   assert.equal(ChannelSchema.safeParse({ ...first, presentationGraphics: { ...frame.graphics, color: 'url(invalid)' } }).success, false);
   assert.equal(ChannelSchema.safeParse({ ...first, presentationGraphicPresets: Array(21).fill(first.presentationGraphicPresets![0]) }).success, false);
 });
+
+ test('flame omits the persistent footer timer while retaining caption and final countdown', () => {
+  const { ctx, marks } = context();
+  drawPresentationGraphics(ctx, { ...frame, graphics: { ...frame.graphics, timer: true, caption: true, progress: false } }, 1920, 1080);
+  const labels = marks.filter(mark => mark.kind === 'fillText').map(mark => mark.args[0]);
+  assert.deepEqual(labels, ['Prayer', '10']);
+ });
