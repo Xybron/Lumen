@@ -36,3 +36,29 @@ The [Whisper Turbo model card](https://huggingface.co/openai/whisper-large-v3-tu
 Retain a stable audio/result contract while recognisers change. Version the corpus, model, decoder settings, retrieval index and decision policy together. Require a reproducible evaluation and live rehearsal before promoting a new release. Store a rollback model and migrate indexes independently of Bible content. Periodically test new recognisers against the same held-out corpus; add newly observed failure cases to development data without repeatedly tuning on final evaluation speakers.
 
 The five-year asset is the reviewed corpus, repeatable evaluation, canonical scripture library and replaceable pipeline. No particular model can be promised to remain the best choice for five years.
+
+## Shared Lyrics suggestions
+
+Lyrics can start the existing AssemblyAI shared listener or consume a session
+already started from Scripture or Notes. This uses one microphone/provider
+stream. Suggestions match recognized sung words against the indexed song
+library, including songs beyond the 500-song browsing page, and include the
+current setlist in the scoring candidates. It does not identify instrumental
+music by melody or audio fingerprint.
+
+Shared Lyrics is suggestion-only. **Prepare song** loads the suggested section
+for operator review; **Send live** is still an explicit action. Neither repeated
+matches nor a Scripture producer's Auto publish mode arms Lyrics. Manual
+publication from the Lyrics producer preserves the shared stream and linked
+Notes. The existing local setlist listener remains available separately.
+
+The shared-result endpoint checks author access to both the source and target,
+target ownership, and the current session ID. It does not persist transcript or
+change either channel's live cue. Stopped/replaced sessions reject stale lookups.
+
+`shared-lyrics.test.ts` exercises simulated provider turns, permissions, full
+library lookup, one-stream Notes fan-out and manual publication boundaries.
+`shared-lyrics-browser.mjs` checks suggestions, Prepare, navigation, no extra
+microphone acquisition and the selected-control appearance using simulated
+transcript events. These checks do not measure recognition accuracy with a band;
+use a clear vocal feed and review suggestions during a rehearsal.

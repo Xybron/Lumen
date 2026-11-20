@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import FacetMark from '@/components/shell/FacetMark.vue';
 import { LoadingSkeleton, Skeleton, SkeletonIndicator } from '@/components/ui/skeleton';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { Aperture, ArrowRightLeft, BookOpen, Check, ChevronLeft, ChevronRight, Circle, Layers, Link2, LockKeyhole, LogOut, Mic, Music2, Radio, Search, ShieldCheck, SlidersHorizontal, Volume2, VolumeX, Wifi, WifiOff } from 'lucide-vue-next';
+import { ArrowRightLeft, BookOpen, Check, ChevronLeft, ChevronRight, Circle, Layers, Link2, LockKeyhole, LogOut, Mic, Music2, Radio, Search, ShieldCheck, SlidersHorizontal, Volume2, VolumeX, Wifi, WifiOff } from 'lucide-vue-next';
 import { useMobileController } from '@/lib/mobile/controller';
 import { useConfirmation } from '@/composables/useConfirmation';
 import MobileScenePoster from '@/components/mobile/MobileScenePoster.vue';
@@ -76,7 +77,7 @@ async function setVolume() {
 
 <template>
   <div class="mobile-controller" data-testid="mobile-controller">
-    <header class="mobile-header"><div class="mobile-brand"><Aperture :size="25" /><b>lumen</b><span>Remote</span></div><span class="mobile-connection" :class="{ connected: fresh, disconnected: !fresh }" role="status"><Wifi v-if="fresh" :size="14" /><WifiOff v-else :size="14" />{{ connection }}</span></header>
+    <header class="mobile-header"><div class="mobile-brand"><FacetMark /><b>lumen</b><span>Remote</span></div><span class="mobile-connection" :class="{ connected: fresh, disconnected: !fresh }" role="status"><Wifi v-if="fresh" :size="14" /><WifiOff v-else :size="14" />{{ connection }}</span></header>
     <LoadingSkeleton v-if="loading && !session" class="mobile-pair-screen mobile-connection-skeleton" label="Connecting to your station">
       <Skeleton :width="58" :height="58" :radius="15" /><Skeleton width="45%" :height="10" />
       <div class="mobile-skeleton-lines" aria-hidden="true"><Skeleton width="78%" :height="29" /><Skeleton width="60%" :height="29" /></div>

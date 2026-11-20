@@ -95,7 +95,7 @@
 .confirmation-heading [data-slot="dialog-header"] { min-width: 0; gap: 8px; text-align: left; }
 .confirmation-heading [data-slot="dialog-description"] { line-height: 1.75; overflow-wrap: anywhere; }
 .confirmation-icon { display: grid; place-items: center; width: 38px; height: 38px; flex-shrink: 0; border: 1px solid var(--border-hair); border-radius: 10px; color: var(--text-muted); background: var(--surface-2); }
-.confirmation-live .confirmation-icon { color: var(--accent); background: var(--accent-soft); border-color: #7dd3fc25; }
+.confirmation-live .confirmation-icon { color: var(--accent); background: var(--accent-soft); border-color: #ddfb7325; }
 .confirmation-danger .confirmation-icon { color: var(--status-live); background: #eea39a09; border-color: #eea39a20; }
 .confirmation-details { display: flex; flex-direction: column; gap: 9px; margin: 0; padding-left: 16px; list-style: disc; color: var(--text-muted); font-size: 12px; line-height: 1.65; }
 .confirmation-details li::marker { color: var(--text-subtle); }

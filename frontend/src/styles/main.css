@@ -2,6 +2,8 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import './operator.css';
+@import './selection.css';
+@import './status-controls.css';
 
 @custom-variant dark (&:is(.dark *));
 
@@ -116,7 +118,7 @@
   --color-hairglow: rgba(255, 255, 255, 0.14);
   --color-textprimary: #f4f4f5;
   --color-textmuted: var(--text-muted);
-  --color-accent: #7dd3fc;
+  --color-accent: #ddfb73;
 
   --font-sans: 'Inter', system-ui, sans-serif;
 
@@ -126,8 +128,8 @@
     0 1px 0 rgba(255, 255, 255, 0.06) inset,
     0 24px 48px -16px rgba(0, 0, 0, 0.5);
   --shadow-glow:
-    0 0 0 1px rgba(125, 211, 252, 0.4),
-    0 0 32px -4px rgba(125, 211, 252, 0.35);
+    0 0 0 1px rgba(221, 251, 115, 0.4),
+    0 0 32px -4px rgba(221, 251, 115, 0.35);
 
   --blur-xl: 40px;
 

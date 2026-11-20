@@ -1,6 +1,6 @@
 import type {IncomingMessage} from 'node:http';
 import {assemblyKey,ASSEMBLYAI_MODEL} from './assemblyai-stream.js';
-import {createAssemblyBridge} from './assemblyai-bridge.js';
+import {createAssemblyBridge,type AssemblyBridgeOptions} from './assemblyai-bridge.js';
 import {ListeningExamples,ExampleReviewSchema} from './listening-examples.js';
 import {analyzeSpokenReferences} from './scripture-reference.js';
 import { Router, raw, json, type Request, type Response, type NextFunction } from 'express';
@@ -15,12 +15,13 @@ import type { RelayHandle } from './ws.js';
 import { WorshipLibrary, SelectionSchema, WorshipCommandSchema } from './worship-library.js';
 import { ProductionError } from './production-store.js';
 import { LocalListener } from './local-listener.js';
+import { suggestSharedLyrics } from './shared-lyrics.js';
 import { ListeningSessions } from './listening-session.js';
 import type { SharedListeningHub } from './shared-listening.js';
 import type { WorshipWorkspace, ListeningSession } from '../../shared/worship.js';
 
 const route=(fn:(req:Request,res:Response)=>Promise<unknown>|unknown)=>(req:Request,res:Response,next:NextFunction)=>{Promise.resolve().then(()=>fn(req,res)).catch(next);};
-export async function createWorship(relay:RelayHandle,shared?:SharedListeningHub) {
+export async function createWorship(relay:RelayHandle,shared?:SharedListeningHub,cloudOptions:Pick<AssemblyBridgeOptions,'key'|'createStream'>={}) {
   const library=new WorshipLibrary(path.join(DATA_DIR,'worship.db'));
   if (!library.versions().find(v=>v.id==='KJV')?.installed && !library.db.prepare("SELECT 1 FROM worship_preferences WHERE key='suppress_default_kjv' AND value='1'").get()) {
     try {
@@ -43,23 +44,23 @@ export async function createWorship(relay:RelayHandle,shared?:SharedListeningHub
   const examples=new ListeningExamples(path.join(DATA_DIR,'ai/live-evaluation'));
   const cloudOrigins=new Map<string,string>();
   const cloudLeases=new Map<string,string>();
-  let cloudChannels:{stamp:string;ids:Set<string>}|undefined;
+  let cloudChannels:{stamp:string;kinds:Map<string,'scripture'|'lyrics'>}|undefined;
   function cloudChannelExists(id:string){
     const stat=statSync(CONTENT_FILE,{bigint:true}),stamp=`${stat.dev}:${stat.ino}:${stat.mtimeNs}:${stat.size}`;
     if(cloudChannels?.stamp!==stamp){
       const content=JSON.parse(readFileSync(CONTENT_FILE,'utf8')) as {channels?:{id:string;kind:string}[]};
-      cloudChannels={stamp,ids:new Set((content.channels??[]).filter(channel=>channel.kind==='scripture').map(channel=>channel.id))};
+      cloudChannels={stamp,kinds:new Map((content.channels??[]).filter(channel=>['scripture','lyrics'].includes(channel.kind)).map(channel=>[channel.id,channel.kind as 'scripture'|'lyrics']))};
     }
-    return cloudChannels.ids.has(id);
+    return cloudChannels.kinds.get(id);
   }
-  const cloud=createAssemblyBridge({sessions,library,examples,drainOnStop:true,
+  const cloud=createAssemblyBridge({...cloudOptions,sessions,library,examples,drainOnStop:true,kind:id=>cloudChannelExists(id)??'scripture',
     onReady:(_channel,session)=>shared?.ready(session),
     onResult:({session,result,turn})=>{shared?.publish(session,result,!!turn.end_of_turn,turn.turn_order);},
     onClose:(channel,session)=>{cloudOrigins.delete(session);if(cloudLeases.get(channel)===session)cloudLeases.delete(channel);shared?.end(session);},
     authorize:(request:IncomingMessage,id:string,session:string)=>{
     const user=readSession(request as Request);
     if(!user||!userCan(user,id,'author'))throw new ProductionError(403,'Sign in with permission to control this channel.');
-    if(!cloudChannelExists(id))throw new ProductionError(404,'The source Scripture channel no longer exists.');
+    if(!cloudChannelExists(id))throw new ProductionError(404,'The source listening channel no longer exists.');
     const lease=sessions.check(id,session,user.id),owner=loadOwners()[id];
     if(lease.provider!=='assemblyai'||lease.commands)throw new ProductionError(403,'This session does not use AssemblyAI shared listening.');
     if(owner&&owner!==user.id)throw new ProductionError(409,'Another operator controls this channel.');
@@ -70,7 +71,7 @@ export async function createWorship(relay:RelayHandle,shared?:SharedListeningHub
   let externalListeningActive=()=>false,listeningStarts=0;
   const listeningGeneration=new Map<string,number>();
   function invalidateListening(id:string){const session=cloudLeases.get(id);cloud.stop(id);listeningGeneration.set(id,(listeningGeneration.get(id)??0)+1);sessions.stop(id);if(session){cloudLeases.delete(id);cloudOrigins.delete(session);shared?.end(session);}}
-  function keepSharedListening(id:string){const session=shared?.snapshot().session;const keep=!!session&&session.source==='scripture'&&session.channelId===id&&session.id===cloudLeases.get(id);if(keep){sessions.disarm(id);shared?.setMode(session!.id,'assisted');}return keep;}
+  function keepSharedListening(id:string){const session=shared?.snapshot().session;const keep=!!session&&['scripture','lyrics'].includes(session.source)&&session.channelId===id&&session.id===cloudLeases.get(id);if(keep){sessions.disarm(id);shared?.setMode(session!.id,'assisted');}return keep;}
   try {const content=JSON.parse(await fs.readFile(CONTENT_FILE,'utf8'));for (const ch of content.channels??[]) if (['scripture','lyrics'].includes(ch.kind)) publish(library.workspace(ch.id));} catch { /* new station */ }
   async function channel(req:Request,write=false) {
     const id=String(req.params.channelId);
@@ -125,6 +126,15 @@ export async function createWorship(relay:RelayHandle,shared?:SharedListeningHub
     modelChanging=true;
     try{const status=await listener.selectModel(modelId);modelGeneration++;res.json(status);}finally{modelChanging=false;}
   }));
+  router.get('/worship/channels/:channelId/listening/shared-result',requireSession,route(async(req,res)=>{
+    const ch=await channel(req,true),user=readSession(req)!;
+    if(ch.kind!=='lyrics')throw new ProductionError(422,'Song suggestions require a Lyrics channel.');
+    const snapshot=shared?.snapshot();
+    if(!snapshot?.session||snapshot.session.id!==req.query.session)throw new ProductionError(409,'The shared listening session has ended or changed.');
+    if(!userCan(user,snapshot.session.channelId,'author'))throw new ProductionError(403,'You do not have access to the shared audio source.');
+    res.set('Cache-Control','private, no-store').json({sessionId:snapshot.session.id,turn:snapshot.turn,
+      result:snapshot.result?suggestSharedLyrics(library,ch.id,snapshot.result.transcript,snapshot.final):null});
+  }));
   router.post('/worship/channels/:channelId/listening',requireSession,route(async(req,res)=>{
     const ch=await channel(req,true),options=z.object({provider:z.enum(['local','assemblyai']).default('local'),mode:z.enum(['assisted','automatic']),language:z.string().regex(/^[a-z]{2}$/).default('en'),commands:z.boolean().default(false)}).parse(req.body);
     if(modelChanging)throw new ProductionError(409,'The station speech model is changing. Try Listen again when it finishes.');
@@ -132,16 +142,17 @@ export async function createWorship(relay:RelayHandle,shared?:SharedListeningHub
     if(externalListeningActive())throw new ProductionError(409,'Stop the active listener before starting another microphone.');
     if(options.provider==='assemblyai'&&(listeningStarts>0||sessions.hasActive()))throw new ProductionError(409,'Stop the active local listener before starting shared listening.');
     if (ch.kind==='scripture' && !library.versions().find(v=>v.id===library.workspace(ch.id).versionId)?.installed) throw new ProductionError(409,'Install and select a Bible version before listening.');
-    if (ch.kind==='lyrics' && !library.workspace(ch.id).setlist.length) throw new ProductionError(409,'Add songs to the setlist before listening.');
+    if (ch.kind==='lyrics' && options.provider==='local' && !library.workspace(ch.id).setlist.length) throw new ProductionError(409,'Add songs to the setlist before listening.');
     const generation=(listeningGeneration.get(ch.id)??0)+1,selectedModelGeneration=modelGeneration;
     listeningGeneration.set(ch.id,generation);
     listeningStarts++;let lease:ListeningSession|undefined;
     try {
       if(options.provider==='assemblyai'){
-        if(ch.kind!=='scripture'||options.commands)throw new ProductionError(422,'AssemblyAI supports Scripture listening; voice commands are not available.');
+        if(options.commands)throw new ProductionError(422,'Voice commands are not available with shared listening.');
+        if(ch.kind==='lyrics'&&options.mode!=='assisted')throw new ProductionError(422,'Shared song listening suggests songs for review; choose Prepare only.');
         lease=sessions.start(ch.id,readSession(req)!.id,options);cloudLeases.set(ch.id,lease.id);
-        shared?.reserve({id:lease.id,channelId:ch.id,source:'scripture',ownerId:readSession(req)!.id,provider:'assemblyai',mode:options.mode,startedAt:Date.now()},()=>{if(!cloud.finish(ch.id))invalidateListening(ch.id);});
-        if(!await assemblyKey())throw new ProductionError(409,'Add ASSEMBLYAI_API_KEY to the station .env to enable streaming.');
+        shared?.reserve({id:lease.id,channelId:ch.id,source:ch.kind,ownerId:readSession(req)!.id,provider:'assemblyai',mode:options.mode,startedAt:Date.now()},()=>{if(!cloud.finish(ch.id))invalidateListening(ch.id);});
+        if(!await (cloudOptions.key??assemblyKey)())throw new ProductionError(409,'Add ASSEMBLYAI_API_KEY to the station .env to enable streaming.');
       }else await listener.start(); if(res.destroyed)throw new ProductionError(409,'Listening start was cancelled.');
       await channel(req,true); if(res.destroyed)throw new ProductionError(409,'Listening start was cancelled.');
       if(modelChanging||selectedModelGeneration!==modelGeneration)throw new ProductionError(409,'The station speech model changed. Try Listen again.');

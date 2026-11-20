@@ -226,20 +226,20 @@ function rounded(value: number) { return Math.round(value * 100) / 100; }
 .layer-animation-editor .studio-field { font-size: 11px; gap: 7px; }
 .layer-animation-editor .studio-field input, .layer-animation-editor .studio-field select { min-height: 32px; border-radius: 6px; }
 .layer-animation-editor .studio-check { margin: 0; color: #e0e1e5; font-size: 11px; }
-.layer-animation-editor .studio-check input { accent-color: #7dd3fc; }
+.layer-animation-editor .studio-check input { accent-color: #ddfb73; }
 .layer-animation-editor .field-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
 .layer-animation-editor .animation-editor-help { color: var(--text-muted); font-size: 11px; line-height: 1.65; margin: 0; }
 .layer-animation-editor .animation-editor-timeline { border-top: 1px solid #ffffff12; padding-top: 17px; }
 .layer-animation-editor .animation-editor-section-heading, .layer-animation-editor .animation-editor-frame-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .layer-animation-editor h3 { display: flex; align-items: center; gap: 8px; color: #f4f4f5; font-size: 11px; font-weight: 500; }
-.layer-animation-editor h3 > svg { color: #7dd3fc; }
+.layer-animation-editor h3 > svg { color: #ddfb73; }
 .layer-animation-editor h3 > span { margin-left: 2px; font-size: 9px; color: #f4f4f560; font-weight: 400; }
 .layer-animation-editor .animation-editor-track { position: relative; margin: 15px 7px 0; height: 35px; }
-.layer-animation-editor .animation-editor-track input[type="range"] { width: 100%; height: 4px; margin: 0; appearance: none; background: #ffffff22; accent-color: #7dd3fc; border-radius: 5px; padding: 0; }
-.layer-animation-editor .animation-editor-track input[type="range"]::-webkit-slider-thumb { appearance: none; width: 10px; height: 10px; background: #7dd3fc; border-radius: 50%; cursor: ew-resize; }
+.layer-animation-editor .animation-editor-track input[type="range"] { width: 100%; height: 4px; margin: 0; appearance: none; background: #ffffff22; accent-color: #ddfb73; border-radius: 5px; padding: 0; }
+.layer-animation-editor .animation-editor-track input[type="range"]::-webkit-slider-thumb { appearance: none; width: 10px; height: 10px; background: #ddfb73; border-radius: 50%; cursor: ew-resize; }
 .layer-animation-editor .animation-editor-markers { position: absolute; left: 0; right: 0; top: 16px; height: 18px; }
 .layer-animation-editor .animation-editor-markers button { position: absolute; display: grid; place-items: center; padding: 0; width: 24px; height: 23px; transform: translateX(-50%); color: #f4f4f58a; border-radius: 4px; }
-.layer-animation-editor .animation-editor-markers button[aria-pressed="true"] { color: #7dd3fc; }
+.layer-animation-editor .animation-editor-markers button[aria-pressed="true"] { color: #ddfb73; }
 .layer-animation-editor .animation-editor-track-labels { display: flex; justify-content: space-between; margin-top: 3px; color: #f4f4f566; font-size: 9px; font-variant-numeric: tabular-nums; }
 .layer-animation-editor .animation-editor-frame-heading { margin-top: 16px; padding-top: 13px; border-top: 1px solid #ffffff0d; }
 .layer-animation-editor .animation-editor-frame-heading > span { display: flex; align-items: center; gap: 10px; font-size: 11px; }

@@ -119,7 +119,7 @@ async function remove() {
 .animation-preset-content .studio-field input { width: 100%; min-width: 0; min-height: 35px; box-sizing: border-box; }
 .animation-preset-content .s-button { min-height: 32px; border-radius: var(--radius-control); padding: 7px 11px; font-size: 12px; justify-content: center; }
 .animation-preset-content .animation-preset-search { display: flex; align-items: center; gap: 8px; padding: 0 11px; height: 36px; border: 1px solid #ffffff15; background: #0a0a0c55; border-radius: 7px; color: #f4f4f56a; }
-.animation-preset-content .animation-preset-search:focus-within { border-color: #7dd3fc77; }
+.animation-preset-content .animation-preset-search:focus-within { border-color: #ddfb7377; }
 .animation-preset-content .animation-preset-search input { min-width: 0; width: 100%; padding: 6px 0; border: 0; outline: 0; font-size: 11px; color: #f4f4f5; background: transparent; }
 .animation-preset-content .animation-preset-browser { display: grid; grid-template-columns: minmax(145px, .8fr) minmax(0, 1.2fr); gap: 20px; margin-top: 16px; }
 .animation-preset-content .animation-preset-list { max-height: 370px; overflow-y: auto; min-width: 0; }
@@ -128,13 +128,13 @@ async function remove() {
 .animation-preset-content .animation-preset-list > button > span { min-width: 0; overflow-wrap: anywhere; font-size: 11px; line-height: 1.5; }
 .animation-preset-content .animation-preset-list > button small { display: block; margin-top: 3px; font-size: 9px; color: #f4f4f55e; }
 .animation-preset-content .animation-preset-list > button:hover { background: #ffffff06; }
-.animation-preset-content .animation-preset-list > button[aria-pressed="true"] { color: #d8f1fd; background: #7dd3fc0c; border-color: #7dd3fc35; }
+.animation-preset-content .animation-preset-list > button[aria-pressed="true"] { color: #d8f1fd; background: #ddfb730c; border-color: #ddfb7335; }
 .animation-preset-content .animation-preset-preview { aspect-ratio: 16 / 9; position: relative; overflow: hidden; border: 1px solid #ffffff14; border-radius: 8px; background: #0a0a0c; }
 .animation-preset-content .animation-preset-preview svg { display: block; width: 100%; height: 100%; }
 .animation-preset-content .animation-preset-preview > span { position: absolute; bottom: 7px; left: 8px; font-size: 6px; letter-spacing: 1px; color: #f4f4f54d; }
 .animation-preset-content .animation-preset-transport { display: flex; justify-content: space-between; align-items: center; gap: 9px; margin-top: 10px; }
 .animation-preset-content .animation-preset-transport output { white-space: nowrap; font-size: 9px; color: #f4f4f575; font-variant-numeric: tabular-nums; }
-.animation-preset-content .animation-preset-playhead { width: 100%; margin: 11px 0 3px; padding: 0; accent-color: #7dd3fc; height: 4px; }
+.animation-preset-content .animation-preset-playhead { width: 100%; margin: 11px 0 3px; padding: 0; accent-color: #ddfb73; height: 4px; }
 .animation-preset-content .animation-preset-detail h3 { margin: 14px 0 4px; font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
 .animation-preset-content .animation-preset-metadata { margin: 0 0 15px; color: #f4f4f565; font-size: 10px; }
 .animation-preset-content .animation-preset-detail-actions { display: flex; gap: 6px; }
@@ -146,7 +146,7 @@ async function remove() {
 .animation-preset-content .animation-preset-detail > .animation-preset-hint { margin: 10px 0 0; }
 .animation-preset-content .animation-preset-empty { font-size: 11px; color: #f4f4f56a; padding: 10px; }
 .animation-preset-content .animation-preset-empty-state { display: grid; justify-items: center; text-align: center; padding: 40px 18px; color: #f4f4f55c; }
-.animation-preset-content .animation-preset-empty-state svg { color: #7dd3fc8a; }
+.animation-preset-content .animation-preset-empty-state svg { color: #ddfb738a; }
 .animation-preset-content .animation-preset-empty-state h3 { margin: 15px 0 7px; font-size: 13px; font-weight: 500; color: #f4f4f5bd; }
 .animation-preset-content .animation-preset-empty-state p { max-width: 300px; font-size: 11px; line-height: 1.7; margin: 0; }
 .animation-preset-content .animation-preset-form-actions, .animation-preset-content .animation-preset-footer { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 20px; }

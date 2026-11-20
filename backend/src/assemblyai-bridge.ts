@@ -17,6 +17,7 @@ export interface AssemblyBridgeOptions {
   onResult?:(context:{request:IncomingMessage;channel:string;session:string;user:string;turn:AssemblyTurn;result:ListeningResult})=>Record<string,unknown>|void;
   onClose?:(channel:string,session:string)=>void;
   drainOnStop?:boolean;
+  kind?:(channel:string)=>'scripture'|'lyrics';
   key?:()=>Promise<string>;
   createStream?:(key:string,onTurn:(turn:AssemblyTurn)=>void,onError:(message:string)=>void)=>Pick<AssemblyStream,'connected'|'send'|'finish'|'close'>;
 }
@@ -66,8 +67,9 @@ export function createAssemblyBridge(options:AssemblyBridgeOptions){
           const final=!!turn.end_of_turn&&turn.turn_order>finalizedTurn;
           if(turn.end_of_turn)finalizedTurn=Math.max(finalizedTurn,turn.turn_order);
           const trustedFinal=final&&!draining&&!(turn.words??[]).some(word=>!Number.isFinite(word.confidence)||word.confidence<.7);
-          const raw=options.sessions.accept(channel,session,user,sequence++,'scripture',turn.transcript,Date.now()-started,workspace.revision,cloudRecognition,trustedFinal,final);
-          result=quoteContext.apply(gate.apply(raw,turn.end_of_turn,turn.turn_order,Date.now()-started),final,Date.now()-started,workspace.versionId);
+          const kind=options.kind?.(channel)??'scripture';
+          const raw=options.sessions.accept(channel,session,user,sequence++,kind,turn.transcript,Date.now()-started,workspace.revision,cloudRecognition,trustedFinal,final);
+          result=kind==='lyrics'?raw:quoteContext.apply(gate.apply(raw,turn.end_of_turn,turn.turn_order,Date.now()-started),final,Date.now()-started,workspace.versionId);
           if(options.examples){const event={atMs:Date.now()-started,audioSeconds:totalBytes/32000,result,final:!!turn.end_of_turn,words:Array.isArray(turn.words)?turn.words.slice(0,200):[]};events.push(event);events=events.filter(e=>e.audioSeconds>=totalBytes/32000-12).slice(-150);}
           const extra=options.onResult?.({request,channel,session,user,turn,result});
           send({...extra,type:'result',result,final:!!turn.end_of_turn,turn:turn.turn_order});

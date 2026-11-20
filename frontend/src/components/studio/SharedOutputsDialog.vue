@@ -60,8 +60,8 @@ function refresh(id: string) {
 
 <template>
   <Dialog :open="outputs.open && canOperate" @update:open="value => { if (!value) outputs.close(); }">
-    <DialogContent class="shared-outputs-dialog sm:max-w-[850px]">
-      <DialogHeader><DialogTitle>Outputs</DialogTitle><DialogDescription>Manage your screens, share Program, and configure Lumen’s camera and microphone.</DialogDescription></DialogHeader>
+    <DialogContent class="shared-outputs-dialog sm:max-w-[720px]">
+      <DialogHeader><DialogTitle>Outputs</DialogTitle><DialogDescription>Send Program to a screen or share a viewing link.</DialogDescription></DialogHeader>
       <StudioOutputsPanel v-if="studio.state" ref="panel" :outputs="studio.state.outputs" :scenes="studio.state.scenes" :pending="!!studio.saving" :can-operate="canOperate" :program-name="studio.state.program?.name"
         @add="addOutput" @rename="renameOutput" @route="(id, sceneId) => run(() => studio.command({ type: 'route', outputId: id, sceneId }))"
         @blank="(id, blanked) => run(() => studio.command({ type: 'blank', outputId: id, blanked }))" @audio="audio" @refresh="refresh" @remove="removeOutput" />

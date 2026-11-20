@@ -67,7 +67,7 @@ function expiry(value: number) { return new Date(value).toLocaleTimeString([], {
 .mobile-management { max-width: 520px; gap: 22px; }
 .mobile-management-title { display: flex; align-items: center; gap: 10px; }
 .mobile-management-title svg { color: var(--accent); }
-.mobile-management-status { display: flex; gap: 11px; padding: 14px; background: var(--accent-soft); border: 1px solid #7dd3fc22; border-radius: 9px; }
+.mobile-management-status { display: flex; gap: 11px; padding: 14px; background: var(--accent-soft); border: 1px solid #ddfb7322; border-radius: 9px; }
 .mobile-management-status > svg { flex-shrink: 0; color: var(--accent); margin-top: 2px; }
 .mobile-management-status b { font-size: 12px; font-weight: 550; }.mobile-management-status p { color: var(--text-muted); font-size: 11px; line-height: 1.7; margin: 5px 0; }.mobile-management-status a { display: inline-block; color: var(--accent); margin-top: 3px; font-size: 11px; overflow-wrap: anywhere; }
 .mobile-management h3 { font-size: 13px; font-weight: 550; margin: 0 0 13px; }.mobile-management h3 > span { color: var(--text-subtle); font-size: 10px; margin-left: 6px; }

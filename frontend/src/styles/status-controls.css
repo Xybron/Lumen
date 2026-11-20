@@ -1,0 +1,15 @@
+/* Shared action colours, including Outputs and compact header controls. */
+.engine-control.engine-control.engine-control {
+  color: var(--accent);
+  background: var(--selection-fill);
+  border-color: var(--selection-border);
+  box-shadow: none;
+}
+.engine-control.engine-control.engine-control.running {
+  color: var(--status-live);
+  background: var(--status-live-fill);
+  border-color: var(--status-live-border);
+}
+.engine-control.engine-control.engine-control:hover:not(:disabled) {
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}

@@ -5,7 +5,7 @@ A live production and presentation workspace for churches and events.
 outputs, audio mixing, and local recording. **Present** retains the existing
 channel-based decks and presentation controls, with dedicated **Scripture** and
 **Lyrics** workspaces using the same matte surfaces, compact controls and
-restrained cyan-accented design.
+restrained citron-accented design.
 
 Decks and Studio scenes live in JSON files alongside local media. SQLite stores
 accounts, roles, offline Bible texts, songs and live worship cues. WebSockets synchronize controls; Studio uses a supervised

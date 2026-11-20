@@ -111,11 +111,59 @@ try {
   stage = 'create Program link';
   await page.getByRole('button', { name: 'Open Outputs', exact: true }).click();
   let dialog = page.getByRole('dialog', { name: 'Outputs', exact: true });
+  stage = 'compact output controls';
+  assert.equal(await dialog.locator('.virtual-devices').count(), 0);
+  assert.equal(await dialog.getByText('Camera & microphone', { exact: true }).count(), 0);
+  const mainOutput = state.outputs.find(item => item.id === 'screen_main');
+  const row = dialog.locator('[data-output-id="screen_main"]');
+  const nameInput = row.getByLabel('Output name screen_main', { exact: true });
+  await nameInput.fill('Room screen'); await nameInput.press('Enter');
+  await until(async () => (await get()).outputs.find(item => item.id === 'screen_main').name === 'Room screen', 'rename commits');
+  await nameInput.fill(mainOutput.name); await nameInput.press('Enter');
+  await until(async () => (await get()).outputs.find(item => item.id === 'screen_main').name === mainOutput.name, 'rename restored');
+  await row.getByLabel(mainOutput.name + ' route', { exact: true }).selectOption('blue');
+  await until(async () => (await get()).outputs.find(item => item.id === 'screen_main').scene?.id === 'blue', 'pinned route saved');
+  await row.getByRole('button', { name: 'More options for ' + mainOutput.name, exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Refresh ' + mainOutput.name + ' from draft', exact: true }).click();
+  await row.getByLabel(mainOutput.name + ' route', { exact: true }).selectOption('');
+  await until(async () => (await get()).outputs.find(item => item.id === 'screen_main').mode === 'program', 'follow Program restored');
+  for (const [field, firstLabel, secondLabel] of [
+    ['blanked', 'Blank ' + mainOutput.name + ' picture', 'Show ' + mainOutput.name + ' picture'],
+    ['audioEnabled', (mainOutput.audioEnabled ? 'Mute ' : 'Enable ') + mainOutput.name + ' audio', (mainOutput.audioEnabled ? 'Enable ' : 'Mute ') + mainOutput.name + ' audio'],
+  ]) {
+    await row.getByRole('button', { name: firstLabel, exact: true }).click();
+    await until(async () => (await get()).outputs.find(item => item.id === 'screen_main')[field] !== mainOutput[field], field + ' toggled');
+    await row.getByRole('button', { name: secondLabel, exact: true }).click();
+    await until(async () => (await get()).outputs.find(item => item.id === 'screen_main')[field] === mainOutput[field], field + ' restored');
+  }
+  await dialog.getByRole('button', { name: 'Add output', exact: true }).click();
+  const added = await until(async () => (await get()).outputs.find(item => !state.outputs.some(original => original.id === item.id)), 'new output saved');
+  await dialog.locator(`[data-output-id="${added.id}"]`).getByRole('button', { name: 'More options for ' + added.name, exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Remove ' + added.name, exact: true }).click();
+  await page.getByRole('dialog', { name: 'Remove output?', exact: true }).getByRole('button', { name: 'Remove output', exact: true }).click();
+  await until(async () => (await get()).outputs.length === state.outputs.length, 'remove output confirmed');
+  assert.equal(routing(await get()), settingsBefore, 'Editing and restoring controls leaves routing and audio unchanged.');
+  await page.screenshot({ path: '/private/tmp/lumen-outputs-overview-desktop.png' });
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.equal(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth + 1), true, 'Overview fits narrow screens.');
+  await page.screenshot({ path: '/private/tmp/lumen-outputs-overview-mobile.png' });
+  await page.setViewportSize({ width: 1512, height: 982 });
+  check('Compact rows retain rename, scene routing, picture/audio toggles, refresh and confirmed removal; overview fits mobile without device information');
+  stage = 'create Program link';
   await dialog.getByRole('button', { name: 'Open Lumen Share', exact: true }).click();
   await dialog.getByRole('button', { name: 'Create output link', exact: true }).click();
   let capabilityUrl = remember(await dialog.getByLabel('View-only link', { exact: true }).inputValue());
   assert.equal(new URL(capabilityUrl).port, String(gatewayPort));
-  await page.screenshot({ path: '/private/tmp/lumen-output-links-desktop.png', fullPage: true, mask: [page.locator('[data-team-private]')] });
+  assert.equal(await dialog.getByRole('tab').count(), 2, 'Screen and Share are the two primary views.');
+  assert.equal(await dialog.locator('details').evaluate(el => el.open), false, 'Extra sharing guidance starts collapsed.');
+  await dialog.getByLabel('Request sound on open', { exact: true }).check();
+  assert.equal(new URLSearchParams(new URL(await dialog.getByLabel('View-only link', { exact: true }).inputValue()).hash.slice(1)).get('audio'), '1');
+  await dialog.getByLabel('Request sound on open', { exact: true }).uncheck();
+  await dialog.getByLabel('Sharing destination', { exact: true }).selectOption('network');
+  assert.equal(await dialog.getByRole('button', { name: 'Create network link', exact: true }).isDisabled(), true, 'Network sharing stays off until explicitly enabled.');
+  await dialog.getByLabel('Sharing destination', { exact: true }).selectOption('computer');
+  assert.equal(await dialog.getByLabel('View-only link', { exact: true }).inputValue(), capabilityUrl, 'Choosing a sharing destination retains the existing link.');
+  await dialog.screenshot({ path: '/private/tmp/lumen-output-links-desktop.png', mask: [page.locator('[data-team-private]')] });
   const viewerContext = await browser.newContext({ viewport: { width: 1280, height: 720 } }), viewer = await viewerContext.newPage();
   viewer.on('pageerror', cause => errors.push(safe(cause))); viewer.on('request', req => requestedUrls.push(req.url()));
   await viewer.goto(capabilityUrl); await videoReady(viewer);
@@ -155,6 +203,14 @@ try {
   const displaySelect = dialog.getByRole('combobox');
   const projectorValue = await displaySelect.locator('option').filter({ hasText: 'Auditorium projector' }).getAttribute('value');
   await displaySelect.selectOption(projectorValue);
+  await dialog.getByRole('tab', { name: 'Screen', exact: true }).focus();
+  await page.keyboard.press('ArrowRight');
+  assert.equal(await dialog.getByRole('tab', { name: 'Share', exact: true }).getAttribute('aria-selected'), 'true');
+  await page.keyboard.press('ArrowLeft');
+  assert.equal(await dialog.getByRole('tab', { name: 'Screen', exact: true }).getAttribute('aria-selected'), 'true');
+  assert.equal(await displaySelect.inputValue(), projectorValue, 'Switching views retains the selected display.');
+  assert.equal(await dialog.getByRole('button', { name: 'Open output', exact: true }).evaluate(el => getComputedStyle(el).color), 'rgb(17, 18, 20)', 'Primary actions use dark text on citron.');
+  await dialog.screenshot({ path: '/private/tmp/lumen-screen-setup-desktop.png' });
   const popupPromise = operator.waitForEvent('page'); await dialog.getByRole('button', { name: 'Open output', exact: true }).click();
   const popup = await popupPromise; await popup.waitForURL(`${base}/studio/output/screen_main?display=1`); await videoReady(popup);
   assert.equal(await popup.evaluate(() => opener === null), true);
@@ -191,11 +247,15 @@ try {
   const bounds = await dialog.boundingBox(); assert.ok(bounds.x >= -1 && bounds.x + bounds.width <= 391, 'Output dialog fits the mobile viewport.');
   assert.equal(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth + 1), true, 'Output setup has no horizontal overflow.');
   assert.ok(await dialog.getAttribute('aria-labelledby')); assert.ok(await dialog.getAttribute('aria-describedby'));
-  await dialog.getByRole('tab', { name: 'External', exact: true }).click();
+  await dialog.getByLabel('Sharing destination', { exact: true }).selectOption('external');
   await dialog.getByText('Relay setup required', { exact: true }).waitFor();
   assert.equal(await dialog.getByRole('button', { name: 'Verify relay', exact: true }).count(), 0, 'No real external relay was inherited by the fixture.');
-  await dialog.getByRole('tab', { name: 'This computer', exact: true }).click();
+  await dialog.getByLabel('Sharing destination', { exact: true }).selectOption('computer');
   await page.screenshot({ path: '/private/tmp/lumen-output-links-mobile.png', fullPage: true, mask: [page.locator('[data-team-private]')] });
+  await dialog.getByRole('tab', { name: 'Screen', exact: true }).click();
+  assert.equal(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth + 1), true);
+  await dialog.screenshot({ path: '/private/tmp/lumen-screen-setup-mobile.png' });
+  await dialog.getByRole('tab', { name: 'Share', exact: true }).click();
   for (let count = 0; count < 12; count++) { await page.keyboard.press('Tab'); assert.equal(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]')), true, 'Modal focus remains inside output setup.'); }
   assert.equal(routing(await get()), settingsBefore);
   check('390px output setup fits, has accessible modal labeling/focus containment and clearly reports unconfigured external sharing');

@@ -40,7 +40,7 @@ function cancel() {
         <template v-if="listening.session">
           <dl>
             <div><dt>Provider</dt><dd>AssemblyAI</dd></div>
-            <div><dt>Scripture</dt><dd>{{ listening.session.mode === 'automatic' ? 'Auto publish' : 'Prepare only' }}</dd></div>
+            <div><dt>{{ listening.session.source === 'lyrics' ? 'Lyrics' : 'Scripture' }}</dt><dd>{{ listening.session.source === 'lyrics' ? 'Song suggestions' : listening.session.mode === 'automatic' ? 'Auto publish' : 'Prepare only' }}</dd></div>
             <div><dt>Notes</dt><dd>{{ listening.session.linkedNotes ? `${listening.session.linkedNotes} linked` : 'None linked' }}</dd></div>
           </dl>
           <p v-if="listening.error" role="status" class="listening-message">{{ listening.error }}</p>

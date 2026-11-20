@@ -43,11 +43,11 @@
 .nle-cut-button:hover:not(:disabled), .nle-cut-button:focus-visible { background: #44798e; border-color: #b6e4f8; outline: 2px solid #91c9e84d; outline-offset: 2px; }
 .nle-export-dialog[data-slot="dialog-content"] { max-width: min(460px, calc(100vw - 24px)); padding: 24px; gap: 0; border: 1px solid #ffffff17; border-radius: 12px; background: #191c20; color: #dce3eb; color-scheme: dark; box-shadow: 0 24px 80px #0008; scrollbar-width: none; }
 .nle-export-dialog::-webkit-scrollbar { display: none; }
-.nle-export-dialog .clip-button-primary { border-color: transparent; background: var(--accent, #7dd3fc); color: #142731; }
+.nle-export-dialog .clip-button-primary { border-color: transparent; background: var(--accent, #ddfb73); color: #142731; }
 .nle-export-dialog .clip-button-primary:hover:not(:disabled) { background: #a4e2ff; }
 .nle-export-dialog button { cursor: pointer; }
 .nle-export-dialog button:disabled { opacity: .4; cursor: not-allowed; }
-.nle-export-dialog :where(button, input, select):focus-visible { outline: 2px solid var(--accent, #7dd3fc); outline-offset: 3px; }
+.nle-export-dialog :where(button, input, select):focus-visible { outline: 2px solid var(--accent, #ddfb73); outline-offset: 3px; }
 .nle-export-heading { display: flex; gap: 13px; align-items: center; margin-bottom: 19px; }
 .nle-export-icon { display: grid; place-items: center; width: 40px; height: 40px; flex-shrink: 0; color: #a8cfe4; border: 1px solid #8ecae624; background: #8ecae60b; border-radius: 9px; }
 .nle-export-heading h2 { margin: 0 0 5px; font-size: 18px; font-weight: 550; letter-spacing: -.35px; }

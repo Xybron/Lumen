@@ -1,0 +1,34 @@
+/* One selection treatment for operator controls, including portaled dialogs.
+   Semantic live/mute/record states and actual colour samples keep their colours.
+   These properties deliberately outrank component and utility selection styles. */
+:is(
+  button[aria-pressed="true"],
+  button[role="tab"][aria-selected="true"],
+  [data-slot="tabs-trigger"][data-state="active"],
+  button[data-state="on"],
+  button.active,
+  button.selected,
+  .library-navigation > a.active,
+  .playlist-row.active,
+  .channel-chip-active
+):not(:where(
+  .muted, .armed, .recording, .is-program, .is-live, .engine-control,
+  .graphics-palette button, .graphics-gradient-palettes button,
+  .notes-themes button, .color-options button, .channel-chip > button, [data-selection-swatch]
+)) {
+  color: var(--accent) !important;
+  background: var(--selection-fill) !important;
+  border-color: transparent !important;
+  box-shadow: inset 0 0 0 1px var(--selection-border) !important;
+}
+
+:is(button[aria-pressed="true"], button[role="tab"][aria-selected="true"], button.active, button.selected) > svg {
+  color: inherit;
+}
+
+[data-slot="tabs-trigger"]::after,
+.team-auth-tabs button.selected::after {
+  display: none;
+}
+
+:is(button[aria-pressed="true"],button.selected) :is(.choice-label,.graphics-card-label) { color:var(--accent) !important; }

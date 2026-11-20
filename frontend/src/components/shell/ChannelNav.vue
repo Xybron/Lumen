@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
-import { Plus, Inbox, Clapperboard, GripVertical, ChevronsLeft, ChevronsRight, RotateCcw, Presentation, BookOpen, Music2, Grid2X2, Scissors, Images, NotebookPen } from 'lucide-vue-next';
+import { Plus, Clapperboard, GripVertical, ChevronsLeft, ChevronsRight, RotateCcw, Presentation, BookOpen, Music2, Grid2X2, Scissors, Images, NotebookPen } from 'lucide-vue-next';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -12,12 +12,10 @@ import { useContentStore } from '@/stores/content';
 import { useEnginesStore } from '@/stores/engines';
 import { useIdentityStore } from '@/stores/identity';
 import { usePresenceStore } from '@/stores/presence';
-import { useStagingStore } from '@/stores/staging';
 import { useWorshipStore } from '@/stores/worship';
 import { useSharedListeningStore } from '@/stores/shared-listening';
 import ChannelChip from './ChannelChip.vue';
 import AccountMenu from './AccountMenu.vue';
-import ApprovalDialog from './ApprovalDialog.vue';
 import { openProjection } from '@/lib/tauri';
 import type { ChannelKind } from '@/types';
 import { useFloatingDock } from '@/composables/useFloatingDock';
@@ -51,7 +49,6 @@ const content = useContentStore();
 const engines = useEnginesStore();
 const identity = useIdentityStore();
 const presence = usePresenceStore();
-const staging = useStagingStore();
 const worship = useWorshipStore();
 const sharedListening = useSharedListeningStore();
 const focusedChannel = computed(() => content.channels.find(ch => ch.id === engines.focusedChannelId));
@@ -66,7 +63,6 @@ function toolbarKeys(event: KeyboardEvent) {
   event.stopPropagation();
 }
 
-const approvalOpen = ref(false);
 function revealUtility(target: HTMLElement | null) {
   const items = dock.value?.querySelector<HTMLElement>('.dock-items');
   if (!items || !target || collapsed.value) return;
@@ -84,7 +80,7 @@ function revealFocusedUtility(event: TransitionEvent) {
   const target = event.target.closest<HTMLElement>('.dock-utility');
   if (target?.matches(':focus-visible, [aria-current="page"]')) revealUtility(target);
 }
-onMounted(() => { void staging.refresh(); revealCurrentUtility(); window.addEventListener('resize', revealCurrentUtility); });
+onMounted(() => { revealCurrentUtility(); window.addEventListener('resize', revealCurrentUtility); });
 onUnmounted(() => window.removeEventListener('resize', revealCurrentUtility));
 watch([() => route.name, collapsed, () => content.channels.length], revealCurrentUtility, { flush: 'post' });
 
@@ -232,25 +228,6 @@ async function deleteChannel(id: string, name: string) {
       <Images :size="17" :stroke-width="1.7" class="dock-tool-icon" aria-hidden="true" /><span class="dock-tool-label" aria-hidden="true">Media</span>
     </RouterLink>
 
-    <!-- pending media inbox -->
-    <button
-      class="dock-tool dock-utility"
-      title="Pending media"
-      aria-label="Pending media"
-      :aria-expanded="approvalOpen"
-      aria-haspopup="dialog"
-      @click="approvalOpen = true"
-    >
-      <Inbox :size="16" class="dock-tool-icon" aria-hidden="true" /><span class="dock-tool-label" aria-hidden="true">Pending media</span>
-      <span
-        v-if="staging.count"
-        class="dock-pending-count"
-        aria-hidden="true"
-      >
-        {{ staging.count > 99 ? '99+' : staging.count }}
-      </span>
-    </button>
-
     <!-- account / admin menu -->
     <div class="w-px h-6 bg-hair mx-0.5 shrink-0" />
     <AccountMenu />
@@ -262,7 +239,6 @@ async function deleteChannel(id: string, name: string) {
       <ChevronsRight v-if="collapsed" :size="16" /><ChevronsLeft v-else :size="16" />
     </button>
   </div>
-  <ApprovalDialog v-model:open="approvalOpen" />
 </template>
 
 <style scoped>
@@ -285,8 +261,7 @@ async function deleteChannel(id: string, name: string) {
   .dock-utility:hover:not(:disabled) .dock-tool-icon { transform: translateY(-1px) scale(1.06); }
 }
 .dock-utility:active:not(:disabled) .dock-tool-icon { transform: translateY(0) scale(.94); }
-.dock-pending-count { position: absolute; top: 1px; right: 1px; display: grid; place-items: center; min-width: 14px; height: 14px; padding: 0 3px; border: 1px solid var(--surface-2); border-radius: 7px; background: var(--accent); color: #102632; font-size: 9px; font-weight: 600; line-height: 1; pointer-events: none; }
-.dock-tool.dock-studio-current { color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px #7dd3fc1f; }
+.dock-tool.dock-studio-current { color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px #ddfb731f; }
 .floating-dock .dock-grip { width: 24px; cursor: grab; touch-action: none; user-select: none; }
 .floating-dock.dock-dragging, .floating-dock.dock-dragging .dock-grip { cursor: grabbing; user-select: none; }
 .dock-divider { height: 22px; width: 1px; background: var(--border-hair); flex-shrink: 0; }

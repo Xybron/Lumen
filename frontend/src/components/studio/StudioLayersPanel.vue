@@ -144,19 +144,19 @@ function rowKey(event: KeyboardEvent, id: string) {
 <style scoped>
 .layer-list { padding: 6px; }
 .layer-row { position: relative; gap: 7px; min-height: 37px; border-radius: 6px; }
-.layer-row:focus-visible { outline: 1px solid #7dd3fcaa; outline-offset: -1px; }
+.layer-row:focus-visible { outline: 1px solid #ddfb73aa; outline-offset: -1px; }
 .layer-grip { flex-shrink: 0; color: #f4f4f53a; cursor: grab; opacity: 0; }
 .layer-row:hover .layer-grip, .layer-row:focus-within .layer-grip, .layer-row.selected .layer-grip { opacity: 1; }
 .layer-row[draggable='false'] .layer-grip { cursor: default; opacity: .2; }
 .layer-row .layer-name { min-width: 0; flex: 1; color: #f4f4f5bf; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.layer-row .layer-rename-input { min-width: 0; width: 0; flex: 1; padding: 4px 5px; background: #111114; color: #f4f4f5; border: 1px solid #7dd3fc88; border-radius: 4px; outline: none; font-size: 11px; }
+.layer-row .layer-rename-input { min-width: 0; width: 0; flex: 1; padding: 4px 5px; background: #111114; color: #f4f4f5; border: 1px solid #ddfb7388; border-radius: 4px; outline: none; font-size: 11px; }
 .layer-row.hidden { opacity: 1; }
 .layer-row.hidden .layer-name, .layer-row.hidden > svg:not(.layer-grip) { opacity: .4; }
 .layer-row .layer-row-action { width: 23px; height: 25px; flex-shrink: 0; }
 .layer-lock-action:not(.is-locked) { opacity: 0; }
 .layer-row:hover .layer-lock-action, .layer-row:focus-within .layer-lock-action { opacity: 1; }
 .layer-row.layer-dragging { opacity: .35; }
-.layer-row.drop-before::before, .layer-row.drop-after::after { content: ''; position: absolute; left: 3px; right: 3px; height: 2px; border-radius: 2px; background: #7dd3fc; pointer-events: none; z-index: 1; }
+.layer-row.drop-before::before, .layer-row.drop-after::after { content: ''; position: absolute; left: 3px; right: 3px; height: 2px; border-radius: 2px; background: #ddfb73; pointer-events: none; z-index: 1; }
 .layer-row.drop-before::before { top: -2px; }.layer-row.drop-after::after { bottom: -2px; }
 .layer-panel-footer { min-height: 40px; padding: 6px 10px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px; border-top: 1px solid #ffffff0a; }
 .layer-panel-footer > span { font-size: 10px; color: var(--text-muted, #a0a2a8); }
@@ -167,12 +167,12 @@ function rowKey(event: KeyboardEvent, id: string) {
 .layer-add-button { width: auto!important; padding: 0 8px!important; gap: 4px; font-size: 11px; color: var(--s-accent); }
 .scene-source-options { display: grid; gap: 5px; max-height: min(45vh, 300px); overflow-y: auto; }
 .scene-source-option { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 42px; padding: 8px 11px; border: 1px solid var(--border-hair); border-radius: 8px; background: var(--surface-2); color: var(--text-primary); text-align: left; }
-.scene-source-option:hover, .scene-source-create:hover { border-color: var(--s-accent); background: #7dd3fc0d; }
+.scene-source-option:hover, .scene-source-create:hover { border-color: var(--s-accent); background: #ddfb730d; }
 .scene-source-option > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scene-source-option > svg:first-child, .scene-source-create > svg { color: var(--s-accent); flex-shrink: 0; }
 .scene-source-option > svg:last-child { color: var(--text-muted); flex-shrink: 0; }
 .scene-source-empty { padding: 13px 4px; color: var(--text-muted); font-size: 11px; }
-.scene-source-create { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; width: 100%; padding: 12px; border: 1px dashed #7dd3fc66; border-radius: 8px; text-align: left; color: var(--text-primary); }
+.scene-source-create { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; width: 100%; padding: 12px; border: 1px dashed #ddfb7366; border-radius: 8px; text-align: left; color: var(--text-primary); }
 .scene-source-create span { margin-left: auto; font-size: 10px; color: var(--text-muted); }
 @media (pointer: coarse) { .layer-lock-action:not(.is-locked), .layer-grip { opacity: .6; }.layer-row .layer-row-action { width: 30px; height: 30px; } }
 </style>

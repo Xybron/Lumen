@@ -52,14 +52,14 @@ function location(value: string) { return value === 'studio' ? 'Studio' : value.
 
 <style scoped>
 .team-presence-layer{position:fixed;inset:0;z-index:35;pointer-events:none;overflow:hidden}
-.team-remote-cursor{position:absolute;color:var(--peer-color,#7dd3fc);display:flex;flex-direction:column;align-items:flex-start;gap:1px;transition:left .1s linear,top .1s linear;filter:drop-shadow(0 1px 1px #0008)}
-.team-remote-cursor>span{max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transform:translate(14px,-1px);background:var(--peer-color,#7dd3fc);color:#101113;border-radius:3px;padding:3px 5px;font-size:9px;font-weight:600;line-height:1.3}
+.team-remote-cursor{position:absolute;color:var(--peer-color,#ddfb73);display:flex;flex-direction:column;align-items:flex-start;gap:1px;transition:left .1s linear,top .1s linear;filter:drop-shadow(0 1px 1px #0008)}
+.team-remote-cursor>span{max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transform:translate(14px,-1px);background:var(--peer-color,#ddfb73);color:#101113;border-radius:3px;padding:3px 5px;font-size:9px;font-weight:600;line-height:1.3}
 .team-presence-bar{position:fixed;top:76px;right:20px;z-index:34;display:flex;gap:9px;align-items:center;background:var(--surface-1);border:1px solid var(--border-hair);border-radius:7px;padding:4px 5px;box-shadow:0 3px 12px #0002;color:var(--text-muted)}
 .team-presence-bar>button{display:flex;align-items:center;gap:6px;padding:4px 5px;border-radius:4px;font-size:9px;cursor:pointer}
 .team-presence-bar>button:hover{color:var(--text-primary);background:var(--bg-hover)}
 .team-presence-bar>button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .team-presence-people{display:flex;padding-left:2px;align-items:center}
-.team-presence-avatar{display:grid;place-items:center;width:23px;height:23px;margin-left:-2px;border:2px solid var(--surface-1);background:var(--peer-color,#7dd3fc);color:#101113;border-radius:50%;font-size:8px;font-weight:600}
+.team-presence-avatar{display:grid;place-items:center;width:23px;height:23px;margin-left:-2px;border:2px solid var(--surface-1);background:var(--peer-color,#ddfb73);color:#101113;border-radius:50%;font-size:8px;font-weight:600}
 .team-presence-more{font-size:9px;padding-left:3px}
 @media(max-width:760px){.team-presence-bar{top:auto;bottom:104px;right:12px}.team-presence-bar>button>span{display:none}}
 @media(prefers-reduced-motion:reduce){.team-remote-cursor{transition:none}}

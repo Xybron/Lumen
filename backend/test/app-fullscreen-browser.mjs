@@ -100,7 +100,7 @@ try {
   await page.route('**/api/studio/broadcast', route => offline ? route.abort('failed') : route.fulfill({ json: snapshot }));
   const refresh = () => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
   await refresh();
-  await page.locator('.broadcast-trigger').getByText('Live controls').waitFor();
+  await page.locator('.broadcast-trigger').getByText('On Air', { exact: true }).waitFor();
   await program.locator('.monitor-picture').hover(); await program.getByRole('button', { name: 'Fullscreen Program', exact: true }).click();
   session.destinations[0].state = 'retrying'; session.destinations[0].retries = 1;
   const alert = program.locator('.stream-alert');

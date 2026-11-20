@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FacetMark from '@/components/shell/FacetMark.vue';
 import { useRoute } from 'vue-router';
 import { computed, onActivated, onDeactivated, ref } from 'vue';
 import ProgramControls from './ProgramControls.vue';
@@ -32,7 +33,7 @@ async function toggleFullscreen() {
 
 <template>
   <header class="lumen-header" :class="{ 'has-program-controls': programControls }">
-    <div class="lumen-header-identity"><RouterLink to="/" class="lumen-brand" aria-label="Lumen home">lumen</RouterLink><span v-if="workspace" class="lumen-workspace-label">{{ workspace }}</span></div>
+    <div class="lumen-header-identity"><RouterLink to="/" class="lumen-brand" aria-label="Lumen home"><FacetMark />lumen</RouterLink><span v-if="workspace" class="lumen-workspace-label">{{ workspace }}</span></div>
     <SharedListeningBar v-if="active && identity.ready && identity.isAuthenticated" />
     <div class="lumen-header-detail"><slot /></div>
     <ProgramControls v-if="programControls" />
@@ -44,8 +45,9 @@ async function toggleFullscreen() {
 </template>
 
 <style scoped>
+.lumen-brand :deep(.facet-mark){color:var(--accent)}
 .lumen-header.lumen-header{min-height:68px;height:auto;min-width:0;flex-shrink:0;grid-column:1/-1;display:flex;align-items:center;gap:24px;padding:14px 22px;flex-wrap:wrap;border-bottom:1px solid var(--border-hair);background:var(--surface-1);color:var(--text-primary);backdrop-filter:none}
-.lumen-header-identity{display:flex;align-items:center;gap:20px;flex-shrink:0;min-width:0}.lumen-brand{color:var(--text-primary);text-decoration:none;font-size:25px;line-height:1;font-weight:600;letter-spacing:-1.25px;white-space:nowrap}.lumen-workspace-label{border-left:1px solid var(--border-hair);padding-left:20px;font-size:12px;color:var(--text-muted);white-space:nowrap;line-height:20px}
+.lumen-header-identity{display:flex;align-items:center;gap:20px;flex-shrink:0;min-width:0}.lumen-brand{display:inline-flex;align-items:center;gap:10px;color:var(--text-primary);text-decoration:none;font-size:25px;line-height:1;font-weight:600;letter-spacing:-1.25px;white-space:nowrap}.lumen-workspace-label{border-left:1px solid var(--border-hair);padding-left:20px;font-size:12px;color:var(--text-muted);white-space:nowrap;line-height:20px}
 .lumen-header .lumen-header-detail{display:flex;align-items:center;gap:12px;flex:0 1 auto;min-width:0;font-size:12px;color:var(--text-muted)}.lumen-header .lumen-header-detail:empty{display:none}.lumen-header :deep(.program-controls){margin-left:auto}
 .lumen-fullscreen-toggle{display:grid;place-items:center;width:30px;height:30px;margin-left:auto;border:1px solid transparent;border-radius:7px;color:var(--text-muted);background:transparent}.lumen-fullscreen-toggle:hover{color:var(--text-primary);background:var(--bg-hover)}
 @media(max-width:900px){.lumen-header.lumen-header{gap:12px 18px;padding:12px 16px}.lumen-header-identity{gap:14px}.lumen-workspace-label{padding-left:14px}}

@@ -14,7 +14,7 @@ const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'lumen-dock-interactio
 const port = Number(process.env.LUMEN_DOCK_TEST_PORT ?? 3498), base = `http://127.0.0.1:${port}`;
 const executablePath = process.env.LUMEN_CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(LUMEN_|VPS_|MEDIA_ENGINE_|SUPABASE_|POWERSYNC_|VITE_|NODE_OPTIONS$|NODE_PATH$|ELECTRON_RUN_AS_NODE$)/i.test(key)));
-const names = ['Add channel', 'Open Production Studio', 'Open Multiview', 'Open Recordings and Clips', 'Open Media library', 'Pending media'];
+const names = ['Add channel', 'Open Production Studio', 'Open Multiview', 'Open Recordings and Clips', 'Open Media library'];
 let server, browser, page, logs = '';
 const errors = [], checks = [];
 async function until(operation, label, timeout = 20000) {
@@ -95,10 +95,7 @@ try {
   await until(() => control('Add channel').getAttribute('data-state').then(value => value === 'open'), 'Add menu open');
   await page.mouse.move(2, 2); await labelState(control('Add channel'), true);
   await page.keyboard.press('Escape'); await idle();
-  await control('Pending media').click();
-  await until(() => control('Pending media').getAttribute('aria-expanded').then(value => value === 'true'), 'Pending dialog open');
-  await page.mouse.move(2, 2); await labelState(control('Pending media'), true);
-  await page.keyboard.press('Escape'); await idle();
+  assert.equal(await page.getByRole('button', { name: 'Pending media', exact: true }).count(), 0, 'Pending media is removed from the dock');
   checks.push('Keyboard focus and open utilities reveal labels while preserving accessible names');
 
   await control('Open Media library').click();

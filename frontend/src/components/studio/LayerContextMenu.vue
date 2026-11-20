@@ -85,7 +85,7 @@ function arrange(action: LayerArrangeAction) { if (layer.value) run(studio.arran
 .studio-layer-menu { z-index: 110; min-width: 216px; max-width: min(280px, calc(100vw - 24px)); max-height: var(--reka-context-menu-content-available-height, calc(100vh - 24px)); overflow-y: auto; padding: 5px; background: #222226; border: 1px solid #ffffff14; border-radius: 11px; color: #f4f4f5dc; box-shadow: 0 12px 42px #0008, 0 2px 8px #0005; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; outline: none; }
 .studio-layer-menu .layer-menu-label { padding: 7px 9px; font-size: 10px; color: #f4f4f560; font-weight: 500; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .studio-layer-menu .layer-menu-item { position: relative; display: flex; align-items: center; gap: 9px; min-height: 31px; padding: 6px 9px; border-radius: 6px; outline: none; font-size: 11px; line-height: 1.4; cursor: default; user-select: none; }
-.studio-layer-menu .layer-menu-item[data-highlighted], .studio-layer-menu .layer-menu-item[data-state='open'] { background: #7dd3fc1a; color: #d2f0ff; }
+.studio-layer-menu .layer-menu-item[data-highlighted], .studio-layer-menu .layer-menu-item[data-state='open'] { background: #ddfb731a; color: #d2f0ff; }
 .studio-layer-menu .layer-menu-item[data-disabled] { opacity: .32; pointer-events: none; }
 .studio-layer-menu .layer-menu-item > svg { flex-shrink: 0; color: #f4f4f57a; }
 .studio-layer-menu .layer-menu-item kbd, .studio-layer-menu .layer-menu-chevron { margin-left: auto; color: #f4f4f550; font: inherit; font-size: 10px; }

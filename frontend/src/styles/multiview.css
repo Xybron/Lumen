@@ -21,7 +21,7 @@
 .multiview-bus.is-preview .multiview-bus-label b { color: var(--accent); }
 .multiview-bus.is-program .multiview-bus-label b { color: var(--status-live); }
 .multiview-monitor { position: relative; overflow: hidden; aspect-ratio: 16 / 9; border: 1px solid var(--border-glow); border-radius: 6px; background: #090a0b; }
-.multiview-bus.is-preview .multiview-monitor { border-color: #7dd3fc55; }
+.multiview-bus.is-preview .multiview-monitor { border-color: #ddfb7355; }
 .multiview-bus.is-program .multiview-monitor { border-color: #eea39a55; }
 .multiview-monitor-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; padding: 12px; background: #090a0b; color: var(--text-subtle); font-size: 10px; text-align: center; }
 .multiview-feed-state { position: absolute; bottom: 5px; left: 5px; max-width: calc(100% - 10px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid #ffffff0c; border-radius: 3px; padding: 3px 5px; background: #111317e8; color: var(--text-muted); font-size: 8px; }
@@ -30,7 +30,7 @@
 .multiview-transition { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 32px; padding: 6px 10px; border: 1px solid var(--border-glow); border-radius: 6px; background: var(--surface-2); font-size: 11px; font-weight: 500; color: var(--text-primary); transition: background .15s ease, border-color .15s ease; }
 .multiview-transition:hover:not(:disabled) { background: var(--surface-3); border-color: #ffffff35; }
 .multiview-transition.is-fade { color: var(--accent); }
-.multiview-transition.is-fade:hover:not(:disabled) { border-color: #7dd3fc60; background: var(--accent-soft); }
+.multiview-transition.is-fade:hover:not(:disabled) { border-color: #ddfb7360; background: var(--accent-soft); }
 .multiview-transition:disabled { opacity: .35; cursor: not-allowed; }
 .multiview-transition kbd { font-family: inherit; font-size: 8px; color: var(--text-subtle); font-weight: 400; white-space: nowrap; }
 .multiview-transition:focus-visible, .multiview-duration input:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }

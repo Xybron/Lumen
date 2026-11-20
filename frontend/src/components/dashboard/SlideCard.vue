@@ -129,11 +129,11 @@ const typeLabel = computed(
   <!-- Section divider — same band in both views, spans full width in grid. -->
   <article
     v-if="isSection"
-    class="group relative flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors duration-150 ease-out-cubic border-l-2 shrink-0"
+    class="group relative flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors duration-150 ease-out-cubic rounded-md shrink-0"
     :class="[
       isCurrent
-        ? 'border-accent bg-accent/10'
-        : 'border-accent/40 hover:border-accent/70 hover:bg-white/[0.04]',
+        ? 'bg-white/[0.07]'
+        : 'hover:bg-white/[0.04]',
       view === 'grid' ? 'col-span-full' : '',
     ]"
   >
@@ -489,12 +489,12 @@ const typeLabel = computed(
 <style scoped>
 .presentation-slide-card { border-radius: var(--radius-control, 7px); background: var(--surface-2, #1d1f22); transition: background .12s, border-color .12s; }
 .presentation-slide-card:hover { border-color: #ffffff26; background: #222429; }
-.presentation-slide-card.is-current { border-color: #7dd3fc66; background: #7dd3fc08; box-shadow: inset 2px 0 0 var(--accent); }
+.presentation-slide-card.is-current { border-color: #ddfb7366; background: #ddfb7308; box-shadow: none; }
 .presentation-slide-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .presentation-slide-card button:disabled { opacity: .3; cursor: not-allowed; }
 .presentation-grid-card :deep(.group) { border-radius: 0; border-width: 0; }
 .slide-current-label, .slide-next-label { font-size: 8px; font-weight: 500; padding: 2px 4px; border-radius: 3px; white-space: nowrap; }
-.slide-current-label { color: var(--accent); background: #7dd3fc14; }
+.slide-current-label { color: var(--accent); background: #ddfb7314; }
 .slide-next-label { color: var(--text-muted); background: #ffffff07; }
 .slide-list-row { display: flex; height: 80px; }
 .slide-list-thumbnail { width: 116px; border-right: 1px solid var(--border-hair); }

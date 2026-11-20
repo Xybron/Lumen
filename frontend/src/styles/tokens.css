@@ -1,8 +1,8 @@
 :root {
-  --bg-base: #101113;
+  --bg-base: #111214;
   --surface-1: #17181b;
-  --surface-2: #1d1f22;
-  --surface-3: #25272b;
+  --surface-2: #1c1e21;
+  --surface-3: #24262a;
   --bg-elevated: var(--surface-1);
   --bg-hover: rgba(255, 255, 255, 0.055);
   --border-hair: rgba(255, 255, 255, 0.08);
@@ -10,11 +10,18 @@
   --text-primary: #f4f4f5;
   --text-muted: #a1a4ab;
   --text-subtle: #72767f;
-  --accent: #7dd3fc;
-  --accent-soft: rgba(125, 211, 252, 0.09);
+  --accent: #ddfb73;
+  --accent-soft: rgba(221, 251, 115, 0.09);
+  --selection-fill: rgba(221, 251, 115, 0.10);
+  --selection-border: rgba(221, 251, 115, 0.30);
   --status-live: #eea39a;
+  --status-live-fill: rgba(238, 163, 154, 0.10);
+  --status-live-border: rgba(238, 163, 154, 0.30);
+  --status-pending: #dfc28a;
+  --status-pending-fill: rgba(223, 194, 138, 0.10);
+  --status-pending-border: rgba(223, 194, 138, 0.30);
   --status-ready: #a3c98f;
-  --radius-panel: 12px;
+  --radius-panel: 8px;
   --radius-control: 7px;
   --shadow-floating: 0 12px 36px #0005, 0 0 0 1px #0003;
 }
@@ -35,7 +42,7 @@
     overflow: hidden;
   }
   ::selection {
-    background: rgba(125, 211, 252, 0.35);
+    background: rgba(221, 251, 115, 0.35);
   }
 }
 

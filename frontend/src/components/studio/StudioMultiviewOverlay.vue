@@ -61,7 +61,7 @@ function isolateKeys(event: KeyboardEvent) {
 </template>
 <style scoped>
 .floating-multiview { position: fixed; z-index: 42; display: flex; flex-direction: column; min-width: 0; overflow: hidden; background: #151619; border: 1px solid #ffffff24; border-radius: 12px; box-shadow: 0 20px 64px #0009, 0 2px 8px #0006; outline: none; }
-.floating-multiview:focus-visible { border-color: var(--accent, #7dd3fc); }
+.floating-multiview:focus-visible { border-color: var(--accent, #ddfb73); }
 .floating-multiview:fullscreen { inset: 0 !important; width: 100vw !important; height: 100vh !important; border: 0; border-radius: 0; background: #101113; }
 .floating-multiview > :deep(.studio-multiview) { flex: 1; overflow: hidden; }
 .floating-multiview :deep(.multiview-scenes-scroll) { flex: 1; }
@@ -73,7 +73,7 @@ function isolateKeys(event: KeyboardEvent) {
 .multiview-window-hint { margin: 0 auto 0 10px; display: flex; gap: 10px; font-size: 9px; color: #73767d; white-space: nowrap; }
 .multiview-window-action { display: grid; place-items: center; width: 28px; height: 28px; flex-shrink: 0; border-radius: 5px; color: #a7aab1; }
 .multiview-window-action:hover { background: #ffffff0b; color: #eef0f3; }
-.multiview-window-title:focus-visible, .multiview-window-action:focus-visible, .multiview-window-resize:focus-visible { outline: 2px solid var(--accent, #7dd3fc); outline-offset: -2px; }
+.multiview-window-title:focus-visible, .multiview-window-action:focus-visible, .multiview-window-resize:focus-visible { outline: 2px solid var(--accent, #ddfb73); outline-offset: -2px; }
 .multiview-window-resize { position: absolute; right: 0; bottom: 0; display: grid; place-items: center; width: 18px; height: 18px; color: #777b83; cursor: nwse-resize; touch-action: none; background: #1c1e22c9; border-radius: 5px 0 0; }
 .multiview-resizing { user-select: none; }
 @media (max-width: 650px) { .multiview-window-hint { font-size: 0; } .multiview-window-hint span { display: none; } }

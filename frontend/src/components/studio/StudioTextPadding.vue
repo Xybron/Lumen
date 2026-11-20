@@ -67,19 +67,19 @@ function reset() {
 .padding-unit { margin-left: auto; color: #f4f4f566; font-size: 9px; }
 .text-padding-heading .s-icon { width: 23px; height: 23px; }
 .padding-map { position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(3, auto); gap: 8px; align-items: center; }
-.padding-map-outline { position: absolute; inset: 20px 26px; border: 1px dashed #7dd3fc30; border-radius: 9px; pointer-events: none; }
+.padding-map-outline { position: absolute; inset: 20px 26px; border: 1px dashed #ddfb7330; border-radius: 9px; pointer-events: none; }
 .padding-side { position: relative; display: flex; flex-direction: column; gap: 4px; min-width: 0; color: #f4f4f580; font-size: 9px; text-align: center; }
 .padding-side input { width: 100%; min-width: 0; max-width: 100%; height: 31px; padding: 5px 3px; border: 1px solid #ffffff0e; border-radius: 6px; background: #202224; color: #f4f4f5; text-align: center; font: inherit; font-size: 11px; font-variant-numeric: tabular-nums; outline: none; appearance: textfield; -moz-appearance: textfield; }
 .padding-side input::-webkit-inner-spin-button, .padding-side input::-webkit-outer-spin-button { appearance: none; margin: 0; }
-.padding-side input:focus-visible { border-color: #7dd3fc; box-shadow: 0 0 0 2px #7dd3fc15; }
+.padding-side input:focus-visible { border-color: #ddfb73; box-shadow: 0 0 0 2px #ddfb7315; }
 .padding-top { grid-area: 1 / 2; }
 .padding-right { grid-area: 2 / 3; }
 .padding-bottom { grid-area: 3 / 2; }
 .padding-left { grid-area: 2 / 1; }
 .padding-link { position: relative; grid-area: 2 / 2; justify-self: center; display: grid; place-items: center; width: 34px; height: 34px; margin-top: 15px; border: 1px solid #ffffff15; border-radius: 8px; color: #f4f4f580; background: #1c1e20; }
-.padding-link[aria-pressed="true"] { color: #7dd3fc; border-color: #7dd3fc50; background: #20313a; }
-.padding-link:hover { border-color: #7dd3fc80; }
-.padding-link:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 2px; }
+.padding-link[aria-pressed="true"] { color: #ddfb73; border-color: #ddfb7350; background: #20313a; }
+.padding-link:hover { border-color: #ddfb7380; }
+.padding-link:focus-visible { outline: 2px solid #ddfb73; outline-offset: 2px; }
 .padding-mode { margin: 11px 0 0; color: #f4f4f580; font-size: 9px; text-align: center; }
 .padding-help { margin: 10px 0 0; color: #f4f4f566; font-size: 9px; line-height: 1.6; }
 .text-padding :disabled { opacity: .4; cursor: default; }

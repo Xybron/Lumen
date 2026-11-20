@@ -17,7 +17,7 @@ function openLiveView() {
 </template>
 
 <style scoped>
-.lumen-live-view { height: 34px; padding: 0 12px; gap: 8px; border-radius: var(--radius-control); font-size: 12px; font-weight: 550; background: #7dd3fc0d; border-color: #7dd3fc30; }
-.lumen-live-view:hover { background: #7dd3fc19; border-color: #7dd3fc55; }
+.lumen-live-view { height: 34px; padding: 0 12px; gap: 8px; border-radius: var(--radius-control); font-size: 12px; font-weight: 550; background: #ddfb730d; border-color: #ddfb7330; }
+.lumen-live-view:hover { background: #ddfb7319; border-color: #ddfb7355; }
 @media (pointer: coarse) { .lumen-live-view { height: 36px; } }
 </style>

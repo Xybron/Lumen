@@ -324,8 +324,7 @@ try {
   }] }];
   fixture.previewSceneId = fixture.scenes[0].id;
   await api('studio', fixture, 'PUT');
-  await page.getByRole('button', { name: 'More Program controls', exact: true }).click();
-  await page.getByRole('button', { name: 'Start Program', exact: true }).click();
+  await page.getByRole('button', { name: 'Start engine', exact: true }).click();
   await until(async () => (await api('studio/status')).state === 'running', 'bundled production Chromium', 90000);
   const state = await api('studio');
   await api('studio/command', { revision: state.revision, command: { type: 'take', sceneId: state.scenes[0].id, transition: 'cut' } });
@@ -383,11 +382,31 @@ try {
   await run(bundledFfmpeg, ['-v', 'error', '-i', mediaPath, '-f', 'null', '-'], { env: environment, timeout: 30000 });
   pass('Bundled Chromium starts the production engine and records playable video');
   await page.screenshot({ path: path.join(artifacts, 'desktop-studio.png') });
+  await page.getByRole('button', { name: 'Add channel', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Notes', exact: true }).click();
+  await page.getByLabel('New note', { exact: true }).click();
+  const notes = page.getByRole('dialog', { name: 'Notes workspace', exact: true });
+  await notes.getByLabel('Notes draft text', { exact: true }).fill('Desktop verification note');
+  await notes.getByLabel('Slide preview', { exact: true }).getByRole('img', { name: /Desktop verification note/ }).waitFor();
+  await notes.getByRole('button', { name: 'Update slide', exact: true }).click();
+  await page.screenshot({ path: path.join(artifacts, 'desktop-notes.png') });
+  await notes.getByRole('button', { name: 'Close', exact: true }).click();
+  pass('Packaged Notes opens, previews text, and applies a slide in the disposable station');
   await close();
   assert.deepEqual(errors, [], 'No unhandled application page errors');
   pass('Desktop shutdown closes the live engine and backend');
   console.log(JSON.stringify({ result: 'PASS', mode, checks, versions,
     outputContinuity: outputContinuity.map(({ diagnostics, ...sample }) => sample), artifacts, stations }, null, 2));
+} catch (error) {
+  // Preserve the engine and receiving-window state before teardown so a
+  // missing Program feed can be distinguished from a packaging failure.
+  const diagnostics = { error: String(error), pageErrors: errors, status: await api('studio/status').catch(() => null), engine: await api('studio/diagnostics').catch(() => null), windows: [] };
+  for (const window of application?.windows() ?? []) {
+    diagnostics.windows.push(await window.evaluate(() => ({ url: location.href, text: document.body.innerText.slice(0, 3000),
+      videos: [...document.querySelectorAll('video')].map(video => ({ readyState: video.readyState, width: video.videoWidth, height: video.videoHeight, paused: video.paused, error: video.error?.message })) })).catch(cause => ({ error: String(cause) })));
+  }
+  await fs.writeFile(path.join(artifacts, 'failure.json'), JSON.stringify(diagnostics, null, 2));
+  throw error;
 } finally {
   if (application) await application.close().catch(() => application.process().kill());
   await fs.writeFile(path.join(artifacts, 'desktop.log'), log);

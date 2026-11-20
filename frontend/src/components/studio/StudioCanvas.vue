@@ -254,19 +254,19 @@ onBeforeUnmount(() => { cancel(); motion.stop(); motion.setOverride(null); });
 
 <style scoped>
 .studio-canvas { outline: none; isolation: isolate; }
-.studio-canvas:focus-visible { box-shadow: 0 0 0 3px #7dd3fc30; }
+.studio-canvas:focus-visible { box-shadow: 0 0 0 3px #ddfb7330; }
 .animation-preview { z-index: 1; pointer-events: none; }
 .animation-preview-badge { position: absolute; bottom: 8px; left: 8px; right: 8px; z-index: 3; display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #b4e6fc; font-size: 8px; letter-spacing: .7px; }
 .animation-preview-badge > span { padding: 4px 6px; background: #10242ee6; border-radius: 4px; }
-.animation-preview-badge button { border: 1px solid #7dd3fc33; border-radius: 5px; background: #10242eeb; color: #b4e6fc; padding: 5px 7px; font-size: 9px; letter-spacing: 0; }
+.animation-preview-badge button { border: 1px solid #ddfb7333; border-radius: 5px; background: #10242eeb; color: #b4e6fc; padding: 5px 7px; font-size: 9px; letter-spacing: 0; }
 .canvas-selection { position: absolute; inset: 0; touch-action: none; }
 .layer-hitbox { position: absolute; touch-action: none; cursor: move; border: 1px solid transparent; outline: none; }
-.layer-hitbox:hover { border-color: #7dd3fc70; }
-.layer-hitbox.selected { border-color: #7dd3fc; }
-.layer-hitbox:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 2px; }
+.layer-hitbox:hover { border-color: #ddfb7370; }
+.layer-hitbox.selected { border-color: #ddfb73; }
+.layer-hitbox:focus-visible { outline: 2px solid #ddfb73; outline-offset: 2px; }
 .layer-hitbox.locked { cursor: default; }
-.text-area-guide { position: absolute; border: 1px dashed #7dd3fc70; pointer-events: none; }
-.selection-name { position: absolute; top: -20px; left: -1px; display: flex; align-items: center; gap: 5px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 5px; border-radius: 3px 3px 0 0; background: #7dd3fc; color: #10212c; font-size: 9px; line-height: 14px; pointer-events: none; }
+.text-area-guide { position: absolute; border: 1px dashed #ddfb7370; pointer-events: none; }
+.selection-name { position: absolute; top: -20px; left: -1px; display: flex; align-items: center; gap: 5px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 5px; border-radius: 3px 3px 0 0; background: #ddfb73; color: #10212c; font-size: 9px; line-height: 14px; pointer-events: none; }
 .resize-handle { position: absolute; width: var(--canvas-handle-size, 8px); height: var(--canvas-handle-size, 8px); min-width: 0; padding: 0; margin: 0; border: 1px solid #16445b; border-radius: 1px; background: #dbf3ff; z-index: 2; touch-action: none; transform: translate(-50%, -50%); right: auto; bottom: auto; }
 .resize-handle:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
 .handle-nw { left: 0; top: 0; cursor: nwse-resize !important; }
@@ -280,6 +280,6 @@ onBeforeUnmount(() => { cancel(); motion.stop(); motion.setOverride(null); });
 .snap-guide { position: absolute; display: block; pointer-events: none; background: #f077d0; z-index: 4; box-shadow: 0 0 3px #f077d050; }
 .guide-x { top: 0; bottom: 0; width: 1px; }
 .guide-y { left: 0; right: 0; height: 1px; }
-.selection-dimensions { position: absolute; left: 50%; bottom: -24px; transform: translateX(-50%); background: #182932; color: #b9eaff; border: 1px solid #7dd3fc55; border-radius: 4px; font-size: 9px; line-height: 18px; padding: 0 5px; white-space: nowrap; pointer-events: none; }
+.selection-dimensions { position: absolute; left: 50%; bottom: -24px; transform: translateX(-50%); background: #182932; color: #b9eaff; border: 1px solid #ddfb7355; border-radius: 4px; font-size: 9px; line-height: 18px; padding: 0 5px; white-space: nowrap; pointer-events: none; }
 .is-interacting, .is-interacting * { user-select: none; }
 </style>

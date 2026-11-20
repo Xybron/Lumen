@@ -24,7 +24,7 @@ try {
   const context=await browser.newContext({viewport:{width:1512,height:982},permissions:['clipboard-read','clipboard-write']});context.setDefaultTimeout(12000);
   const request=context.request;assert.equal((await request.post(`${base}/api/auth/login`,{data:{username:'admin',password:'admin'}})).status(),200);
   const fixture={version:2,updatedAt:new Date().toISOString(),settings:{transitionMs:0},music:{mode:'off'},
-    channels:[{id:'prayer',name:'Notes rehearsal',kind:'presentation',playlistId:'deck',defaultMode:'manual'}],
+    channels:[{id:'prayer',name:'Notes rehearsal',kind:'notes',playlistId:'deck',defaultMode:'manual'}],
     playlists:[{id:'deck',name:'Notes rehearsal',groups:[{id:'message',name:'Message notes'}],items:[{id:'live-cue',type:'text',title:'Current audience cue',body:'Stay on this live cue',durationMs:120000},{id:'separate-note',type:'notes',title:'Separate note',body:'Keep this unrelated note',layout:'quote',groupId:'message'}]}],
     sources:[{id:'prayer-source',kind:'channel',ref:'prayer'}],destinations:[],routes:[],program:{programSourceId:'prayer-source',previewSourceId:null}};
   const seeded=await request.put(`${base}/api/content`,{data:fixture});assert.equal(seeded.status(),200,await seeded.text());
@@ -33,8 +33,7 @@ try {
   await page.getByRole('heading',{name:'Notes rehearsal',exact:true}).waitFor();
   const output=await context.newPage();await output.goto(`${base}/live/prayer`);await output.getByText('Stay on this live cue',{exact:true}).waitFor();
   await page.bringToFront();await page.getByLabel('Destination group',{exact:true}).selectOption('message');
-  await page.getByRole('button',{name:'New slide',exact:true}).click();
-  await page.getByRole('button',{name:'Notes Write, listen & present',exact:true}).click();
+  await page.getByRole('button',{name:'New note',exact:true}).click();
   const dialog=()=>page.getByRole('dialog',{name:'Notes workspace',exact:true});
   const body=()=>dialog().getByLabel('Notes draft text',{exact:true});
   const preview=()=>dialog().getByLabel('Slide preview',{exact:true});

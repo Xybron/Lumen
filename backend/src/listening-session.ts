@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { ProductionError } from './production-store.js';
+import { suggestSharedLyrics } from './shared-lyrics.js';
 import { BOOK_NAMES,analyzeSpokenReferences,continueSpokenReference,type ParsedReference } from './scripture-reference.js';
 import type { WorshipLibrary } from './worship-library.js';
 import type { CueSelection, ListeningSession, ListeningResult, ListeningRecognition, WorshipWorkspace } from '../../shared/worship.js';
@@ -108,6 +109,8 @@ export class ListeningSessions {
         } catch {result.decision='unavailable';result.reason='The selected Bible version is unavailable for quotation matching.';}
       }
     } else {
+      // Shared music listening is suggestion-only, including finalized turns.
+      if(lease.provider==='assemblyai')return {...suggestSharedLyrics(this.library,channelId,text,streamFinal),elapsedMs,...(recognition?{recognition}:{})};
       const matches=this.library.matchLyrics(text,workspace.setlist), best=matches[0];
       if (best && best.score>=.6) {result.candidate=this.library.cue(best.selection);result.match='lyrics';result.score=best.score;eligible=best.score>=.9 && (!matches[1] || best.score-matches[1].score>=.15);}
       if (!workspace.setlist.length) result.reason='Add songs to this channel’s setlist to enable listening matches.';

@@ -4,7 +4,7 @@ import type { ListeningResult } from './worship.js';
 export interface SharedListeningSession {
   id: string;
   channelId: string;
-  source: 'scripture' | 'notes';
+  source: 'scripture' | 'notes' | 'lyrics';
   ownerId: string;
   provider: 'assemblyai';
   mode?: 'assisted' | 'automatic';

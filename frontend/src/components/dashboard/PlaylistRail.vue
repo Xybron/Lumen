@@ -211,8 +211,7 @@ const emit = defineEmits<{ (e: 'open-settings'): void }>();
 .playlist-list { flex: 1; min-height: 0; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 3px; }
 .playlist-row { position: relative; display: flex; align-items: center; gap: 3px; padding: 0 3px 0 9px; border: 1px solid transparent; border-radius: var(--radius-control, 7px); flex-shrink: 0; transition: background .12s, border-color .12s; }
 .playlist-row:hover { background: #ffffff05; }
-.playlist-row.active { background: #7dd3fc0b; border-color: #7dd3fc26; }
-.playlist-row.active::before { content: ''; position: absolute; left: -1px; top: 11px; bottom: 11px; width: 2px; background: var(--accent); border-radius: 2px; }
+.playlist-row.active { background: var(--surface-3); border-color: var(--border-glow); }
 .playlist-select { display: flex; flex-direction: column; width: 100%; min-width: 0; padding: 10px 0; gap: 3px; text-align: left; color: var(--text-primary); font-size: 12px; }
 .playlist-select small { color: var(--text-muted); font-size: 10px; }
 .playlist-empty { padding: 16px 8px; color: var(--text-muted); font-size: 11px; line-height: 1.6; }

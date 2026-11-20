@@ -180,7 +180,7 @@ try {
       focusedControl = page.getByRole('button', { name: 'Add channel', exact: true });
       await focusedControl.click(); await page.getByRole('menu').waitFor();
     } else if (kind === 'dialog') {
-      focusedControl = page.getByRole('button', { name: 'Pending media', exact: true });
+      focusedControl = page.getByRole('button', { name: 'Open Outputs', exact: true });
       await focusedControl.click(); await page.getByRole('dialog').waitFor();
     } else if (kind === 'header') {
       focusedControl = page.getByRole('link', { name: 'Lumen home', exact: true });

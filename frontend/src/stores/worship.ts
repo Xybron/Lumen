@@ -33,16 +33,29 @@ export const useWorshipStore=defineStore('worship',()=>{
   }
   const cloudSockets=new Map<string,WebSocket>();
   const cloudDraining=new Set<string>(),producerReleases=new Map<string,()=>void>();
-  const shared=useSharedListeningStore(),sharedTargets=new Set<string>(),sharedFrames=new Map<string,string>();
-  function followShared(id:string){sharedTargets.add(id);applyShared();shared.connect();}
+  const shared=useSharedListeningStore(),sharedTargets=new Map<string,'scripture'|'lyrics'>(),sharedFrames=new Map<string,string>();
+  const sharedResults=reactive<Record<string,ListeningResult|null>>({}),sharedErrors=reactive<Record<string,string>>({});
+  const sharedTimers=new Map<string,number>();
+  function followShared(id:string,kind:'scripture'|'lyrics'='scripture'){sharedTargets.set(id,kind);applyShared();shared.connect();}
   function applyShared(){
     const snapshot=shared.snapshot;
     if(snapshot.session?.mode){const session=listening[snapshot.session.channelId]?.session;if(session?.id===snapshot.session.id)session.mode=snapshot.session.mode;}
-    if(!snapshot.session||!snapshot.result){sharedFrames.clear();return;}
+    if(!snapshot.session||!snapshot.result){sharedFrames.clear();for(const id of sharedTargets.keys()){clearTimeout(sharedTimers.get(id));sharedResults[id]=null;sharedErrors[id]='';}return;}
     const frame=JSON.stringify([snapshot.session.id,snapshot.turn,snapshot.result.transcript,snapshot.result.candidate?.selection??null,snapshot.result.reason]);
-    for(const id of sharedTargets){
+    for(const [id,kind] of sharedTargets){
       if(!identity.can(id,'author')||sharedFrames.get(id)===frame)continue;
-      sharedFrames.set(id,frame);drafts[id]=snapshot.result.candidate;
+      sharedFrames.set(id,frame);
+      if(kind==='lyrics'){
+        clearTimeout(sharedTimers.get(id));
+        const sessionId=snapshot.session.id;
+        sharedTimers.set(id,window.setTimeout(async()=>{
+          try{
+            const value=await worshipRequest<{sessionId:string;result:ListeningResult|null}>(`/channels/${id}/listening/shared-result?session=${encodeURIComponent(sessionId)}`);
+            if(shared.session?.id!==sessionId||sharedFrames.get(id)!==frame)return;
+            sharedResults[id]=value.result;sharedErrors[id]='';
+          }catch(cause){if(shared.session?.id===sessionId&&sharedFrames.get(id)===frame){sharedResults[id]=null;sharedErrors[id]=(cause as Error).message;}}
+        },120));
+      }else if(!snapshot.result.candidate||snapshot.result.candidate.selection.kind==='scripture')drafts[id]=snapshot.result.candidate;
       // A shared result's workspace belongs to its producer, never the viewer.
     }
   }
@@ -97,7 +110,7 @@ export const useWorshipStore=defineStore('worship',()=>{
       }
       capture?.abort.abort();socket?.close();cloudSockets.delete(id);cloudDraining.delete(id);exampleBusy[id]=false;captures.delete(id);
       producerReleases.get(id)?.();producerReleases.delete(id);
-      if(listening[id]){listening[id].session=null;listening[id].starting=false;listening[id].busy=false;listening[id].level=0;listening[id].peak=0;listening[id].clipping=false;}
+      if(listening[id]){if(session?.provider==='assemblyai'&&sharedTargets.get(id)==='lyrics')listening[id].result=null;listening[id].session=null;listening[id].starting=false;listening[id].busy=false;listening[id].level=0;listening[id].peak=0;listening[id].clipping=false;}
       // Cancelled CONNECTING sockets may never reach the bridge. End their
       // captured lease by ID without touching a replacement session.
       if(notifyServer&&session?.provider==='assemblyai')await fetch(`/api/listening/shared?session=${encodeURIComponent(session.id)}`,{method:'DELETE'}).catch(()=>{});
@@ -208,7 +221,7 @@ export const useWorshipStore=defineStore('worship',()=>{
         if(message.type==='ready'){clearTimeout(deadline);ready=true;view.starting=false;}
         else if(message.type==='finishing'){capture.stop();void stopListening(id);}
         else if(message.type==='result'){
-          view.result=message.result;view.error='';drafts[id]=message.result.candidate;
+          view.result=message.result;view.error='';if(sharedTargets.get(id)!=='lyrics')drafts[id]=message.result.candidate;
           if(message.result.workspace.revision>=(workspaces[id]?.revision??-1))workspaces[id]=message.result.workspace;
         }else if(message.type==='error')fail(message.message);
         else if(message.type==='example'){exampleBusy[id]=false;(examples[id]??=[]).unshift(message.example);examples[id]=examples[id].slice(0,20);}
@@ -230,5 +243,5 @@ export const useWorshipStore=defineStore('worship',()=>{
   }
   async function deleteListeningExample(id:string,exampleId:string){await worshipRequest(`/listening/examples/${exampleId}`,{method:'DELETE'});examples[id]=(examples[id]??[]).filter(e=>e.id!==exampleId);}
   window.addEventListener('beforeunload',()=>{for(const capture of captures.values())capture.stop();});
-  return{followShared,examples,exampleBusy,refreshListeningExamples,saveListeningExample,reviewListeningExample,deleteListeningExample,scripturePins,pinsBusy,refreshPins,savePin,workspaces,drafts,versions,aiStatus,saving,preparing,listening,listeningControlsFor,load,refreshVersions,refreshAi,selectListeningModel,prepare,command,take,startListening,stopListening};
+  return{followShared,sharedResults,sharedErrors,examples,exampleBusy,refreshListeningExamples,saveListeningExample,reviewListeningExample,deleteListeningExample,scripturePins,pinsBusy,refreshPins,savePin,workspaces,drafts,versions,aiStatus,saving,preparing,listening,listeningControlsFor,load,refreshVersions,refreshAi,selectListeningModel,prepare,command,take,startListening,stopListening};
 });

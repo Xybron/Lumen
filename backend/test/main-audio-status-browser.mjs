@@ -75,6 +75,13 @@ try {
   health({ levels: { main: .05, master: .05 } });
   await until(async () => Number(await page.getByRole('meter', { name: `${mainName} input level` }).getAttribute('aria-valuenow')) > 50, 'audible speech fills the decibel meter');
   assert.ok(Number(await page.getByRole('meter', { name: 'Final output audio level' }).getAttribute('aria-valuenow')) > 50);
+  const meter = page.getByRole('meter', { name: 'Final output audio level' });
+  assert.equal(await meter.locator('i').count(), 30, 'Segmented meter renders a stable scale');
+  health({ levels: { main: 0, master: 0 } });
+  await until(async () => await meter.locator('.lit').count() === 0, 'silence clears every segment');
+  health({ levels: { main: 1, master: 1 } });
+  await until(async () => await meter.locator('.lit.peak').count() === 2, 'full-scale signal reaches clipping segments');
+  health({ levels: { main: .05, master: .05 } });
   await badge('ready');
   await mixer(); await page.getByRole('button', { name: `Mute ${mainName}`, exact: true }).click();
   await badge('muted'); await screenshot('main-audio-sources-muted.png');

@@ -131,7 +131,7 @@ try {
   await until(() => studioProgram.locator('video').evaluate(video => video.readyState >= 2 &&
     video.srcObject?.getAudioTracks().some(track => track.readyState === 'live' && !track.muted)), 'Studio Program monitor receives live audio');
   assert.ok(await studioProgram.locator('video').evaluate(video => video.videoWidth > 0 && video.videoWidth <= 960 && video.videoHeight <= 540), 'Studio monitor caps its picture at 960 × 540');
-  await studioProgram.getByRole('button', { name: 'Program health' }).click();
+  await page.getByRole('button', { name: 'Program health', exact: true }).click();
   const health = page.getByRole('dialog', { name: 'Program health' });
   await health.getByText('Program rendering').waitFor();
   await health.getByRole('button', { name: 'Refresh' }).click();

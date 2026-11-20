@@ -246,6 +246,15 @@ export class WorshipLibrary {
       return state;
     })();
   }
+  matchLyricsLibrary(transcript: string, preferredIds: string[] = []) {
+    const words = [...new Set(searchWords(transcript).filter(word => word.length > 1))].slice(-40);
+    if (words.length < 4) return [];
+    // Search the full index, not the 500-song browsing page. Bound the scoring
+    // work for live turns and always include this channel's service setlist.
+    const query = words.map(word => `"${word.replace(/"/g, '""')}"`).join(' OR ');
+    const rows = this.db.prepare('SELECT songId FROM song_sections_fts WHERE song_sections_fts MATCH ? ORDER BY rank LIMIT 100').all(query) as {songId:string}[];
+    return this.matchLyrics(transcript, [...new Set([...preferredIds, ...rows.map(row => row.songId)])]);
+  }
   matchLyrics(transcript: string, songIds: string[]) {
     const words = searchWords(transcript).filter(w=>w.length>1);
     if (words.length<4 || !songIds.length) return [];
